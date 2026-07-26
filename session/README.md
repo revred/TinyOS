@@ -5,13 +5,13 @@ This folder holds dated handover snapshots — one subfolder per work session th
 ## Naming convention
 
 - One folder per calendar date: **`session/hand-YYYY-MM-DD/`** (e.g. `session/hand-2026-07-26/`) — not one folder per handover event.
-- **Every handover produced on that date lives in that same folder.** If several handovers happen on the same day, they all update the one dated folder rather than spawning new sibling folders — `index.html` always reflects the latest, cumulative state for that date. (If it's ever useful to preserve an individual same-day snapshot rather than let it be absorbed into the running `index.html`, add it as an extra file inside that day's folder, e.g. `snapshot-1430.html` — the folder is the unit of "this date," not a single write.)
-- `index.html` is a self-contained, dependency-free HTML page: what changed, key decisions made, open questions, and immediate next steps. It should be readable directly (open the file in a browser) without any build step.
-- Once a new calendar date's folder exists, earlier dated folders are never edited or deleted — they're a historical record. If something in an old handover turns out to be wrong or superseded, the newer handover says so explicitly; it doesn't get retroactively rewritten.
+- **Every handover produced on that date lives in that same folder, as its own numbered Markdown file:** `NN-short-slug.md` (e.g. `01-initial-handover.md`, `02-mvp-delivery-strategy-handover.md`), numbered in chronological order starting at `01`. Each file is a normal, self-contained handover write-up — what changed, key decisions made, open questions, immediate next steps — and should say what it follows (e.g. "Follows: `01-initial-handover.md`") so the sequence is readable end to end without needing the index.
+- **`index.html` is the index of that date's handovers, not a handover itself.** It's a self-contained, dependency-free HTML page (readable directly in a browser, no build step) listing every `NN-*.md` file produced that date in order, each with a one-line summary and a link — plus, optionally, a quick document-reference table for fast navigation. It does not duplicate the `.md` files' content; if you want to know what actually changed, follow the link and read the `.md` file.
+- Once a new calendar date's folder exists, earlier dated folders (and the individual `.md` handovers inside them) are never edited or deleted — they're a historical record. If something in an old handover turns out to be wrong or superseded, the newer handover says so explicitly; it doesn't get retroactively rewritten.
 
 ## Finding the latest handover
 
-Sort `session/` subfolders by date descending; the most recent `hand-YYYY-MM-DD/index.html` is the current snapshot. [`README.md`](../README.md)'s "New here?" pointer always links to the latest one directly, so that's the fastest way to find it without sorting folders yourself.
+Sort `session/` subfolders by date descending, then open that folder's `index.html` — it lists every handover from that date in order; the last entry is the most recent state. [`README.md`](../README.md)'s "New here?" pointer always links to the latest date's `index.html` directly, so that's the fastest way to find it without sorting folders yourself.
 
 ## Relationship to other documents
 

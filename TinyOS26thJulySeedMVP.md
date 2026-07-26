@@ -499,7 +499,7 @@ The **5-axis CNC flagship demonstration** (G-PA-8) is not a single phase — it'
 Every document in the repository, one line each, for quick navigation from this master specification:
 
 - [`README.md`](README.md) — the living, current-state design document; the first place to check if anything here seems out of date.
-- [`session/`](session/) — dated handover documents, one folder per session (`session/hand-YYYY-MM-DD/index.html`); see [`session/README.md`](session/README.md) for the naming convention. Start with the most recent dated folder for a snapshot orientation.
+- [`session/`](session/) — dated handover documents, one folder per calendar date (`session/hand-YYYY-MM-DD/`), each with an `index.html` indexing that date's numbered `NN-*.md` handover write-ups in order; see [`session/README.md`](session/README.md) for the naming convention. Start with the most recent dated folder's `index.html`.
 - [`agent/CODING_STANDARDS.md`](agent/CODING_STANDARDS.md) — the authoritative, binding coding rules: language policy, priority ordering, crate size ceiling, SOLID enforcement, TDD mandate, tooling standard.
 - [`docs/hbp-spec.md`](docs/hbp-spec.md) — Host Bridge Protocol wire-level spec (same-machine host comms).
 - [`docs/physical-ai-reference-workloads.md`](docs/physical-ai-reference-workloads.md) — the 5-axis CNC (flagship MVP demonstration), Wire DED robot arm, and resin-curing UV array reference workloads, and the shared RT primitives that let all three run on one kernel.
