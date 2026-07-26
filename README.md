@@ -2,7 +2,7 @@
 
 **A real-time operating system with the soul of MS-DOS and the reflexes of an RTOS — built to sit between silicon and intelligence.**
 
-TinyOS is a from-scratch real-time operating system designed to run on anything from a modern laptop to a Jetson Nano-class edge device, and to speak fluently to the Windows/Linux host it lives beside or the machines it's wired to over CAN bus, USB, or Ethernet. It looks and feels like MS-DOS 4+ — a fast, legible, keyboard-driven command environment — but underneath that familiar shell is a hard-partitioned multitasking core built for deterministic, real-time control. And it's designed from day one to host a local LLM (via Ollama or an equivalent runtime) as a first-class citizen: not a chat window bolted on top, but a supervised operator that can observe, propose, and — within strict, auditable limits — act.
+TinyOS is a from-scratch, **64-bit-only** real-time operating system designed to run on anything from a modern x86_64 laptop to an ARM64 edge device like the Jetson Orin Nano, and to speak fluently to the Windows/Linux host it lives beside or the machines it's wired to over CAN bus, USB, or Ethernet. It looks and feels like MS-DOS 4+ — a fast, legible, keyboard-driven command environment — but underneath that familiar shell is a hard-partitioned multitasking core built for deterministic, real-time control. And it's designed from day one to host a local LLM (via Ollama or an equivalent runtime) as a first-class citizen: not a chat window bolted on top, but a supervised operator that can observe, propose, and — within strict, auditable limits — act.
 
 ---
 
@@ -20,27 +20,33 @@ TinyOS exists to close that gap deliberately, not accidentally: a real-time core
 ## Design Pillars
 
 ### 1. A real multitasking RTOS core
+
 - Preemptive, priority-based scheduler with bounded interrupt latency and no unbounded priority inversion (priority inheritance/ceiling protocols from day one).
 - Deterministic memory model — static or pool-based allocation in real-time paths; no surprise heap fragmentation in the control loop.
 - Time is a first-class resource: every task declares its period, deadline, and worst-case execution budget. The kernel enforces them and screams (loudly, safely) when they're violated.
 
 ### 2. UX/UI strictly separated from control
+
 - The DOS-like shell (`TINYCMD`) is a **presentation and orchestration layer only**. It never has direct write access to real-time task state, drivers, or bus I/O.
 - All shell and UI actions go through a narrow, versioned **Command & Control API** — the same API used by scripts, remote hosts, and the LLM agent. One gate, many callers, one audit trail.
 - This means the UI can crash, hang, or be swapped out (text console today, a web dashboard tomorrow) without ever jeopardizing a real-time task that's mid-cycle.
 
 ### 3. Host and bus connectivity as a native concept
+
 - **Host bridge**: a lightweight driver/service pair (Windows + Linux) that lets TinyOS run as a companion OS on the same machine (dual-boot, hypervisor partition, or a dedicated core on an AMP/SMP split) and exchange typed messages with host-side processes.
 - **CAN bus**: native CAN 2.0B/CAN-FD stack for talking to vehicles, industrial controllers, and other embedded nodes.
 - **USB**: device and host-mode USB stacks for peripherals, flashable storage, and tethered control links.
 - **Ethernet**: lwIP-class TCP/IP stack for edge-to-cloud and edge-to-fleet communication.
 - All transports terminate at the same internal message bus — a CAN frame, a USB packet, and a TCP message can all trigger the same command handler, subject to the same permission checks.
 
-### 4. Runs where the work happens
-- Target hardware spans laptop-class x86_64 (as a bare-metal boot option or hosted partition) down to Jetson Nano-class ARM64 edge devices with GPU/NPU acceleration.
-- Hardware abstraction layer (HAL) keeps board-specific code in one place so the kernel, scheduler, and shell stay portable.
+### 4. Runs where the work happens — 64-bit only
+
+- No 32-bit targets, ever. TinyOS commits to **x86_64 and ARM64** exclusively, which simplifies the kernel's memory model, pointer/ABI assumptions, and driver interfaces from day one.
+- Target hardware spans laptop-class x86_64 (as a bare-metal boot option or hosted partition) down to ARM64 edge devices such as the Jetson Orin Nano, with GPU/NPU acceleration for local inference.
+- Hardware abstraction layer (HAL) keeps board-specific code in one place so the kernel, scheduler, and shell stay portable across both architectures.
 
 ### 5. LLM as a supervised operator, not a root user
+
 - Local inference (Ollama or compatible runtime) runs in its own isolated task/partition — resource-budgeted like any other real-time citizen, never able to preempt hard-deadline control loops.
 - The LLM interacts with TinyOS exclusively through the **Agent Command Interface (ACI)**: a declarative, capability-scoped API where every possible action is pre-registered, typed, rate-limited, and logged.
 - **Strict rule: the LLM can request, TinyOS decides.** Every agent-issued command passes through the same policy engine as a human operator's command — no privileged bypass path exists for AI-originated actions.
@@ -48,9 +54,37 @@ TinyOS exists to close that gap deliberately, not accidentally: a real-time core
 
 ---
 
+## Target Hardware & Test Matrix
+
+TinyOS is **64-bit only** — no 32-bit boot path is planned or supported, on either architecture.
+
+### Tier 0 — Emulated (CI gate, every commit)
+
+- **QEMU x86_64** (`q35` machine type) and **QEMU ARM64** (`virt` machine type) — the primary dev loop; kernel, scheduler, and ACI changes are validated here before any real hardware is touched.
+- **Renode** — bus/peripheral simulation for CAN, USB, and Ethernet driver work ahead of physical hardware availability.
+
+### Tier 1 — Edge device (primary mission target)
+
+- **Jetson Orin Nano** (ARM64) — the standard edge target for new hardware bring-up; GPU-accelerated local inference (Ollama) validation happens here.
+- A second, non-NVIDIA ARM64 board (e.g. Raspberry Pi 4/5) — portability check so the HAL doesn't quietly grow Jetson-only assumptions.
+
+### Tier 2 — Laptop / x86_64 (host-bridge + full UX validation)
+
+- A mid-spec x86_64 laptop or NUC-class mini-PC, dual-boot or hypervisor-partitioned — validates the Windows/Linux host bridge and the DOS-style shell UX, not just the kernel.
+
+### Default supported set for v1
+
+1. QEMU x86_64 + QEMU ARM64 — CI gate, every commit.
+2. Jetson Orin Nano — primary real-world edge target.
+3. Generic x86_64 laptop/NUC — host-bridge and shell UX target.
+
+Raspberry Pi and real CAN/USB hardware-in-the-loop rigs are added from Phase 3 onward, once the bus stack exists.
+
+---
+
 ## System Architecture (target)
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                         TinyOS Shell (UX)                        │
 │   TINYCMD (DOS-style CLI)  │  Status/Monitor TUI  │  Web Console  │
@@ -94,7 +128,7 @@ TinyOS borrows MS-DOS 4+'s ergonomics deliberately — not out of nostalgia, but
 
 ## Repository Layout (planned)
 
-```
+```text
 /kernel/          Real-time scheduler, IPC, memory pools, deadline monitor
 /hal/              Board-specific hardware abstraction (x86_64, Jetson/ARM64, ...)
 /drivers/          CAN, USB, Ethernet, storage, display, misc peripherals
@@ -118,7 +152,7 @@ TinyOS borrows MS-DOS 4+'s ergonomics deliberately — not out of nostalgia, but
 - [ ] **Phase 4 — Host bridge**: Windows + Linux companion services, shared-memory or socket transport, cross-OS clock sync.
 - [ ] **Phase 5 — Agent Command Interface**: capability registry, policy engine, full audit trail, human-equivalent permission model for machine callers.
 - [ ] **Phase 6 — LLM integration**: Ollama runtime hosted as a budgeted task; agent tool-calling mapped 1:1 onto ACI capabilities; safety evaluation harness before any agent gets write access to a live bus.
-- [ ] **Phase 7 — Edge bring-up**: Jetson Nano (and successors) port with GPU/NPU-accelerated inference path.
+- [ ] **Phase 7 — Edge bring-up**: Jetson Orin Nano (and successors) port with GPU/NPU-accelerated inference path.
 - [ ] **Phase 8 — Fleet mode**: multiple TinyOS nodes coordinating over CAN/Ethernet with a shared policy and audit plane.
 
 ---
