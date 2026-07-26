@@ -116,6 +116,41 @@ See [`docs/hbp-spec.md`](docs/hbp-spec.md) for the detailed wire format and stat
 
 ---
 
+## Remote Control: the Wireless Command Interface (WCI)
+
+Not every TinyOS deployment shares a chassis with its caller. The second reference case is a **TinyOS-controlled co-bot** that exposes a WiFi node, where a remote operator, host application, or fleet controller connects over the network — and where, unlike HBP, the transport itself is untrusted and must not be allowed to become an unauthenticated command path. WCI is the specified channel for this topology.
+
+### Design principle (extends HBP over an untrusted link)
+
+Everything HBP guarantees for a co-resident host still applies here — the caller is subject to the ACI policy engine, no bypass exists, and the real-time core never blocks on the network. WCI adds what a wireless, multi-tenant-capable link requires on top: **no command is honored from a connection that has not completed authentication, and no network state can ever suppress the co-bot's hardware e-stop.**
+
+### Authentication & authorization
+
+- The co-bot's WiFi node accepts connections at the link layer (WPA2/3), but link-layer association is **not** authorization to issue commands — it only gets a client to the application-layer authentication handshake.
+- Application-layer identity uses mutual TLS: each authorized controller holds a client certificate issued during an out-of-band provisioning/pairing step (physical access to the co-bot required, e.g. a provisioning button plus short-lived enrollment code) — no over-the-air enrollment without a physical trust anchor.
+- An authenticated connection is mapped to a capability scope in the ACI capability registry, same as any other caller (e.g. `operator`, `supervisor`, `monitor-only`). A valid certificate proves identity; the ACI policy engine still decides what that identity may do.
+- Sessions are short-lived and re-authenticated periodically; there is no standing, indefinitely-trusted connection.
+
+### Command authority (single-writer lock)
+
+- Multiple clients may hold read-only telemetry sessions concurrently, but only **one** client may hold command authority at a time — a leasable authority token issued by TinyOS, renewed by heartbeat, and revocable.
+- A second client requesting command authority while a lease is held is denied (or queued, per policy) rather than silently allowed to issue conflicting motion commands.
+
+### Protocol layer — wire format over TLS
+
+- TLS-wrapped, versioned binary frames (same fixed-size, allocation-free framing discipline as HBP) — sequence-numbered to detect replay and reordering, since the transport is a real network, not a trusted local bus.
+- Same two-lane structure as HBP: a **command lane** (gated by ACI + authority lease) and a **telemetry lane** (broadcast to all authenticated sessions regardless of authority).
+
+### Failure semantics (network + authority specific)
+
+- **Link loss or auth expiry.** The co-bot treats loss of the WiFi link, an expired session, or a lapsed authority lease identically to HBP's "operator gone" case: transition to a safe hold state, not continued execution of the last received command.
+- **Hardware e-stop is out of band.** The physical e-stop on the co-bot is wired directly into the kernel's watchdog/failsafe path (Non-Negotiable #5) and is never mediated by WCI, ACI, or any network state — a compromised, jammed, or simply disconnected network can never prevent an e-stop from taking effect.
+- **No silent reconnect-and-resume.** Regaining the link does not automatically resume motion; the reconnecting client must re-authenticate and re-acquire command authority, and TinyOS treats resumption as a fresh command, not a continuation.
+
+See [`docs/wci-spec.md`](docs/wci-spec.md) for the detailed pairing flow, wire format, and authority state machine (draft).
+
+---
+
 ## System Architecture (target)
 
 ```text
