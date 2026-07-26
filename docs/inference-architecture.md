@@ -32,7 +32,7 @@ Where the underlying hardware supports it, TinyOS exposes a **Unified Memory Man
 - Buffers are represented as typed, ownership-tracked handles, not raw pointers passed across the CPU/GPU boundary.
 - A buffer has a single writer at a time; the UMM enforces explicit hand-off (fencing) between CPU and GPU access rather than allowing silent concurrent access — this is the same discipline as the RT kernel's own memory model (deterministic, no surprise aliasing), applied to heterogeneous memory instead of just CPU memory.
 - On hardware without true unified memory, the UMM falls back to an explicit copy path (host RAM ↔ VRAM) behind the same handle API, so higher-level code (the agent runtime, inference driver) doesn't need to know which memory model the target device has.
-- All UMM code that touches vendor driver APIs lives in `-sys` binding crates per [`CODING_STANDARDS.md`](../CODING_STANDARDS.md#language-policy); the UMM's own ownership/fencing logic is safe Rust built on top of that boundary.
+- All UMM code that touches vendor driver APIs lives in `-sys` binding crates per [`CODING_STANDARDS.md`](../agent/CODING_STANDARDS.md#language-policy); the UMM's own ownership/fencing logic is safe Rust built on top of that boundary.
 
 ## Hosting an Ollama-like runtime
 

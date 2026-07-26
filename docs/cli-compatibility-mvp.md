@@ -6,7 +6,7 @@ Status: **draft / companion to Roadmap Phase 2 (Shell & UX)**
 
 TinyOS's shell, `TINYCMD`, needs to feel native to two very different populations of muscle memory: operators who think in `DIR`/`COPY`/`DEL` and DOS-style `/switches`, and operators who think in `ls`/`cp`/`rm` and POSIX-style `-flags`, pipes, and redirection. Rather than implementing each command twice, `TINYCMD` is built as **one canonical command core with two syntax front-ends** that both compile down to the same verbs — consistent with Design Pillar 2 (UX/UI strictly separated from control): whichever syntax an operator types, the same ACI-gated backend executes it, with the same audit trail.
 
-Reference note: the [`MsDOS`](../MsDOS) submodule (Microsoft's officially released MS-DOS source, `v4.0/src/CMD`) was reviewed for *which* commands existed and their general behavior, not for implementation — TinyOS's shell is an original, from-scratch Rust implementation per [`CODING_STANDARDS.md`](../CODING_STANDARDS.md#language-policy), not a port.
+Reference note: the [`MsDOS`](../MsDOS) submodule (Microsoft's officially released MS-DOS source, `v4.0/src/CMD`) was reviewed for *which* commands existed and their general behavior, not for implementation — TinyOS's shell is an original, from-scratch Rust implementation per [`CODING_STANDARDS.md`](../agent/CODING_STANDARDS.md#language-policy), not a port.
 
 ## Architecture
 
@@ -79,7 +79,7 @@ The MVP intentionally covers the commands that account for the large majority of
 - Every verb — regardless of which syntax front-end produced it — passes through the ACI policy engine exactly like an HBP/WCI/agent-originated command. There is no "local shell" privilege shortcut.
 - Destructive verbs (`delete`, `remove-dir` with recursive flag) require explicit confirmation by default in interactive sessions; scripted/batch invocation requires an explicit non-interactive flag, so a script can't silently inherit an interactive default.
 - `task-kill` against an RT-critical task requires `supervisor` capability scope, never `operator`, consistent with the co-bot/CNC authority model already specified for WCI.
-- Per [`CODING_STANDARDS.md`](../CODING_STANDARDS.md#test-driven-development-mandatory), every verb ships with tests under **both** syntax front-ends (a DOS-syntax test and a POSIX-syntax test exercising the same canonical verb), plus adversarial tests for path traversal (`../../`, absolute-path escapes) and argument-injection attempts through either parser.
+- Per [`CODING_STANDARDS.md`](../agent/CODING_STANDARDS.md#test-driven-development-mandatory), every verb ships with tests under **both** syntax front-ends (a DOS-syntax test and a POSIX-syntax test exercising the same canonical verb), plus adversarial tests for path traversal (`../../`, absolute-path escapes) and argument-injection attempts through either parser.
 
 ## Phased plan
 

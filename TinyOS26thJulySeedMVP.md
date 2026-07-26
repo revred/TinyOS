@@ -10,7 +10,7 @@ The first job is to be the **founding record**: the original ambition that start
 
 The second job, added as the project's design work matured, is to be the **exhaustive reference**: every goal TinyOS is meant to serve, every configuration and hardware option seriously considered, the reasoning that narrows all of that down to a buildable MVP, and — because this is where projects like this most often quietly fail — precisely how reliability, security, testing, and codebase discipline are guaranteed rather than merely hoped for. That part is large by design. It is meant to be read selectively (jump to the section you need via the table of contents below) rather than linearly every time, but it is meant to be *complete* enough that no important decision about TinyOS has to be re-derived from scratch or re-argued from memory.
 
-Everything else in the repository — [`README.md`](README.md), [`CODING_STANDARDS.md`](CODING_STANDARDS.md), and the specs under [`docs/`](docs/) — is either a distillation of material that lives here in full, or a deeper technical dive into one topic this document only summarizes. [`HANDOVER.md`](HANDOVER.md) is the short pointer that tells a new reader where to start; this document is what they land on once they want the full picture.
+Everything else in the repository — [`README.md`](README.md), [`agent/CODING_STANDARDS.md`](agent/CODING_STANDARDS.md), and the specs under [`docs/`](docs/) — is either a distillation of material that lives here in full, or a deeper technical dive into one topic this document only summarizes. The latest dated handover under [`session/`](session/) is the short pointer that tells a new reader where to start; this document is what they land on once they want the full picture.
 
 ### Table of Contents
 
@@ -301,17 +301,17 @@ The MVP is not "a demo." It is the smallest hardware and software configuration 
 
 ## 6. Testing Strategy
 
-Testing is not a phase that happens after implementation — per [`CODING_STANDARDS.md`](CODING_STANDARDS.md#test-driven-development-mandatory), every feature is built test-first, and this section describes the full taxonomy of tests TinyOS uses and how they map onto the goals in Section 3 and the hardware tiers already defined in the [Target Hardware & Test Matrix](README.md#target-hardware--test-matrix).
+Testing is not a phase that happens after implementation — per [`agent/CODING_STANDARDS.md`](agent/CODING_STANDARDS.md#test-driven-development-mandatory), every feature is built test-first, and this section describes the full taxonomy of tests TinyOS uses and how they map onto the goals in Section 3 and the hardware tiers already defined in the [Target Hardware & Test Matrix](README.md#target-hardware--test-matrix).
 
 ### 6.1 TDD discipline recap
 
-Red, green, refactor, for every feature, with no exceptions for "trivial" code, and mandatory adversarial tests for every safety- and security-relevant subsystem — this is specified in full in `CODING_STANDARDS.md` and is not repeated here beyond this pointer, because that document is the authoritative source and this document should not risk drifting out of sync with it by duplicating its detail.
+Red, green, refactor, for every feature, with no exceptions for "trivial" code, and mandatory adversarial tests for every safety- and security-relevant subsystem — this is specified in full in `agent/CODING_STANDARDS.md` and is not repeated here beyond this pointer, because that document is the authoritative source and this document should not risk drifting out of sync with it by duplicating its detail.
 
 ### 6.2 Test taxonomy
 
 | Test type | Purpose | Primary goals validated |
 |---|---|---|
-| **Unit tests** | Verify individual function/type behavior in isolation, co-located with the code per `CODING_STANDARDS.md` | All — the baseline for every crate |
+| **Unit tests** | Verify individual function/type behavior in isolation, co-located with the code per `agent/CODING_STANDARDS.md` | All — the baseline for every crate |
 | **Integration tests** | Verify correct behavior across module/crate boundaries within one binary | G-RT-1 through G-RT-7, G-HW-1 through G-HW-4 |
 | **Property-based tests** | Generate a wide range of inputs against an invariant (e.g. "the scheduler never assigns two RT tasks overlapping exclusive time on the same core") rather than fixed examples | G-RT-1, G-RT-2, G-PA-1 |
 | **Fuzz testing** | Feed malformed/adversarial byte streams into any parser that accepts external input — HBP/WCI frame parsers, TINYCMD's DOS/POSIX front-ends, deploy image validation | G-RC-2, G-HW-3, all frame-parsing code |
@@ -397,7 +397,7 @@ The Agent Command Interface is TinyOS's single security boundary: every caller (
 
 ### 8.3 Supply chain security
 
-- **Dependency minimalism.** Per `CODING_STANDARDS.md`, every new dependency in a `no_std` crate is justified in its introducing PR — both audit surface and binary size matter on edge targets, and an unjustified dependency is a review blocker, not a nitpick.
+- **Dependency minimalism.** Per `agent/CODING_STANDARDS.md`, every new dependency in a `no_std` crate is justified in its introducing PR — both audit surface and binary size matter on edge targets, and an unjustified dependency is a review blocker, not a nitpick.
 - **Reproducible builds.** The full system image builds deterministically from a pinned toolchain (`rust-toolchain.toml`) and a locked dependency set (`Cargo.lock` committed, not gitignored), so a given commit always produces a byte-identical (or at minimum, behavior-identical) build — a prerequisite for trusting that what's deployed matches what was reviewed.
 - **Dependency auditing.** Automated dependency vulnerability scanning (`cargo-audit`-class tooling) and license/policy scanning (`cargo-deny`-class tooling) run in CI on every dependency change, not just on a periodic schedule — a newly disclosed vulnerability in an existing dependency should be caught the next time CI runs against it, not discovered months later during an ad hoc review.
 - **Software Bill of Materials (SBOM).** Every released image ships with a generated SBOM, so a downstream deployer (or TinyOS's own incident response process, Section 8.6) can immediately determine whether a given disclosed vulnerability affects a specific deployed device.
@@ -415,7 +415,7 @@ The Agent Command Interface is TinyOS's single security boundary: every caller (
 
 ### 8.6 Incident response and disclosure process
 
-- A security-relevant defect (in TinyOS's own code or in a dependency, per Section 8.3's scanning) is triaged against the priority ordering in `CODING_STANDARDS.md`: security is priority 2, ahead of any feature work, and a confirmed vulnerability with a plausible exploitation path in a deployed configuration is treated as a release-blocking issue for any pending release, and a hotfix-worthy issue for already-deployed devices via the same deploy-protocol mechanism used for any other update.
+- A security-relevant defect (in TinyOS's own code or in a dependency, per Section 8.3's scanning) is triaged against the priority ordering in `agent/CODING_STANDARDS.md`: security is priority 2, ahead of any feature work, and a confirmed vulnerability with a plausible exploitation path in a deployed configuration is treated as a release-blocking issue for any pending release, and a hotfix-worthy issue for already-deployed devices via the same deploy-protocol mechanism used for any other update.
 - Given the project's current design-only stage, a formal public disclosure policy (CVE process, disclosure timeline commitments) is deferred until there is shipped code for it to apply to — but the *mechanism* for fixing and deploying a fix quickly (the deploy protocol) is being built early (Roadmap Phase 1.5) specifically so that mechanism already exists by the time it's needed.
 
 ### 8.7 Security testing cadence
@@ -431,13 +431,13 @@ This section is called out by name because it governs *how the entire codebase i
 
 ### 9.1 Crate size ceiling
 
-**No crate may exceed 20,000 lines of code, excluding test code.** This is stated here as policy; the authoritative, enforceable specification — measurement method, CI enforcement, splitting strategy, and a worked example — lives in [`CODING_STANDARDS.md`](CODING_STANDARDS.md#crate-size-ceiling-hard-limit-no-exceptions), and this document defers to that one for detail rather than duplicating and risking drift between the two.
+**No crate may exceed 20,000 lines of code, excluding test code.** This is stated here as policy; the authoritative, enforceable specification — measurement method, CI enforcement, splitting strategy, and a worked example — lives in [`agent/CODING_STANDARDS.md`](agent/CODING_STANDARDS.md#crate-size-ceiling-hard-limit-no-exceptions), and this document defers to that one for detail rather than duplicating and risking drift between the two.
 
 The reason this matters enough to restate here, at the level of a project-wide goal rather than just a style rule: TinyOS's entire safety and security architecture depends on components being genuinely comprehensible and genuinely isolated (Section 8.2's capability model, the Universal Driver Model's driver isolation, Section 7's fault containment). A 40,000-line crate is not just harder to review — it's a crate where the isolation boundaries the rest of this document assumes have almost certainly eroded, because nothing forced anyone to keep them clean. The ceiling is a structural precondition for every other guarantee in this document, not an independent nicety.
 
 ### 9.2 SOLID principles, Rust-adapted, never compromised
 
-Again, the authoritative enforceable specification — the five principles translated into Rust idiom, and their per-principle enforcement mechanisms — lives in [`CODING_STANDARDS.md`](CODING_STANDARDS.md#solid-principles--rust-adapted-never-compromised). This section states why "never compromised" is the right bar rather than "encouraged" or "best-effort":
+Again, the authoritative enforceable specification — the five principles translated into Rust idiom, and their per-principle enforcement mechanisms — lives in [`agent/CODING_STANDARDS.md`](agent/CODING_STANDARDS.md#solid-principles--rust-adapted-never-compromised). This section states why "never compromised" is the right bar rather than "encouraged" or "best-effort":
 
 - **Single Responsibility** is what keeps the crate-size ceiling (9.1) achievable in the first place — a codebase of well-factored, single-purpose types splits naturally along crate boundaries; a codebase that ignores Single Responsibility hits the 20K-line ceiling by accident, with no clean seam to split along, which is exactly the failure mode 9.1's ceiling is meant to force out into the open early.
 - **Open/Closed** is what makes the Universal Driver Model's class-driver/vendor-extension pattern (G-HW-2, G-HW-3) actually work in practice — adding a vendor extension must never require editing the generic class driver's code, or every vendor extension becomes a fork risk.
@@ -450,7 +450,7 @@ None of these five principles is optional or "nice to have" in TinyOS's specific
 ### 9.3 Additional governance
 
 - **Coupling/cohesion as a review signal.** Beyond the five SOLID principles, reviewers watch for high coupling between crates that should be independent (e.g. a `drivers-storage` crate that reaches into `kernel` internals rather than going through the DCI) as an early warning that a boundary is eroding before it becomes a crate-size or SOLID violation outright.
-- **Documentation coverage.** `#![deny(missing_docs)]` on library crates (per `CODING_STANDARDS.md`) is treated as governance, not decoration — a public API without a documented invariant is exactly the kind of interface where a Liskov violation or a capability-scope mistake goes unnoticed, because there's no written contract to check a change against.
+- **Documentation coverage.** `#![deny(missing_docs)]` on library crates (per `agent/CODING_STANDARDS.md`) is treated as governance, not decoration — a public API without a documented invariant is exactly the kind of interface where a Liskov violation or a capability-scope mistake goes unnoticed, because there's no written contract to check a change against.
 - **Dependency minimalism as governance, not just security.** Section 8.3's dependency-justification requirement also serves crate-size and SOLID discipline: a dependency pulled in to avoid writing 200 lines of well-factored code is sometimes the right call, but a dependency pulled in because it was easier than doing Single Responsibility properly is exactly the kind of shortcut this section exists to prevent.
 
 ---
@@ -499,10 +499,11 @@ The **5-axis CNC flagship demonstration** (G-PA-8) is not a single phase — it'
 Every document in the repository, one line each, for quick navigation from this master specification:
 
 - [`README.md`](README.md) — the living, current-state design document; the first place to check if anything here seems out of date.
-- [`HANDOVER.md`](HANDOVER.md) — short orientation pointer for anyone (human or AI) picking up the project.
-- [`CODING_STANDARDS.md`](CODING_STANDARDS.md) — the authoritative, binding coding rules: language policy, priority ordering, crate size ceiling, SOLID enforcement, TDD mandate, tooling standard.
+- [`session/`](session/) — dated handover documents, one folder per session (`session/hand-YYYY-MM-DD/index.html`); see [`session/README.md`](session/README.md) for the naming convention. Start with the most recent dated folder for a snapshot orientation.
+- [`agent/CODING_STANDARDS.md`](agent/CODING_STANDARDS.md) — the authoritative, binding coding rules: language policy, priority ordering, crate size ceiling, SOLID enforcement, TDD mandate, tooling standard.
 - [`docs/hbp-spec.md`](docs/hbp-spec.md) — Host Bridge Protocol wire-level spec (same-machine host comms).
 - [`docs/physical-ai-reference-workloads.md`](docs/physical-ai-reference-workloads.md) — the 5-axis CNC (flagship MVP demonstration), Wire DED robot arm, and resin-curing UV array reference workloads, and the shared RT primitives that let all three run on one kernel.
+- [`docs/extended-domain-workloads.md`](docs/extended-domain-workloads.md) — vision-tier exploration of how far the architecture generalizes (washing machine through rotary detonation engine), tiered honestly by realism; not a roadmap commitment.
 - [`docs/wci-spec.md`](docs/wci-spec.md) — Wireless Command Interface wire-level spec (remote/wireless comms, co-bot reference case).
 - [`docs/deploy-protocol.md`](docs/deploy-protocol.md) — peer-to-peer Ethernet/WiFi deploy and reboot protocol, A/B partition boot.
 - [`docs/inference-architecture.md`](docs/inference-architecture.md) — GPU admission control, Unified Memory Manager, distributed daisy-chained inference.

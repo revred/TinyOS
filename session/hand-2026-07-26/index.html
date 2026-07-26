@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TinyOS Handover — 26 July 2026</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #5a5a5a;
+    --border: #d8d8d8;
+    --code-bg: #f2f2f2;
+    --accent: #0b5fff;
+    --tag-bg: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --fg: #e8e8e8;
+      --muted: #a0a0a0;
+      --border: #333740;
+      --code-bg: #1e2126;
+      --accent: #6fa8ff;
+      --tag-bg: #1c2333;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.6;
+  }
+  h1 { font-size: 1.7rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.25rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+  h3 { font-size: 1.05rem; margin-top: 1.5rem; }
+  .status {
+    display: inline-block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--tag-bg);
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    margin-bottom: 1.5rem;
+  }
+  code {
+    background: var(--code-bg);
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.92rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.6rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th { color: var(--muted); font-weight: 600; }
+  ul, ol { padding-left: 1.3rem; }
+  li { margin-bottom: 0.4rem; }
+  a { color: var(--accent); }
+  .muted { color: var(--muted); }
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+
+<h1>TinyOS — Handover</h1>
+<p class="muted">Session date: 26 July 2026</p>
+<span class="status">Design phase — no implementation code exists yet</span>
+
+<h2>Start here</h2>
+<ul>
+  <li><strong>Founding intent &amp; master specification:</strong> <code>TinyOS26thJulySeedMVP.md</code> — Section 1 is the fixed original ambition; the rest is a comprehensive, actively-maintained specification (goal taxonomy, hardware catalog, MVP narrowing, testing, reliability, security, codebase governance).</li>
+  <li><strong>Current state of the design:</strong> <code>README.md</code> — the living document. If it disagrees with anything on this page, the README wins; this page is a snapshot, not a source of truth.</li>
+  <li><strong>How to write code here:</strong> <code>agent/CODING_STANDARDS.md</code> — Rust-first policy, <code>unsafe</code> boundaries, real-time coding discipline, mandatory TDD, the crate-size ceiling, SOLID enforcement, and the safety &gt; security &gt; correctness &gt; performance priority ordering.</li>
+</ul>
+
+<h2>What exists today</h2>
+<p>Nothing has been implemented yet — this repository is entirely design and specification, deliberately, so Phase 0 starts from a coherent architecture rather than accumulating one ad hoc.</p>
+<table>
+<thead><tr><th>Area</th><th>Document</th><th>Summary</th></tr></thead>
+<tbody>
+<tr><td>Vision &amp; pillars</td><td><code>README.md</code></td><td>RTOS core, UX/control separation, host/bus connectivity, 64-bit-only hardware policy, LLM-as-supervised-operator</td></tr>
+<tr><td>Coding standard</td><td><code>agent/CODING_STANDARDS.md</code></td><td>Rust-primary language policy, <code>no_std</code>/<code>std</code> split, unsafe policy, real-time discipline, mandatory TDD, priority ordering, tooling standard, 20K-LOC crate ceiling, SOLID enforcement</td></tr>
+<tr><td>Same-machine host comms</td><td><code>docs/hbp-spec.md</code></td><td>Host Bridge Protocol — Windows/Linux ↔ TinyOS on one box (CNC controller reference case)</td></tr>
+<tr><td>Wireless/remote comms</td><td><code>docs/wci-spec.md</code></td><td>Wireless Command Interface — co-bot over WiFi, mutual-TLS auth, single-writer command authority lease</td></tr>
+<tr><td>Deploy tooling</td><td><code>docs/deploy-protocol.md</code></td><td>P2P Ethernet / WiFi hot-deploy and reboot-deploy, A/B partition boot with rollback</td></tr>
+<tr><td>Heterogeneous compute</td><td><code>docs/inference-architecture.md</code></td><td>GPU admission control, Unified Memory Manager, hosting an Ollama-like runtime, daisy-chained distributed inference</td></tr>
+<tr><td>Shell command surface</td><td><code>docs/cli-compatibility-mvp.md</code></td><td>TINYCMD MVP — DOS and POSIX syntax over one canonical verb core</td></tr>
+<tr><td>Driver architecture</td><td><code>docs/universal-driver-model.md</code></td><td>Driver isolation, Driver Capability Interface, class drivers, unified ACPI/Device-Tree hardware manifest, honest Apple Silicon scope caveat</td></tr>
+<tr><td>Physical AI — committed workloads</td><td><code>docs/physical-ai-reference-workloads.md</code></td><td>5-axis CNC (flagship MVP demonstration, Fanuc-class UX, RTCP/TCPC kinematics), Wire DED robot arm, resin-curing UV array — and the shared RT primitives that let all three run on one kernel</td></tr>
+<tr><td>Physical AI — vision-tier exploration</td><td><code>docs/extended-domain-workloads.md</code></td><td>Ten further domains (washing machine through rotary detonation engine), tiered honestly by realism (A/B/C) — not a roadmap commitment</td></tr>
+<tr><td>Reference-only source</td><td><code>MsDOS/</code> (git submodule)</td><td>Microsoft's officially released MS-DOS source, kept for historical command-behavior reference only — not built upon</td></tr>
+</tbody>
+</table>
+
+<h2>Key decisions already made</h2>
+<p class="muted">Don't relitigate these without a specific reason — they've each been argued through once already.</p>
+<ul>
+  <li><strong>64-bit only.</strong> No 32-bit boot path, ever, on either x86_64 or ARM64.</li>
+  <li><strong>Rust-primary.</strong> Assembly limited to boot/context-switch glue; C limited to isolated <code>-sys</code> vendor-driver bindings.</li>
+  <li><strong>Remote control is the primary UX</strong>, not a fallback — HBP and WCI are how the device is meant to be operated and developed against from day one.</li>
+  <li><strong>No privileged bypass, ever</strong>, for any caller — human shell, remote host, wireless controller, or LLM agent. Everything routes through the ACI policy engine.</li>
+  <li><strong>Fail-safe over keep-trying</strong>, everywhere: link loss, deploy failures, GPU/inference stalls, watchdog trips — all default to a safe hold state.</li>
+  <li><strong>MVP hardware chosen:</strong> Jetson Orin Nano Super (8GB) for ARM64/GPU/inference validation, plus a budget x86_64 mini-PC (N100/N305 class) for GPU-independent RT validation and host-bridge testing. Not yet purchased.</li>
+  <li><strong>Three deployment modes defined:</strong> Inference-only, Real-Time control, and Inference + Real-Time Execution.</li>
+  <li><strong>Flagship MVP demonstration is the 5-axis CNC controller</strong> — full-depth, no-compromises motion/interpolation/kinematics software; physical accuracy validation deferred to hardware bolt-on.</li>
+  <li><strong>Crate size ceiling: 20,000 lines of code per crate, excluding tests, no exceptions.</strong> SOLID principles, Rust-adapted, are reviewer-enforced and treated as blocking on every PR.</li>
+</ul>
+
+<h2>What's genuinely open</h2>
+<p class="muted">Flagged as open questions in their respective specs — don't assume an answer exists yet.</p>
+<ul>
+  <li>Exact wire/frame layout and versioning handshake for HBP, WCI, and the deploy protocol (all currently draft, fields TBD).</li>
+  <li>Certificate rotation/revocation mechanics for WCI when a device is offline at rotation time.</li>
+  <li>Authority-lease preemption policy defaults (can a <code>supervisor</code> session always preempt an <code>operator</code> lease, or must it request?).</li>
+  <li>Whether a wired daisy-chain (CAN/USB/Ethernet) needs the same mutual-TLS trust model as WCI, or can rely on physical-chain trust.</li>
+  <li>Tensor/pipeline partitioning strategy for distributed inference, and its relationship to Fleet mode.</li>
+  <li>Session mode selection heuristics for TINYCMD (explicit switch vs. auto-detect from input syntax).</li>
+  <li>Whether the Combustion/Ignition Event-Timing primitive (from <code>docs/extended-domain-workloads.md</code>) holds at rotary-detonation-engine frequencies, or needs fundamentally different scheduling guarantees — explicitly unresolved.</li>
+</ul>
+
+<h2>Immediate next steps</h2>
+<p>Roadmap Phase 0 — Kernel skeleton: boot, context switch, preemptive priority scheduler, static memory pools, and a minimal HAL for one x86_64 target, built test-first, against the MVP hardware once purchased. Phase 1.5 (deploy tooling) is intentionally pulled early because remote deploy is meant to be the actual development loop, not a later convenience.</p>
+
+<h2>For whoever (or whatever) picks this up next</h2>
+<p>Read the seed document's Section 1 first, then <code>README.md</code>, then whichever <code>docs/</code> spec is relevant to the task at hand. The priority ordering in <code>agent/CODING_STANDARDS.md</code> (safety &gt; security &gt; correctness &gt; performance) resolves almost any design disagreement that comes up during implementation.</p>
+
+<footer>
+  TinyOS session handover · <a href="../README.md">session/README.md</a> for the naming convention · see <a href="../../README.md">repository root README</a>
+</footer>
+
+</body>
+</html>

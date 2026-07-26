@@ -48,7 +48,7 @@ TinyOS targets x86_64 (Intel/AMD PC-class chipsets) and ARM64 (Jetson-class SoCs
 ### Driver Capability Interface (DCI) — the stable contract
 
 - The DCI is versioned independently of kernel internals. A driver written against DCI v1 keeps working across kernel releases as long as v1 remains supported — this is the direct fix for Linux's out-of-tree rot and Windows' ABI-break churn.
-- The DCI is a Rust trait-based contract per [`CODING_STANDARDS.md`](../CODING_STANDARDS.md#language-policy); vendor code that must call a C SDK is confined to an isolated `-sys` crate behind it, same as any other vendor binding.
+- The DCI is a Rust trait-based contract per [`CODING_STANDARDS.md`](../agent/CODING_STANDARDS.md#language-policy); vendor code that must call a C SDK is confined to an isolated `-sys` crate behind it, same as any other vendor binding.
 - Breaking changes to a class contract require a new major DCI version, published alongside the old one for a defined deprecation window — drivers are never broken by a routine kernel update.
 
 ### Class drivers vs. vendor extensions
@@ -72,7 +72,7 @@ Apple Silicon Macs do not publish public hardware interface documentation, stabl
 
 ## Conformance & trust
 
-- Every class driver and every vendor extension ships with a conformance test suite for its class contract, built test-first per [`CODING_STANDARDS.md`](../CODING_STANDARDS.md#test-driven-development-mandatory) — this is TinyOS's equivalent of driver certification (à la WHQL), but automated, open, and re-run on every relevant change rather than a one-time gate.
+- Every class driver and every vendor extension ships with a conformance test suite for its class contract, built test-first per [`CODING_STANDARDS.md`](../agent/CODING_STANDARDS.md#test-driven-development-mandatory) — this is TinyOS's equivalent of driver certification (à la WHQL), but automated, open, and re-run on every relevant change rather than a one-time gate.
 - A driver's granted capability scope (DMA regions, IRQ lines, MMIO ranges) is logged with the same provenance discipline as every other ACI-gated action — what was requested, what was granted, and why.
 - Adversarial tests are required for the DCI/UDI boundary itself: a driver attempting to request capabilities outside its declared manifest, or a malformed capability grant, must fail closed.
 

@@ -1,6 +1,6 @@
 # Deploy & Hot-Reboot Protocol — Draft Spec
 
-Status: **draft / tooling companion to [`CODING_STANDARDS.md`](../CODING_STANDARDS.md#tooling)**
+Status: **draft / tooling companion to [`CODING_STANDARDS.md`](../agent/CODING_STANDARDS.md#tooling)**
 
 ## Purpose
 
@@ -56,4 +56,4 @@ TinyOS is designed to be developed and operated remotely by default — per [Non
 
 ## Status
 
-This document accompanies the Tooling section of [`CODING_STANDARDS.md`](../CODING_STANDARDS.md#tooling) and the remote-control-first philosophy stated in the README. It will be refined once the ACI capability registry and A/B boot mechanism land in the kernel skeleton.
+This document accompanies the Tooling section of [`CODING_STANDARDS.md`](../agent/CODING_STANDARDS.md#tooling) and the remote-control-first philosophy stated in the README. It will be refined once the ACI capability registry and A/B boot mechanism land in the kernel skeleton.

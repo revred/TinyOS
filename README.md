@@ -21,7 +21,7 @@ TinyOS exists to close that gap deliberately, not accidentally: a real-time core
 
 TinyOS is written primarily in **Rust** — the kernel, HAL, drivers, ACI, shell, and host bridge services are all Rust by default. Assembly is confined to boot/entry and context-switch glue; C is confined to isolated `-sys` binding crates wrapping vendor SDKs (GPU drivers, CAN transceiver code) that don't yet have a safe Rust equivalent. `unsafe` is forbidden at the application layer (`aci`, `agent`, `shell`) and permitted only in `hal`/`drivers`/`-sys` crates, each block justified with a `// SAFETY:` comment.
 
-See [`CODING_STANDARDS.md`](CODING_STANDARDS.md) for the full standard, including the `no_std` policy, real-time coding discipline (no allocation or unbounded blocking in scheduler/IPC/interrupt paths), and toolchain/lint requirements (`rustfmt`, `clippy -D warnings`, `#![deny(missing_docs)]`).
+See [`CODING_STANDARDS.md`](agent/CODING_STANDARDS.md) for the full standard, including the `no_std` policy, real-time coding discipline (no allocation or unbounded blocking in scheduler/IPC/interrupt paths), and toolchain/lint requirements (`rustfmt`, `clippy -D warnings`, `#![deny(missing_docs)]`).
 
 ---
 
@@ -84,6 +84,8 @@ Real-Time control and combined mode are validated against three deliberately dif
 3. **Resin-printer UV curing array** — near-trivial motion (one lift axis) paired with a high-channel-count, precisely-timed UV array output gated by an exposure-window safety interlock.
 
 See [`docs/physical-ai-reference-workloads.md`](docs/physical-ai-reference-workloads.md) for the full specification, including the shared RT primitives (Motion & Interpolation Service, Process-Synchronized Output Service, Position Feedback Abstraction, Safety Interlock) that let all three workloads run on one kernel rather than three bespoke control subsystems.
+
+Beyond these three committed reference workloads, [`docs/extended-domain-workloads.md`](docs/extended-domain-workloads.md) explores how far the same architecture generalizes — from near-term-credible domains (a washing machine, an automatic transmission, engine valve timing, a drone flight controller) to deliberately-labeled extreme-tail cases (a sea-landing rocket controller, a rotary detonation engine) that are included to be honest about the architecture's ceiling, not as roadmap commitments.
 
 ---
 
@@ -205,7 +207,7 @@ Remote control over a secure channel isn't just the runtime UX model — it's th
 
 Non-core tasks and drivers can be **hot-deployed** without a reboot (atomic swap, automatic abort-and-keep-old-instance on a failed health check). Kernel-core updates go through a **reboot deploy** using A/B partition boot with automatic rollback to the last-known-good partition if the new image fails its boot-health check. A deploy can never leave a device unable to boot, and never blocks or delays an RT task while in progress.
 
-See [`docs/deploy-protocol.md`](docs/deploy-protocol.md) for the full spec, and [`CODING_STANDARDS.md`](CODING_STANDARDS.md#tooling) for the tooling standard this implements.
+See [`docs/deploy-protocol.md`](docs/deploy-protocol.md) for the full spec, and [`CODING_STANDARDS.md`](agent/CODING_STANDARDS.md#tooling) for the tooling standard this implements.
 
 ---
 
@@ -270,7 +272,7 @@ TinyOS borrows MS-DOS 4+'s ergonomics deliberately — not out of nostalgia, but
 /tests/            Kernel conformance tests, timing/determinism benchmarks, HIL test rigs
 ```
 
-Each of these is a crate in a single Cargo workspace, per [`CODING_STANDARDS.md`](CODING_STANDARDS.md#toolchain).
+Each of these is a crate in a single Cargo workspace, per [`CODING_STANDARDS.md`](agent/CODING_STANDARDS.md#toolchain).
 
 ---
 
@@ -292,7 +294,7 @@ Each of these is a crate in a single Cargo workspace, per [`CODING_STANDARDS.md`
 
 ## Non-Negotiables
 
-These are the rules the project will not compromise on, even under schedule pressure. They resolve in strict priority order — safety first, then security, then correctness, then performance — see [`CODING_STANDARDS.md`](CODING_STANDARDS.md#priority-ordering) for how that ordering governs day-to-day trade-offs.
+These are the rules the project will not compromise on, even under schedule pressure. They resolve in strict priority order — safety first, then security, then correctness, then performance — see [`CODING_STANDARDS.md`](agent/CODING_STANDARDS.md#priority-ordering) for how that ordering governs day-to-day trade-offs.
 
 1. **The real-time core never blocks on UI, network, or LLM inference.** A hung shell or a stalled model call must never delay a scheduled task.
 2. **No agent — human or AI — gets a privileged bypass around the policy engine.** Every action, from any caller, goes through the same gate.
@@ -300,7 +302,7 @@ These are the rules the project will not compromise on, even under schedule pres
 4. **Determinism is tested, not assumed.** Timing regressions are CI failures, on par with functional test failures.
 5. **The system fails safe.** Watchdogs, deadline violations, and policy denials default to the safest known state, not to "keep trying."
 6. **GPU and inference work never jeopardizes CPU real-time guarantees.** Admission-controlled, never scheduler-privileged; a stalled or failed inference degrades or errors out through the ACI, it never blocks an RT task on any node.
-7. **Every feature is test-driven.** Tests are written before the implementation, security- and safety-relevant code gets adversarial tests, and a PR without corresponding tests doesn't merge. See [`CODING_STANDARDS.md`](CODING_STANDARDS.md#test-driven-development-mandatory).
+7. **Every feature is test-driven.** Tests are written before the implementation, security- and safety-relevant code gets adversarial tests, and a PR without corresponding tests doesn't merge. See [`CODING_STANDARDS.md`](agent/CODING_STANDARDS.md#test-driven-development-mandatory).
 8. **Performance is a first-class goal, pursued only after 1–3 above hold.** TinyOS aims to extract the maximum throughput and lowest latency the target hardware allows — on constrained edge devices and full-capability laptops alike — but never by weakening safety, security, or correctness guarantees.
 9. **A driver fault never faults the kernel.** Drivers run outside the RT trust boundary, capability-scoped and admission-controlled like any other caller; a crashing driver is contained and restarted, never a path to a kernel panic. See the [Universal Driver Model](docs/universal-driver-model.md).
 
@@ -310,7 +312,7 @@ These are the rules the project will not compromise on, even under schedule pres
 
 Early design phase. Architecture and roadmap above are the north star; implementation is starting from the kernel skeleton outward. Contributions, critique, and hardware to test on are all welcome once Phase 0 lands.
 
-New here? Start with [`TinyOS26thJulySeedMVP.md`](TinyOS26thJulySeedMVP.md) for the founding intent, then [`HANDOVER.md`](HANDOVER.md) for a snapshot of what's decided, what's open, and what to work on next.
+New here? Start with [`TinyOS26thJulySeedMVP.md`](TinyOS26thJulySeedMVP.md) for the founding intent, then the latest dated handover under [`session/`](session/) — currently [`session/hand-2026-07-26/index.html`](session/hand-2026-07-26/index.html) — for a snapshot of what's decided, what's open, and what to work on next.
 
 ## License
 
