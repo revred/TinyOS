@@ -47,6 +47,7 @@ See [`CODING_STANDARDS.md`](CODING_STANDARDS.md) for the full standard, includin
 - **USB**: device and host-mode USB stacks for peripherals, flashable storage, and tethered control links.
 - **Ethernet**: lwIP-class TCP/IP stack for edge-to-cloud and edge-to-fleet communication.
 - All transports terminate at the same internal message bus — a CAN frame, a USB packet, and a TCP message can all trigger the same command handler, subject to the same permission checks.
+- **Drivers run outside the kernel's trust boundary, not inside it.** A crashing or misbehaving driver never faults the RT core — it's admitted, capability-scoped, and restarted like any other ACI-gated resource, not a privileged kernel-mode extension. See [Universal Driver Model](docs/universal-driver-model.md).
 
 ### 4. Runs where the work happens — 64-bit only
 
@@ -79,6 +80,8 @@ More modes may be added as deployments demand them; each new mode is defined by 
 ## Target Hardware & Test Matrix
 
 TinyOS is **64-bit only** — no 32-bit boot path is planned or supported, on either architecture.
+
+**Committed hardware scope:** x86_64/Intel-and-AMD-chipset PCs and ARM64 boards that expose a standard hardware description (ACPI or Device Tree/SBSA/EBBR) — this includes Windows-PC-class laptops/NUCs and Jetson-class or comparable ARM64 SBCs. **Apple Silicon is explicitly tracked as best-effort, not committed**, because Apple does not publish public hardware interfaces for it; see the [Universal Driver Model](docs/universal-driver-model.md#the-apple-silicon-constraint-stated-plainly) for why this isn't a design gap TinyOS can architect around on its own.
 
 ### Tier 0 — Emulated (CI gate, every commit)
 
@@ -263,11 +266,11 @@ Each of these is a crate in a single Cargo workspace, per [`CODING_STANDARDS.md`
 
 ## Roadmap
 
-- [ ] **Phase 0 — Kernel skeleton**: boot, context switch, preemptive priority scheduler, static memory pools, minimal HAL for one x86_64 target.
+- [ ] **Phase 0 — Kernel skeleton**: boot, context switch, preemptive priority scheduler, static memory pools, minimal HAL for one x86_64 target; HAL includes the initial ACPI/Device-Tree-normalizing hardware manifest per the [Universal Driver Model](docs/universal-driver-model.md).
 - [ ] **Phase 1 — Determinism proof**: deadline monitor, priority inheritance, worst-case timing benchmarks and regression suite; CI gate on timing regressions, not just functional correctness.
 - [ ] **Phase 1.5 — Deploy tooling**: peer-to-peer Ethernet and WiFi deploy client, A/B partition boot with automatic rollback, hot-deploy for non-core tasks. See [`docs/deploy-protocol.md`](docs/deploy-protocol.md). Ships early because remote deploy is the primary development loop, not a later convenience.
 - [ ] **Phase 2 — Shell & UX**: TINYCMD core verb engine + DOS/POSIX front-ends (MVP set per [`docs/cli-compatibility-mvp.md`](docs/cli-compatibility-mvp.md)), batch scripting, TASKMGR live view, config file loader.
-- [ ] **Phase 3 — Connectivity**: CAN, USB, Ethernet stacks; unify under one internal message bus with a single command dispatch path.
+- [ ] **Phase 3 — Connectivity**: CAN, USB, Ethernet stacks; unify under one internal message bus with a single command dispatch path; ship mandatory class drivers (storage, network, HID) per the [Universal Driver Model](docs/universal-driver-model.md) so common hardware works before any vendor extension exists.
 - [ ] **Phase 4 — Host bridge**: Windows + Linux companion services, shared-memory or socket transport, cross-OS clock sync.
 - [ ] **Phase 5 — Agent Command Interface**: capability registry, policy engine, full audit trail, human-equivalent permission model for machine callers.
 - [ ] **Phase 6 — LLM integration**: Ollama runtime hosted as a budgeted task; agent tool-calling mapped 1:1 onto ACI capabilities; safety evaluation harness before any agent gets write access to a live bus.
@@ -289,6 +292,7 @@ These are the rules the project will not compromise on, even under schedule pres
 6. **GPU and inference work never jeopardizes CPU real-time guarantees.** Admission-controlled, never scheduler-privileged; a stalled or failed inference degrades or errors out through the ACI, it never blocks an RT task on any node.
 7. **Every feature is test-driven.** Tests are written before the implementation, security- and safety-relevant code gets adversarial tests, and a PR without corresponding tests doesn't merge. See [`CODING_STANDARDS.md`](CODING_STANDARDS.md#test-driven-development-mandatory).
 8. **Performance is a first-class goal, pursued only after 1–3 above hold.** TinyOS aims to extract the maximum throughput and lowest latency the target hardware allows — on constrained edge devices and full-capability laptops alike — but never by weakening safety, security, or correctness guarantees.
+9. **A driver fault never faults the kernel.** Drivers run outside the RT trust boundary, capability-scoped and admission-controlled like any other caller; a crashing driver is contained and restarted, never a path to a kernel panic. See the [Universal Driver Model](docs/universal-driver-model.md).
 
 ---
 
