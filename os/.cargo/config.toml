@@ -1,0 +1,28 @@
+# No workspace-wide default `[build] target` here deliberately: `kernel`/`hal`/
+# `hal-x86_64` build against the custom `targets/x86_64-tinyos.json` spec with
+# `-Z build-std`, while `xtask` (and any other host tooling) builds for the host
+# triple with the ordinary standard library. A blanket override would break the
+# latter, so `xtask` passes `--target` explicitly only for the crates that need
+# it (per `docs/mvp-delivery-strategy.md#custom-target-specs`).
+#
+# Host-target linker: this project does not depend on MSVC/Visual Studio being
+# installed (per project decision — see `Sharc.Blue`'s `.cargo/config.toml` for
+# the established pattern this mirrors). On Windows, `link.exe` from Git Bash's
+# coreutils shadows the real MSVC linker on PATH and produces confusing errors,
+# and requiring the full VS Build Tools install is exactly the kind of
+# developer-machine-specific setup `agent/CODING_STANDARDS.md`'s "reproducible
+# builds" tooling principle exists to avoid. `rust-lld` (LLVM's linker, bundled
+# with rustup — no external install) links MSVC-target pure-Rust binaries
+# directly; it still needs the Windows SDK/CRT import libs on `LIB`, supplied
+# here from the `cargo-xwin` splat cache rather than a VS install.
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"
+
+# KNOWN GAP (mirrors Sharc.Blue's tracked "F40" issue): cargo's `[env]` table
+# is process-global, not target-gated, so this LIB value is technically
+# applied even on a non-Windows host — harmless there (no Windows linker
+# reads it) but not a clean cross-platform story. Proper fix is a host-side
+# tool that discovers this path dynamically instead of a checked-in absolute
+# path; deferred until that lands, same as upstream.
+[env]
+LIB = 'C:\Users\End User\AppData\Local\cargo-xwin\xwin\crt\lib\x86_64;C:\Users\End User\AppData\Local\cargo-xwin\xwin\sdk\lib\um\x86_64;C:\Users\End User\AppData\Local\cargo-xwin\xwin\sdk\lib\ucrt\x86_64'

@@ -1,0 +1,33 @@
+[package]
+name = "kernel"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "TinyOS kernel: scheduler, IPC, memory pools, deadline monitor. Phase 0: boot-to-halt walking skeleton only."
+
+[dependencies]
+hal = { path = "../hal" }
+hal-x86_64 = { path = "../hal-x86_64" }
+
+[lib]
+name = "kernel"
+path = "src/lib.rs"
+
+[features]
+# Forces a panic immediately after entering `kernel_main`, before the normal
+# success exit — used only by `xtask qemu-x86_64 --fixture broken-boot` and
+# `TEST-P0-01-03-A` to prove the failure path is distinguishable from success,
+# never enabled in a real boot image.
+fixture-broken-boot = []
+# Replaces the normal ACPI-topology-discovery boot path with the
+# STORY-P0-02-02 context-switch fixture — used only by
+# `xtask qemu-x86_64 --fixture=context-switch` and `TEST-P0-02-02-A`, never
+# enabled in a real boot image.
+fixture-context-switch = []
+
+[[bin]]
+name = "kernel"
+path = "src/main.rs"
+test = false
+bench = false

@@ -77,6 +77,7 @@ Every entry below is an `os/src/<name>/` directory with its own `Cargo.toml`. Th
 | `inference` | Local/external LLM runtime integration, Ollama adapter, ACI tool-call mapping | Depends on Phase 6 design work (§`no_std` vs `std` in CODING_STANDARDS) | `#![forbid(unsafe_code)]` at the ACI-facing boundary | Phase 6 |
 | `compute` | Unified Memory Manager, GPU admission control, `-sys` vendor bindings | Yes | Permitted (isolated to `-sys` sub-crates) | Phase 6b |
 | `config` | Boot/system configuration schema and parser | Yes | `#![forbid(unsafe_code)]` | Phase 0 (needed by `kernel` bring-up) |
+| `exec` | PE64 executable parsing, process address-space setup, capability-scoped Win32 API compatibility shim (`FEAT-P0-05`, validated against `Sharc.Blue`'s `blue-sharc.exe`) | Yes | Permitted (image mapping only; the API shim itself is ACI-mediated, not a raw syscall boundary) | Phase 0 |
 
 Two crates are **not** part of the Cargo workspace's `no_std` build at all: `deploy-client` and `bridge-host` are ordinary host binaries (Windows/Linux), consistent with [`agent/CODING_STANDARDS.md`](../agent/CODING_STANDARDS.md#no_std-vs-std)'s existing `no_std`/`std` split — they're still workspace members for shared tooling/CI purposes, just not part of the on-device image.
 

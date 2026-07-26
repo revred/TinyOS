@@ -1,6 +1,6 @@
 # TEST-P0-01-01-A — QEMU Boot-to-Halt Integration Test
 
-Status: **Planned (not yet implemented)**
+Status: **Verified — passing locally, 2026-07-26**
 Story: [`STORY-P0-01-01`](../stories/STORY-P0-01-01.md)
 Tier: Tier 0 (QEMU x86_64), per [Target Hardware & Test Matrix](../../README.md#target-hardware--test-matrix)
 
@@ -19,10 +19,10 @@ Per the TDD mandate, this specification is written before the kernel code it wil
 
 Integration test (Tier 0, QEMU-based), per [`agent/CODING_STANDARDS.md`](../../agent/CODING_STANDARDS.md#test-driven-development-mandatory)'s requirement that every driver/kernel path targets at minimum a Tier 0 test.
 
-## Implementation location (once written)
+## Implementation location
 
-`os/src/tests/` or co-located with `os/src/kernel/` — to be finalized when `FEAT-P0-01` work begins; this entry will be updated with the actual path.
+Implemented via `os/src/xtask/src/main.rs`'s `qemu-x86_64` command (bounded-timeout QEMU launch, `isa-debug-exit`-based pass/fail detection), exercising `os/src/kernel/` boot code (`src/boot.rs`, `src/qemu_exit.rs`).
 
 ## Reports
 
-None yet — this test has not been implemented or run. The first Report filed against this Test will be linked here, most recent first.
+- [`REPORT-2026-07-26-01`](../reports/REPORT-2026-07-26-01.md) — Pass (local, Tier 0/QEMU)

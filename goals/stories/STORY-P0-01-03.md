@@ -1,6 +1,6 @@
 # STORY-P0-01-03 — `xtask qemu-x86_64` Builds and Launches the Kernel Under QEMU
 
-Status: **Planned**
+Status: **Verified** (locally; CI run pending)
 Feature: [`FEAT-P0-01`](../features/FEAT-P0-01.md)
 Introduced in: [`session/hand-2026-07-26/04-seedmvp-agentmd-goals-vv-model-handover.md`](../../session/hand-2026-07-26/04-seedmvp-agentmd-goals-vv-model-handover.md)
 

@@ -1,0 +1,31 @@
+[package]
+name = "exec"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "PE64 executable loading and process compatibility (FEAT-P0-05). Phase 0: PE64 image parsing (STORY-P0-05-01) and process address-space creation/section mapping (STORY-P0-05-02)."
+
+[dependencies]
+kernel = { path = "../kernel" }
+hal-x86_64 = { path = "../hal-x86_64" }
+
+[[bin]]
+# `TEST-P0-05-02-A`'s Tier 0 QEMU fixture. A separate `no_std`/`no_main`
+# binary (not a `kernel` fixture feature, unlike `context-switch`) because
+# `exec` depends on `kernel`'s library for `kernel::mem::Pool` — `kernel`'s
+# own binary depending back on `exec` would be a cyclic crate dependency.
+# See `hal_x86_64::boot`'s doc comment for the shared boot-entry glue this
+# binary reuses.
+name = "exec-fixture"
+path = "src/fixture_main.rs"
+test = false
+bench = false
+
+[[bin]]
+# `TEST-P0-05-03-A`'s Tier 0 QEMU fixture, following `exec-fixture`'s own
+# precedent above.
+name = "win32-shim-fixture"
+path = "src/fixture_win32_shim_main.rs"
+test = false
+bench = false

@@ -8,3 +8,7 @@ work/**/*.PDF
 # Common editor/OS cruft
 .DS_Store
 Thumbs.db
+
+# Rust build output (os/ is the Cargo workspace root)
+os/target/
+**/target/

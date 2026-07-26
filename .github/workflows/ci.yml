@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+defaults:
+  run:
+    working-directory: os
+
+jobs:
+  governance-gates:
+    name: Format, lint, crate-size ceiling, missing_docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned toolchain
+        run: |
+          rustup toolchain install --profile minimal --component rustfmt --component clippy --component rust-src "$(grep -oP 'channel\s*=\s*"\K[^"]+' rust-toolchain.toml)"
+
+      - name: rustfmt check
+        run: cargo fmt --all -- --check
+
+      - name: clippy (-D warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: crate-size ceiling (20,000 LOC excluding tests)
+        run: cargo run -p xtask -- check-crate-sizes --ceiling=20000
+
+      - name: Performance catalogue integrity (625 tests)
+        run: cargo run -p xtask -- check-performance-catalogue
+
+      - name: missing_docs check
+        run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: "-D missing-docs"
+
+  governance-fixture-smoke-test:
+    name: TEST-P0-01-02-A — fixtures actually catch what they claim to
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain
+        run: |
+          rustup toolchain install --profile minimal --component rustfmt --component clippy "$(grep -oP 'channel\s*=\s*"\K[^"]+' rust-toolchain.toml)"
+      - name: Run fixture smoke test
+        run: cargo run -p xtask -- governance-fixture-test
+
+  kernel-boot-x86_64:
+    name: TEST-P0-01-01-A / TEST-P0-01-03-A — kernel boots to halt under QEMU
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned nightly toolchain + rust-src
+        run: |
+          rustup toolchain install --profile minimal --component rust-src "$(grep -oP 'channel\s*=\s*"\K[^"]+' rust-toolchain.toml)"
+      - name: Install QEMU
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-x86
+      - name: Boot kernel (expect success)
+        run: cargo run -p xtask -- qemu-x86_64
+      - name: Boot deliberately-broken fixture (expect distinguishable failure code)
+        run: |
+          set +e
+          cargo run -p xtask -- qemu-x86_64 --fixture=broken-boot
+          code=$?
+          if [ "$code" -ne 1 ]; then
+            echo "expected xtask exit code 1 (KernelBootFailed) for the broken-boot fixture, got $code"
+            exit 1
+          fi

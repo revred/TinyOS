@@ -1,6 +1,6 @@
 # TEST-P0-01-02-A — CI Governance-Gate Smoke Test
 
-Status: **Planned (not yet implemented)**
+Status: **Verified — passing locally, 2026-07-26**
 Story: [`STORY-P0-01-02`](../stories/STORY-P0-01-02.md)
 Tier: CI (no hardware tier — validates the CI pipeline configuration itself)
 
@@ -14,10 +14,10 @@ Tier: CI (no hardware tier — validates the CI pipeline configuration itself)
 
 CI configuration/meta-test — this test verifies the governance tooling itself, distinct from testing kernel code.
 
-## Implementation location (once written)
+## Implementation location
 
-`os/src/xtask/` (or a dedicated CI fixture directory) — to be finalized when `FEAT-P0-01` work begins.
+`os/src/xtask/src/governance.rs` (`governance-fixture-test` command), invoked from `.github/workflows/ci.yml`'s `governance-fixture-smoke-test` job.
 
 ## Reports
 
-None yet.
+- [`REPORT-2026-07-26-03`](../reports/REPORT-2026-07-26-03.md) — Pass (local; not yet observed in CI)

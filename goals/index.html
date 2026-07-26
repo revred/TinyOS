@@ -144,14 +144,14 @@
 <h2>Overall progress</h2>
 <div class="stat-row">
   <div class="stat"><div class="n">1&nbsp;/&nbsp;9</div><div class="l">Epics decomposed</div></div>
-  <div class="stat"><div class="n">4</div><div class="l">Features (EPIC-P0)</div></div>
-  <div class="stat"><div class="n">3&nbsp;/&nbsp;3</div><div class="l">Stories planned</div></div>
-  <div class="stat"><div class="n">0&nbsp;/&nbsp;3</div><div class="l">Tests verified</div></div>
+  <div class="stat"><div class="n">5</div><div class="l">Features (EPIC-P0)</div></div>
+  <div class="stat"><div class="n">17&nbsp;/&nbsp;23</div><div class="l">Stories verified</div></div>
+  <div class="stat"><div class="n">16&nbsp;/&nbsp;17</div><div class="l">Tests verified (local)</div></div>
 </div>
-<div class="bar-track"><div class="bar-fill" style="width:0%"></div></div>
-<p class="muted" style="font-size:0.85rem">0% of specified Tests have a passing Report. Expected — Phase 0 implementation hasn't started yet.</p>
+<div class="bar-track"><div class="bar-fill" style="width:74%"></div></div>
+<p class="muted" style="font-size:0.85rem">16 of 17 currently-specified Tests (<code>goals/tests/*.md</code>) have a passing Report, as of 2026-07-26 — verified locally against the pinned nightly toolchain; not yet observed passing in CI. `STORY-P0-02-01` has 5 passing test functions with no separate `TEST-*.md` doc (see its Story page), so isn't counted in this Test-doc figure despite being Verified. `FEAT-P0-02` (preemptive priority scheduler core, 5/5 Stories), `FEAT-P0-03` (static/pool memory allocator, 3/3 Stories), and `FEAT-P0-06` (spoor — a universal 64-bit audit atom borrowed from the sibling `Sharc.Blue` project's own doctrine, 2/2 Stories: the packed <code>Spoor</code> type plus a new <code>kernel::spoor_journal::SpoorJournal&lt;N&gt;</code> ring buffer) are all now fully Verified. **`FEAT-P0-07`** (local IPC — message channels and shared-memory grants, explicitly never a network-addressable socket, mirroring `Sharc.Blue`'s own retired-loopback-TCP doctrine) specified, not yet implemented; a real TCP/IP stack is tracked separately under `EPIC-P3`, not this Epic. `FEAT-P0-05.md`/`STORY-P0-05-04.md`'s framing of `blue-sharc.exe` was corrected — it's `Sharc.Blue`'s MCP sidecar/context engine, not an inference runtime. `STORY-P0-04-02`–`-03`, `STORY-P0-05-04`, and both `FEAT-P0-07` Stories remain not started.</p>
 
-<h2>EPIC-P0 — Kernel Skeleton <span class="badge planned">PLANNED</span></h2>
+<h2>EPIC-P0 — Kernel Skeleton <span class="badge progress">IN PROGRESS</span></h2>
 <p><a href="epics/EPIC-P0.md">epics/EPIC-P0.md</a> · Roadmap Phase 0 · Goals: G-RT-1, G-RT-2, G-RT-7, G-HW-4</p>
 
 <table>
@@ -159,27 +159,68 @@
 <tbody>
 <tr>
   <td><a href="features/FEAT-P0-01.md">FEAT-P0-01</a> — Workspace bootstrap &amp; walking skeleton</td>
-  <td><span class="badge planned">PLANNED</span></td>
+  <td><span class="badge verified">VERIFIED (local)</span></td>
   <td>
-    <a href="stories/STORY-P0-01-01.md">STORY-P0-01-01</a> <span class="badge planned">PLANNED</span> · Test: <a href="tests/TEST-P0-01-01-A.md">TEST-P0-01-01-A</a><br>
-    <a href="stories/STORY-P0-01-02.md">STORY-P0-01-02</a> <span class="badge planned">PLANNED</span> · Test: <a href="tests/TEST-P0-01-02-A.md">TEST-P0-01-02-A</a><br>
-    <a href="stories/STORY-P0-01-03.md">STORY-P0-01-03</a> <span class="badge planned">PLANNED</span> · Test: <a href="tests/TEST-P0-01-03-A.md">TEST-P0-01-03-A</a>
+    <a href="stories/STORY-P0-01-01.md">STORY-P0-01-01</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-01-01-A.md">TEST-P0-01-01-A</a> · <a href="reports/REPORT-2026-07-26-01.md">Report</a><br>
+    <a href="stories/STORY-P0-01-02.md">STORY-P0-01-02</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-01-02-A.md">TEST-P0-01-02-A</a> · <a href="reports/REPORT-2026-07-26-03.md">Report</a><br>
+    <a href="stories/STORY-P0-01-03.md">STORY-P0-01-03</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-01-03-A.md">TEST-P0-01-03-A</a> · <a href="reports/REPORT-2026-07-26-02.md">Report</a>
   </td>
 </tr>
 <tr>
   <td><a href="features/FEAT-P0-02.md">FEAT-P0-02</a> — Preemptive priority scheduler core</td>
-  <td><span class="badge planned">PLANNED</span></td>
-  <td class="muted">Not yet decomposed into Stories</td>
+  <td><span class="badge verified">VERIFIED (local)</span></td>
+  <td>
+    <a href="stories/STORY-P0-02-01.md">STORY-P0-02-01</a> <span class="badge verified">VERIFIED</span> · <a href="reports/REPORT-2026-07-26-05.md">Report</a><br>
+    <a href="stories/STORY-P0-02-02.md">STORY-P0-02-02</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-02-02-A.md">TEST-P0-02-02-A</a> · <a href="reports/REPORT-2026-07-26-08.md">Report</a><br>
+    <a href="stories/STORY-P0-02-03.md">STORY-P0-02-03</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-02-03-A.md">TEST-P0-02-03-A</a> · <a href="reports/REPORT-2026-07-26-11.md">Report</a><br>
+    <a href="stories/STORY-P0-02-04.md">STORY-P0-02-04</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-02-04-A.md">TEST-P0-02-04-A</a> · <a href="reports/REPORT-2026-07-26-12.md">Report</a><br>
+    <a href="stories/STORY-P0-02-05.md">STORY-P0-02-05</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-02-05-A.md">TEST-P0-02-05-A</a> · <a href="reports/REPORT-2026-07-26-13.md">Report</a><br>
+    <span class="muted">One structural gap remains (no timer/watchdog for `STORY-P0-02-04`) — see <a href="features/FEAT-P0-02.md">FEAT-P0-02.md</a></span>
+  </td>
 </tr>
 <tr>
   <td><a href="features/FEAT-P0-03.md">FEAT-P0-03</a> — Static/pool memory allocator</td>
-  <td><span class="badge planned">PLANNED</span></td>
-  <td class="muted">Not yet decomposed into Stories</td>
+  <td><span class="badge verified">VERIFIED (local)</span></td>
+  <td>
+    <a href="stories/STORY-P0-03-01.md">STORY-P0-03-01</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-03-01-A.md">TEST-P0-03-01-A</a> · <a href="reports/REPORT-2026-07-26-04.md">Report</a><br>
+    <a href="stories/STORY-P0-03-02.md">STORY-P0-03-02</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-03-02-A.md">TEST-P0-03-02-A</a> · <a href="reports/REPORT-2026-07-26-14.md">Report</a><br>
+    <a href="stories/STORY-P0-03-03.md">STORY-P0-03-03</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-03-03-A.md">TEST-P0-03-03-A</a> · <a href="reports/REPORT-2026-07-26-04.md">Report</a>
+  </td>
 </tr>
 <tr>
   <td><a href="features/FEAT-P0-04.md">FEAT-P0-04</a> — x86_64 HAL backend &amp; ACPI manifest normalization</td>
+  <td><span class="badge progress">IN PROGRESS</span></td>
+  <td>
+    <a href="stories/STORY-P0-04-01.md">STORY-P0-04-01</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-04-01-A.md">TEST-P0-04-01-A</a> · <a href="reports/REPORT-2026-07-26-06.md">Report</a><br>
+    <a href="stories/STORY-P0-04-02.md">STORY-P0-04-02</a> · <a href="stories/STORY-P0-04-03.md">STORY-P0-04-03</a> — <span class="badge planned">PLANNED</span>, not yet started
+  </td>
+</tr>
+<tr>
+  <td><a href="features/FEAT-P0-05.md">FEAT-P0-05</a> — Executable loading &amp; process compatibility (<code>Sharc.Blue</code> PE loader)</td>
+  <td><span class="badge progress">IN PROGRESS</span></td>
+  <td>
+    <a href="stories/STORY-P0-05-01.md">STORY-P0-05-01</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-05-01-A.md">TEST-P0-05-01-A</a> · <a href="reports/REPORT-2026-07-26-07.md">Report</a><br>
+    <a href="stories/STORY-P0-05-02.md">STORY-P0-05-02</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-05-02-A.md">TEST-P0-05-02-A</a> · <a href="reports/REPORT-2026-07-26-09.md">Report</a><br>
+    <a href="stories/STORY-P0-05-03.md">STORY-P0-05-03</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-05-03-A.md">TEST-P0-05-03-A</a> · <a href="reports/REPORT-2026-07-26-10.md">Report</a><br>
+    <a href="stories/STORY-P0-05-04.md">STORY-P0-05-04</a> · <a href="tests/TEST-P0-05-04-A.md">Test</a><br>
+    <span class="muted">`-04` remains <span class="badge planned">PLANNED</span>, not yet started — <code>STORY-P0-05-03</code> has now landed, unblocking `STORY-P0-05-04`</span>
+  </td>
+</tr>
+<tr>
+  <td><a href="features/FEAT-P0-06.md">FEAT-P0-06</a> — Spoor: universal 64-bit audit atom</td>
+  <td><span class="badge verified">VERIFIED (local)</span></td>
+  <td>
+    <a href="stories/STORY-P0-06-01.md">STORY-P0-06-01</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-06-01-A.md">TEST-P0-06-01-A</a> · <a href="reports/REPORT-2026-07-26-15.md">Report</a><br>
+    <a href="stories/STORY-P0-06-02.md">STORY-P0-06-02</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-06-02-A.md">TEST-P0-06-02-A</a> · <a href="reports/REPORT-2026-07-26-16.md">Report</a>
+  </td>
+</tr>
+<tr>
+  <td><a href="features/FEAT-P0-07.md">FEAT-P0-07</a> — Local IPC (shared memory &amp; message channels)</td>
   <td><span class="badge planned">PLANNED</span></td>
-  <td class="muted">Not yet decomposed into Stories</td>
+  <td>
+    <a href="stories/STORY-P0-07-01.md">STORY-P0-07-01</a> · <a href="stories/STORY-P0-07-02.md">STORY-P0-07-02</a> — <span class="badge planned">PLANNED</span>, not yet started<br>
+    <span class="muted">Local IPC only — a real TCP/IP stack is tracked separately under <code>EPIC-P3</code>, not this Epic</span>
+  </td>
 </tr>
 </tbody>
 </table>
@@ -231,6 +272,10 @@
 
 <h3 id="jit-decomposition">Just-in-time decomposition</h3>
 <p>Only <code>EPIC-P0</code> is decomposed to Feature/Story/Test level — it's the next real work. Decomposing every future Epic today would produce dozens of Story files describing undesigned work, which this project's own principles argue against. Decompose an Epic when work on it is about to start, not before.</p>
+
+<h2>Cross-cutting performance catalogue</h2>
+<p><a href="performance/README.md"><strong>625 performance guardrail tests</strong></a> cover 25 OS domains against 25 measurable latency, CPU-cycle, memory, allocation, queue, throughput, isolation, fault-containment, observability, footprint, and comparative-evidence checks. The complete machine-readable expansion is <a href="performance/catalogue.tsv"><code>performance/catalogue.tsv</code></a>; the <a href="performance/current-state-review.md">current-state review</a> records which Phase-0 surfaces exist and which future subsystems remain only specified or designed.</p>
+<p class="muted">These cross-cutting contracts are intentionally not added to the Story/Test verification counts above: all 625 begin as <code>Specified</code>, not Verified, and become executable evidence only when the owning Epic/Story exists. Linux and “10× RTOS” comparisons are claim gates requiring same-hardware, safety-equivalent evidence, never assumed project facts.</p>
 
 <h2>Folder layout</h2>
 <pre>goals/

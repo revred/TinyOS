@@ -81,6 +81,14 @@ This is where TinyOS's coding standard diverges hardest from general Rust practi
 - **Worked example.** Suppose `drivers` (the crate housing early class-driver implementations) is approaching 18,000 lines because storage, network, and HID class drivers all live in it. The fix is not to compress code or delete comments — it's to extract `drivers-storage`, `drivers-net`, and `drivers-hid` as separate crates, each implementing the [Driver Capability Interface](docs/universal-driver-model.md#driver-capability-interface-dci-the-stable-contract) independently, with `drivers` (if it survives at all) reduced to shared enumeration glue.
 - **Applies from Phase 0.** The ceiling is not a "we'll worry about it later" concern — CI enforces it starting with the very first crate in the kernel skeleton, so the workspace never accumulates a monolith that's painful to split retroactively.
 
+## Total OS image size ceiling (hard limit, no exceptions)
+
+**The built OS image — kernel, HAL, scheduler, memory allocator, ACI, shell, and every other non-driver component — fits within 8MB, excluding drivers.** Per `G-DX-8` in `SeedMVP.md` §3.6. Drivers are isolated, separately-loaded components per the [Universal Driver Model](../docs/universal-driver-model.md) and scale with the hardware catalog, not with the OS core, so they're excluded from this ceiling the same way tests are excluded from the crate-size ceiling below — but nothing non-driver gets a similar exemption.
+
+- **Rationale.** This is a security property, not just a size preference: a small, auditable trusted computing base is what makes "low attack surface by design" (the standing design goal behind, among other things, `FEAT-P0-05`'s PE executable loader) a checkable fact instead of an assertion. A component that can't justify its footprint against this ceiling is a component whose necessity hasn't been proven yet.
+- **Measurement.** CI computes the built image's total size (mirroring the crate-size ceiling's `tokei`-based measurement approach) on every PR and fails the build if the non-driver image crosses 8MB.
+- **No size-based exception process**, matching the crate-size ceiling's own policy — the correct response to approaching the limit is to cut scope or move a component behind the driver boundary (if it genuinely fits that model), never to request a waiver.
+
 ## SOLID principles — Rust-adapted, never compromised
 
 SOLID was written for object-oriented languages, but every one of its principles has a direct, idiomatic Rust translation, and TinyOS treats all five as non-negotiable — not aspirational guidance, but a review-blocking requirement alongside `clippy` and `rustfmt`. "Never compromised" means: a PR that violates one of these is not merged with a "we'll fix it later" comment. It's fixed before merge, or the PR is redesigned.

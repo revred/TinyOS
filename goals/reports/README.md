@@ -1,6 +1,6 @@
 # Verification Reports
 
-Status: **No reports filed yet — Phase 0 implementation has not started.**
+Status: **3 reports filed** — `FEAT-P0-01`'s three Stories/Tests (`TEST-P0-01-01-A`, `TEST-P0-01-02-A`, `TEST-P0-01-03-A`) passed locally on 2026-07-26; not yet observed passing in CI.
 
 ## Purpose
 
@@ -28,4 +28,10 @@ Each Report states:
 
 ## Status
 
-Empty. The first Report filed against this project will be for `TEST-P0-01-01-A` (QEMU boot-to-halt), once `FEAT-P0-01` implementation begins.
+| Report | Test(s) | Result | Tier |
+|---|---|---|---|
+| [`REPORT-2026-07-26-01`](REPORT-2026-07-26-01.md) | `TEST-P0-01-01-A` | Pass | Tier 0 (QEMU) |
+| [`REPORT-2026-07-26-02`](REPORT-2026-07-26-02.md) | `TEST-P0-01-03-A` | Pass | CI / Tier 0 |
+| [`REPORT-2026-07-26-03`](REPORT-2026-07-26-03.md) | `TEST-P0-01-02-A` | Pass | CI |
+
+All three passed locally against the pinned `nightly-2026-07-26` toolchain; none have yet been observed passing in the GitHub Actions CI pipeline (`.github/workflows/ci.yml`) since no CI run has been triggered against this work yet. A follow-up Report is warranted once the first real CI run completes.

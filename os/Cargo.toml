@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = [
+    "src/kernel",
+    "src/hal",
+    "src/hal-x86_64",
+    "src/exec",
+    "src/xtask",
+]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+publish = false
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+lto = true

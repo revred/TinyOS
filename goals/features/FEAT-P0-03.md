@@ -1,8 +1,8 @@
 # FEAT-P0-03 — Static/Pool Memory Allocator
 
-Status: **Planned, not yet decomposed into Stories**
+Status: **Verified — 3/3 Stories Verified**
 Epic: [`EPIC-P0`](../epics/EPIC-P0.md)
-Introduced in: [`session/hand-2026-07-26/04-seedmvp-agentmd-goals-vv-model-handover.md`](../../session/hand-2026-07-26/04-seedmvp-agentmd-goals-vv-model-handover.md)
+Introduced in: [`session/hand-2026-07-26/04-seedmvp-agentmd-goals-vv-model-handover.md`](../../session/hand-2026-07-26/04-seedmvp-agentmd-goals-vv-model-handover.md); decomposed in [`session/hand-2026-07-26/08-cover-note-mvp-continuation-and-ns-file-access.md`](../../session/hand-2026-07-26/08-cover-note-mvp-continuation-and-ns-file-access.md)
 
 ## Description
 
@@ -16,6 +16,20 @@ The deterministic memory model required by Goal **G-RT-2**: static or pool-based
 
 `FEAT-P0-01`.
 
-## Status
+## Stories
 
-Not yet decomposed into Stories. When decomposed, Stories here should cover at minimum: a bounded-capacity pool allocator type, compile-time pool-size configuration, and an allocation-failure path that fails closed (per Non-Negotiable #5) rather than panicking silently.
+| Story | Summary | Status |
+|---|---|---|
+| [`STORY-P0-03-01`](../stories/STORY-P0-03-01.md) | Bounded-capacity pool allocator type (`Pool<T, N>`) | Verified |
+| [`STORY-P0-03-02`](../stories/STORY-P0-03-02.md) | Compile-time pool-size configuration | Verified |
+| [`STORY-P0-03-03`](../stories/STORY-P0-03-03.md) | Allocation-failure path fails closed | Verified |
+
+`STORY-P0-03-02` implemented and Verified in [`session/hand-2026-07-26/19-story-p0-03-02-capacity-configuration-implementation.md`](../../session/hand-2026-07-26/19-story-p0-03-02-capacity-configuration-implementation.md) — a new `kernel::capacities` module consolidating `MAX_CPUS` and `EXEC_FRAME_POOL_CAPACITY` (previously scattered/duplicated), plus a `const`-evaluated `STATIC_MEMORY_BUDGET_BYTES` check proven to actually fail a build when violated (`fixture-capacity-budget`, a new governance-fixture-test case). Per that Story's own scope-resolution note, only capacities with a real, concrete call site today are declared — the task-control-block/IPC/demand-paging pools this Feature's own "Note on scope beyond Phase 0" below anticipates have none yet, so adding placeholders for them was deliberately deferred.
+
+## Note on scope beyond Phase 0
+
+Per [`session/hand-2026-07-26/08-cover-note-mvp-continuation-and-ns-file-access.md`](../../session/hand-2026-07-26/08-cover-note-mvp-continuation-and-ns-file-access.md), this Feature is also the direct prerequisite for Phase 6's mmap/pointer-based model-file access (TinyOS's own kernel virtual-memory manager, demand-paging a file-backed region) — whoever extends `Pool<T, N>` toward a virtual-memory allocator should keep that consumer in mind, not just the RT task/IPC pool use case this Feature's own title suggests. This is also recorded in project memory (`inference-mmap-model-loading`).
+
+## Exit criteria
+
+`STORY-P0-03-01` through `-03` all reach **Verified**. **Met**, as of 2026-07-26 (`-01`/`-03`: `REPORT-2026-07-26-04`; `-02`: `REPORT-2026-07-26-14`).

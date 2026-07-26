@@ -1,6 +1,6 @@
 # TEST-P0-01-03-A — `xtask qemu-x86_64` Command Smoke Test
 
-Status: **Planned (not yet implemented)**
+Status: **Verified — passing locally, 2026-07-26**
 Story: [`STORY-P0-01-03`](../stories/STORY-P0-01-03.md)
 Tier: CI / Tier 0
 
@@ -14,10 +14,10 @@ Tier: CI / Tier 0
 
 Integration/smoke test for the `xtask` tool itself.
 
-## Implementation location (once written)
+## Implementation location
 
-`os/src/xtask/tests/` — to be finalized when `FEAT-P0-01` work begins.
+`os/src/xtask/src/main.rs` (the `qemu-x86_64` command and its exit-code mapping), fixture path via `kernel`'s `fixture-broken-boot` Cargo feature (`os/src/kernel/src/main.rs`).
 
 ## Reports
 
-None yet.
+- [`REPORT-2026-07-26-02`](../reports/REPORT-2026-07-26-02.md) — Pass (local; not yet observed in CI)

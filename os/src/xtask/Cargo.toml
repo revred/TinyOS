@@ -1,0 +1,11 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Host-side build/test/QEMU-launch/deploy orchestration, per docs/mvp-delivery-strategy.md#why-xtask-not-shell-scripts."
+
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
