@@ -82,6 +82,40 @@ Raspberry Pi and real CAN/USB hardware-in-the-loop rigs are added from Phase 3 o
 
 ---
 
+## Inter-OS Communication: the Host Bridge Protocol (HBP)
+
+TinyOS is frequently co-resident with a full-bodied OS on the same physical machine — the canonical example being a **CNC controller**, where Windows runs the operator-facing G-code sender/DRO/jog UI and TinyOS runs the real-time motion core on the same box. The Host Bridge Protocol (HBP) is the specified, versioned channel between them. It is the concrete implementation of Roadmap Phase 4.
+
+### Design principle
+
+The channel is layered so that latency-critical, safety-critical traffic never depends on the health of the general-purpose OS above it. Windows (or Linux) is a **caller**, subject to the same Agent Command Interface policy engine as a human shell user or an LLM agent — it gets no privileged bypass.
+
+### Transport layer — how bytes move
+
+- **Shared-memory ring buffers** (lock-free, single-producer/single-consumer) when TinyOS runs on a dedicated core in an AMP split on the same SoC/CPU — lowest latency, no host-OS scheduler in the path on the TinyOS side.
+- **Virtio (virtio-vsock / virtio-console)** when TinyOS runs in a hypervisor partition (e.g. Jailhouse, Xen, or a lightweight Type-1 hypervisor) alongside Windows/Linux — better isolation, more portable across laptop-class hardware; the standard choice for Tier 2 targets.
+- **Local loopback TCP/UDP** as a fallback and early dev-mode transport — quickest to bring up, useful for integration testing before the shared-memory/vsock path exists.
+
+### Protocol layer — what goes over the wire
+
+- A small, versioned, binary message protocol — fixed-size frames, no allocation on the TinyOS side, so parsing stays O(1) and doesn't threaten deadline guarantees.
+- Two logically separate lanes over the same transport:
+  - **Command lane** (host → TinyOS): motion commands, config changes, mode switches. Every message passes through the ACI policy engine like any other caller.
+  - **Telemetry lane** (TinyOS → host): position feedback, axis status, alarms, deadline-violation events. High frequency, no acknowledgment required — the host renders latest state.
+
+### Host-side component
+
+- A thin **host bridge service** (Windows and Linux variants) owns the shared-memory/vsock endpoint and re-exposes it to host applications over a local named pipe or WebSocket, so an app like a CNC UI never speaks the wire protocol directly.
+
+### Failure semantics
+
+- If the host OS hangs, crashes, or is closed, TinyOS **must not** stall or fault. The real-time control loop continues from its last safe command or drops to a safe hold state — the RT core never blocks on the UI (Non-Negotiable #1), and the system fails safe (Non-Negotiable #5).
+- The command lane carries a heartbeat. If the host stops heartbeating, TinyOS treats it as "operator gone" and transitions to a safe hold/estop state rather than continuing to execute the last known command indefinitely.
+
+See [`docs/hbp-spec.md`](docs/hbp-spec.md) for the detailed wire format and state machine (draft).
+
+---
+
 ## System Architecture (target)
 
 ```text
