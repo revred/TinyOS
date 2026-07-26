@@ -17,6 +17,14 @@ TinyOS exists to close that gap deliberately, not accidentally: a real-time core
 
 ---
 
+## Language & Coding Standards
+
+TinyOS is written primarily in **Rust** — the kernel, HAL, drivers, ACI, shell, and host bridge services are all Rust by default. Assembly is confined to boot/entry and context-switch glue; C is confined to isolated `-sys` binding crates wrapping vendor SDKs (GPU drivers, CAN transceiver code) that don't yet have a safe Rust equivalent. `unsafe` is forbidden at the application layer (`aci`, `agent`, `shell`) and permitted only in `hal`/`drivers`/`-sys` crates, each block justified with a `// SAFETY:` comment.
+
+See [`CODING_STANDARDS.md`](CODING_STANDARDS.md) for the full standard, including the `no_std` policy, real-time coding discipline (no allocation or unbounded blocking in scheduler/IPC/interrupt paths), and toolchain/lint requirements (`rustfmt`, `clippy -D warnings`, `#![deny(missing_docs)]`).
+
+---
+
 ## Design Pillars
 
 ### 1. A real multitasking RTOS core
@@ -51,6 +59,7 @@ TinyOS exists to close that gap deliberately, not accidentally: a real-time core
 - The LLM interacts with TinyOS exclusively through the **Agent Command Interface (ACI)**: a declarative, capability-scoped API where every possible action is pre-registered, typed, rate-limited, and logged.
 - **Strict rule: the LLM can request, TinyOS decides.** Every agent-issued command passes through the same policy engine as a human operator's command — no privileged bypass path exists for AI-originated actions.
 - Full command provenance: every state change is tagged with *who* asked (human shell, script, remote host, or agent), *what* was requested, *what* was actually executed, and *why* the policy engine allowed it.
+- On hardware with a GPU/VRAM and shared CPU/GPU memory, inference work is admission-controlled rather than scheduled on the RT path, and can be split across daisy-chained TinyOS nodes for larger models — see [Heterogeneous Compute & Distributed Inference](docs/inference-architecture.md).
 
 ---
 
@@ -65,12 +74,13 @@ TinyOS is **64-bit only** — no 32-bit boot path is planned or supported, on ei
 
 ### Tier 1 — Edge device (primary mission target)
 
-- **Jetson Orin Nano** (ARM64) — the standard edge target for new hardware bring-up; GPU-accelerated local inference (Ollama) validation happens here.
-- A second, non-NVIDIA ARM64 board (e.g. Raspberry Pi 4/5) — portability check so the HAL doesn't quietly grow Jetson-only assumptions.
+- **Jetson Orin Nano** (ARM64) — the standard edge target for new hardware bring-up; its integrated GPU and unified CPU/GPU memory make it the reference platform for the Unified Memory Manager and GPU-accelerated local inference (Ollama) validation — see [Heterogeneous Compute & Distributed Inference](docs/inference-architecture.md).
+- A second, non-NVIDIA ARM64 board (e.g. Raspberry Pi 4/5) — portability check so the HAL doesn't quietly grow Jetson-only assumptions. Not expected to have comparable GPU/VRAM capability; used for CPU-side/HAL portability, not inference validation.
 
 ### Tier 2 — Laptop / x86_64 (host-bridge + full UX validation)
 
 - A mid-spec x86_64 laptop or NUC-class mini-PC, dual-boot or hypervisor-partitioned — validates the Windows/Linux host bridge and the DOS-style shell UX, not just the kernel.
+- At least one Tier 2 machine should carry a discrete GPU with dedicated VRAM, to validate the Unified Memory Manager's non-unified (explicit copy) fallback path against the Jetson's true-unified-memory path.
 
 ### Default supported set for v1
 
@@ -205,10 +215,13 @@ TinyOS borrows MS-DOS 4+'s ergonomics deliberately — not out of nostalgia, but
 /shell/            TINYCMD, TASKMGR, DOS-style utilities and batch runtime
 /aci/              Agent Command Interface: capability registry, policy engine, audit log
 /agent/            Local LLM runtime integration (Ollama adapter), prompt/tooling contracts
+/compute/          Unified Memory Manager, GPU admission control, -sys bindings for vendor drivers
 /config/           System and boot configuration schemas + defaults
 /docs/             Architecture decision records, protocol specs, hardware bring-up notes
 /tests/            Kernel conformance tests, timing/determinism benchmarks, HIL test rigs
 ```
+
+Each of these is a crate in a single Cargo workspace, per [`CODING_STANDARDS.md`](CODING_STANDARDS.md#toolchain).
 
 ---
 
@@ -221,8 +234,9 @@ TinyOS borrows MS-DOS 4+'s ergonomics deliberately — not out of nostalgia, but
 - [ ] **Phase 4 — Host bridge**: Windows + Linux companion services, shared-memory or socket transport, cross-OS clock sync.
 - [ ] **Phase 5 — Agent Command Interface**: capability registry, policy engine, full audit trail, human-equivalent permission model for machine callers.
 - [ ] **Phase 6 — LLM integration**: Ollama runtime hosted as a budgeted task; agent tool-calling mapped 1:1 onto ACI capabilities; safety evaluation harness before any agent gets write access to a live bus.
+- [ ] **Phase 6b — Heterogeneous compute**: GPU admission control, Unified Memory Manager (unified and explicit-copy paths), first end-to-end local inference on Jetson Orin Nano. See [`docs/inference-architecture.md`](docs/inference-architecture.md).
 - [ ] **Phase 7 — Edge bring-up**: Jetson Orin Nano (and successors) port with GPU/NPU-accelerated inference path.
-- [ ] **Phase 8 — Fleet mode**: multiple TinyOS nodes coordinating over CAN/Ethernet with a shared policy and audit plane.
+- [ ] **Phase 8 — Fleet mode**: multiple TinyOS nodes coordinating over CAN/Ethernet with a shared policy and audit plane, including distributed/daisy-chained inference across nodes.
 
 ---
 
@@ -235,6 +249,7 @@ These are the rules the project will not compromise on, even under schedule pres
 3. **Every state-changing command is attributable and logged.** If it happened, we know who asked, what was executed, and what the system's state was before and after.
 4. **Determinism is tested, not assumed.** Timing regressions are CI failures, on par with functional test failures.
 5. **The system fails safe.** Watchdogs, deadline violations, and policy denials default to the safest known state, not to "keep trying."
+6. **GPU and inference work never jeopardizes CPU real-time guarantees.** Admission-controlled, never scheduler-privileged; a stalled or failed inference degrades or errors out through the ACI, it never blocks an RT task on any node.
 
 ---
 
