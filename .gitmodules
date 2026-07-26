@@ -1,0 +1,3 @@
+[submodule "MsDOS"]
+	path = MsDOS
+	url = https://github.com/microsoft/MS-DOS.git
