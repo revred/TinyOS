@@ -70,6 +70,63 @@ This is where TinyOS's coding standard diverges hardest from general Rust practi
 - Errors crossing a subsystem boundary (e.g. driver → kernel, ACI → agent) are part of that subsystem's public API and are documented like any other contract.
 - Silent error swallowing (`let _ = fallible_call()`) requires a comment stating why the error is genuinely safe to discard.
 
+## Crate size ceiling (hard limit, no exceptions)
+
+**No crate may exceed 20,000 lines of code, excluding test code.** This is a structural constraint, not a style preference, and it is enforced the same way for every crate in the workspace — kernel, HAL, drivers, ACI, shell, agent, bridge, compute.
+
+- **Measurement.** Line count is measured by an automated tool (e.g. `tokei`) configured to exclude `#[cfg(test)]` modules and files under a crate's `tests/` directory. CI computes this on every PR and fails the build if any crate crosses the ceiling.
+- **Rationale.** A crate is a unit of comprehension as much as a unit of compilation. Past roughly 20K lines, a single contributor can no longer hold a crate's invariants in their head, review quality degrades, and — specifically for TinyOS — the blast radius of a bug inside one crate grows past what the [Universal Driver Model](docs/universal-driver-model.md)'s isolation guarantees are designed around. The ceiling exists to force decomposition before that happens, not to catch it after.
+- **No size-based exception process.** There is no ADR that waives this limit for an "important" or "central" crate — the correct response to a crate approaching 20K lines is always to split it, never to request an exception. If a crate seems impossible to split, that is itself a design smell (see SOLID, below) worth escalating.
+- **Splitting strategy.** When a crate approaches ~16,000 lines (80% of ceiling — the trigger point for action, not the limit itself), the next PR that would grow it further must instead extract a cohesive sub-module into its own crate. A natural split follows the crate's own internal seams: a `kernel` crate nearing the ceiling typically separates cleanly into `kernel-sched`, `kernel-ipc`, and `kernel-mem`, for example, each independently testable and each with its own, smaller surface. The split is a normal PR, reviewed like any other — not a special "refactor sprint."
+- **Worked example.** Suppose `drivers` (the crate housing early class-driver implementations) is approaching 18,000 lines because storage, network, and HID class drivers all live in it. The fix is not to compress code or delete comments — it's to extract `drivers-storage`, `drivers-net`, and `drivers-hid` as separate crates, each implementing the [Driver Capability Interface](docs/universal-driver-model.md#driver-capability-interface-dci-the-stable-contract) independently, with `drivers` (if it survives at all) reduced to shared enumeration glue.
+- **Applies from Phase 0.** The ceiling is not a "we'll worry about it later" concern — CI enforces it starting with the very first crate in the kernel skeleton, so the workspace never accumulates a monolith that's painful to split retroactively.
+
+## SOLID principles — Rust-adapted, never compromised
+
+SOLID was written for object-oriented languages, but every one of its principles has a direct, idiomatic Rust translation, and TinyOS treats all five as non-negotiable — not aspirational guidance, but a review-blocking requirement alongside `clippy` and `rustfmt`. "Never compromised" means: a PR that violates one of these is not merged with a "we'll fix it later" comment. It's fixed before merge, or the PR is redesigned.
+
+### S — Single Responsibility
+
+- Every `struct`, `enum`, and `trait` has exactly one reason to change. If describing what a type does requires the word "and" in a way that implies two unrelated concerns (e.g. "parses DOS command syntax *and* manages the authority lease"), it is two types, not one.
+- Applied at the module level too: a module's `mod.rs`/lib root should be describable in one sentence without a conjunction joining unrelated responsibilities.
+- Enforcement: code review checklist item; a practical proxy is function and type size — a struct whose `impl` block exceeds roughly 300–400 lines, or a function exceeding roughly 50 lines, is a strong signal of a responsibility split waiting to happen, and is flagged in review even though no automated lint catches this directly.
+
+### O — Open/Closed
+
+- Extend behavior by adding a new trait implementation, not by editing an existing one's match arms. TinyOS's own capability model already demonstrates this: adding a new ACI capability, a new WCI authority scope, or a new UDI device class should be additive — a new implementor of an existing trait — never a modification to a central `match` statement that enumerates every known case.
+- Where a genuine central dispatch point is unavoidable (e.g. routing a frame to the correct lane), that dispatch point is kept as thin as possible and is the *only* place allowed to know about every variant — it is explicitly exempted from Single Responsibility's "no growing match statements" guidance because its one responsibility *is* dispatch, and it is reviewed with extra scrutiny precisely because it's the one place required to change when something new is added.
+- Enforcement: PRs that add a new variant to an existing enum outside of a designated extension point (and touch unrelated code to handle it) are flagged in review as an Open/Closed violation.
+
+### L — Liskov Substitution
+
+- Any type implementing a trait must be substitutable for any other implementor without the caller needing to know which one it got. A `-sys` vendor binding wrapped behind the DCI must behave identically, from the caller's perspective, to the generic class driver it extends — no implementor may narrow the trait's documented contract (e.g. returning an error where the trait promises success is never valid, even if "this hardware just doesn't support that").
+- Trait contracts are documented with their invariants, not just their signatures (per the Formatting & linting section's `missing_docs` policy), specifically so Liskov violations are checkable by a reviewer against the doc comment, not just against the compiler.
+- Enforcement: every trait with more than one implementor requires a **shared conformance test suite** that runs against every implementor identically (the same pattern already specified for driver class conformance in the Universal Driver Model) — a Liskov violation shows up as one implementor failing a test the others pass.
+
+### I — Interface Segregation
+
+- Traits are kept small and role-specific. A driver that only needs to read a device's state should depend on a `DeviceStatus` trait, not a monolithic `Device` trait that also exposes write/configure/reset methods it never calls — because depending on the larger trait means it's coupled to (and could plausibly be broken by) changes to methods it never uses.
+- This directly serves the [Unsafe code policy](#unsafe-code-policy) and the Universal Driver Model's capability-scoping: a narrow trait is also a narrow attack surface — a caller that only holds a `DeviceStatus` capability literally cannot invoke a write operation, because the type it was handed doesn't have one.
+- Enforcement: review flags any trait with more than roughly 5–7 methods as a segregation candidate, and any struct implementing a trait where more than one method is a stub (`unimplemented!()`, or returns a fixed "not supported" error) as a sign the trait was too broad in the first place.
+
+### D — Dependency Inversion
+
+- High-level modules (the ACI policy engine, the scheduler) depend on trait abstractions, never on concrete driver or transport types. The ACI doesn't know whether a command arrived over HBP, WCI, or the local shell — it depends on a `Caller` abstraction, and each transport implements it. This is already the architecture described throughout the README (HBP, WCI, and the local shell are three implementors of one caller abstraction feeding one policy engine) — Dependency Inversion is the formal name for a pattern TinyOS already committed to structurally, and this section makes that commitment explicit at the code level.
+- Concretely in Rust: prefer `fn handle(caller: &dyn Caller)` or a generic `fn handle<C: Caller>(caller: &C)` over `fn handle(caller: &HbpSession)` in any code that has no genuine reason to be HBP-specific.
+- Enforcement: a PR introducing a concrete-type dependency in a high-level module (kernel, ACI, scheduler) where a trait abstraction already exists for that role is flagged in review as a Dependency Inversion violation; introducing a *new* concrete-type dependency where no abstraction yet exists is the trigger to define one, not a justification to skip it.
+
+### Enforcement summary
+
+| Principle | Primary enforcement mechanism |
+|---|---|
+| Single Responsibility | Code review checklist + function/type size as a review-time proxy signal |
+| Open/Closed | Review flag on unrelated changes to match-statement dispatch points outside designated extension points |
+| Liskov Substitution | Shared conformance test suite required for every trait with 2+ implementors |
+| Interface Segregation | Review flag on traits >5–7 methods or implementors with stubbed methods |
+| Dependency Inversion | Review flag on concrete-type dependencies in kernel/ACI/scheduler code where a trait abstraction exists or should exist |
+
+None of these are automated to the same degree as `clippy`/`rustfmt` today — Rust tooling doesn't yet have a turnkey SOLID linter — which is exactly why they're reviewer-enforced, checklist items, and treated as blocking rather than advisory. As tooling matures (custom `clippy` lints, `cargo-geiger`-style static analysis for trait-object usage), automation should replace manual review checks wherever it reliably can, without lowering the bar in the meantime.
+
 ## Test-Driven Development (mandatory)
 
 Every feature in TinyOS — kernel, driver, ACI capability, shell command, deploy tooling, agent integration, all of it — is built test-first. This is not a preference; it is how correctness is proven under Priority 3 above.

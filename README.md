@@ -75,6 +75,16 @@ A TinyOS device is configured into one of a defined set of modes at boot/provisi
 
 More modes may be added as deployments demand them; each new mode is defined by which capability classes the ACI exposes and which subsystems are permitted to be resident, not by ad hoc configuration flags.
 
+### Physical AI reference workloads
+
+Real-Time control and combined mode are validated against three deliberately different physical-AI workloads, so the RT core's motion and process-synchronization primitives are proven general rather than accidentally CNC-shaped:
+
+1. **5-axis CNC controller — the flagship MVP demonstration.** Fanuc-class operator experience (G-code interpretation, work coordinate systems, tool compensation, override dials, alarm/diagnostics), full RTCP/TCPC kinematics for simultaneous 5-axis contouring. The motion/interpolation/kinematics software is built to full, no-compromises correctness from the start; physical positional-accuracy validation is deferred until real encoders and drives are bolted onto the MVP compute hardware.
+2. **Wire DED robot arm** — a directed-energy-deposition additive process where wire feed rate and energy-source power must track instantaneous path velocity, not just fire on a timer, with the energy source gated by a motion-active safety interlock.
+3. **Resin-printer UV curing array** — near-trivial motion (one lift axis) paired with a high-channel-count, precisely-timed UV array output gated by an exposure-window safety interlock.
+
+See [`docs/physical-ai-reference-workloads.md`](docs/physical-ai-reference-workloads.md) for the full specification, including the shared RT primitives (Motion & Interpolation Service, Process-Synchronized Output Service, Position Feedback Abstraction, Safety Interlock) that let all three workloads run on one kernel rather than three bespoke control subsystems.
+
 ---
 
 ## Target Hardware & Test Matrix
