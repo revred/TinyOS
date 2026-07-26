@@ -259,20 +259,26 @@ TinyOS borrows MS-DOS 4+'s ergonomics deliberately — not out of nostalgia, but
 ## Repository Layout (planned)
 
 ```text
-/kernel/          Real-time scheduler, IPC, memory pools, deadline monitor
-/hal/              Board-specific hardware abstraction (x86_64, Jetson/ARM64, ...)
-/drivers/          CAN, USB, Ethernet, storage, display, misc peripherals
-/bridge/           Host-side companion services (Windows, Linux) + wire protocol
-/shell/            TINYCMD, TASKMGR, DOS-style utilities and batch runtime
-/aci/              Agent Command Interface: capability registry, policy engine, audit log
-/agent/            Local LLM runtime integration (Ollama adapter), prompt/tooling contracts
-/compute/          Unified Memory Manager, GPU admission control, -sys bindings for vendor drivers
-/config/           System and boot configuration schemas + defaults
-/docs/             Architecture decision records, protocol specs, hardware bring-up notes
-/tests/            Kernel conformance tests, timing/determinism benchmarks, HIL test rigs
+/agent/                  Development guidelines (CODING_STANDARDS.md) — not a code crate
+/crates/kernel/          Real-time scheduler, IPC, memory pools, deadline monitor
+/crates/hal/             Board-specific hardware abstraction (x86_64, Jetson/ARM64, ...)
+/crates/drivers/         Storage, network, HID class drivers; drivers-can/ for the CAN bus stack
+/crates/bridge-device/   HBP device-side protocol; bridge-host/ for the Windows/Linux service
+/crates/wci/             Wireless Command Interface: mutual TLS, authority lease
+/crates/deploy-device/   On-device deploy/hot-swap/A-B-boot logic; deploy-client/ for the host tool
+/crates/shell/           TINYCMD, TASKMGR, DOS-style utilities and batch runtime
+/crates/aci/             Agent Command Interface: capability registry, policy engine, audit log
+/crates/inference/       Local/external LLM runtime integration (Ollama adapter), ACI tool-call mapping
+/crates/motion/          Motion & Interpolation, Process-Synchronized Output, Position Feedback, Safety Interlock
+/crates/compute/         Unified Memory Manager, GPU admission control, -sys bindings for vendor drivers
+/crates/config/          System and boot configuration schemas + defaults
+/targets/                Custom Rust target-spec JSON files for bare-metal builds
+/xtask/                  Host-side build/test/QEMU-launch/deploy orchestration (Rust, not shell scripts)
+/docs/                   Architecture decision records, protocol specs, hardware bring-up notes
+/tests/                  Kernel conformance tests, timing/determinism benchmarks, HIL test rigs
 ```
 
-Each of these is a crate in a single Cargo workspace, per [`CODING_STANDARDS.md`](agent/CODING_STANDARDS.md#toolchain).
+Each crate under `/crates/` is a member of a single Cargo workspace, per [`agent/CODING_STANDARDS.md`](agent/CODING_STANDARDS.md#toolchain). See [`docs/mvp-delivery-strategy.md`](docs/mvp-delivery-strategy.md) for the full crate map (which Roadmap phase creates each one, `no_std`/`std` split, `unsafe` policy) and the phased delivery strategy from an empty repository to the CNC flagship milestone.
 
 ---
 
