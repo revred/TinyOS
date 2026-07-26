@@ -1,0 +1,10 @@
+# Vendor/manufacturer documentation kept locally for personal reference.
+# These are copyrighted third-party materials (equipment manuals, datasheets)
+# — never commit or push them to this public repository. Case studies under
+# work/ should cite such documents by title/URL, not include the files.
+work/**/*.pdf
+work/**/*.PDF
+
+# Common editor/OS cruft
+.DS_Store
+Thumbs.db
