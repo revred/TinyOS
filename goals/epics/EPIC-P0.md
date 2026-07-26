@@ -28,7 +28,7 @@ Per [Target Hardware & Test Matrix](../../README.md#target-hardware--test-matrix
 | [`FEAT-P0-03`](../features/FEAT-P0-03.md) | Static/pool memory allocator | Planned, not yet decomposed into Stories |
 | [`FEAT-P0-04`](../features/FEAT-P0-04.md) | x86_64 HAL backend & ACPI manifest normalization | Planned, not yet decomposed into Stories |
 
-`FEAT-P0-01` is decomposed first and fully, since it's the literal next step (the walking skeleton itself). The other three features are scoped but intentionally left un-decomposed into Stories until work on each begins, per the just-in-time principle in [`goals/README.md`](../README.md#just-in-time-decomposition-not-upfront-exhaustive-planning).
+`FEAT-P0-01` is decomposed first and fully, since it's the literal next step (the walking skeleton itself). The other three features are scoped but intentionally left un-decomposed into Stories until work on each begins, per the just-in-time principle in the [goals dashboard](../index.html#jit-decomposition).
 
 ## Exit criteria for this Epic
 

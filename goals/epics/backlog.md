@@ -2,7 +2,7 @@
 
 Status: **Planned, not yet decomposed**
 
-These Epics exist so the full Roadmap has a placeholder in the V&V model, but none are decomposed into Features/Stories yet — per [`goals/README.md`](../README.md#just-in-time-decomposition-not-upfront-exhaustive-planning), decomposition happens when work on an Epic is about to start. Each row below is a direct restatement of [`SeedMVP.md`](../../SeedMVP.md#10-roadmap-alignment) Section 10's Roadmap Alignment table — this file does not add new information, it gives each phase an Epic ID so it can be referenced from Stories/Tests once decomposition begins.
+These Epics exist so the full Roadmap has a placeholder in the V&V model, but none are decomposed into Features/Stories yet — per the [goals dashboard](../index.html#jit-decomposition), decomposition happens when work on an Epic is about to start. Each row below is a direct restatement of [`SeedMVP.md`](../../SeedMVP.md#10-roadmap-alignment) Section 10's Roadmap Alignment table — this file does not add new information, it gives each phase an Epic ID so it can be referenced from Stories/Tests once decomposition begins.
 
 | Epic | Roadmap phase | Goals to verify | Hardware | Depends on |
 |---|---|---|---|---|

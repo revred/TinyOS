@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TinyOS Goals — V&amp;V Progress Dashboard</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #5a5a5a;
+    --border: #d8d8d8;
+    --code-bg: #f2f2f2;
+    --accent: #0b5fff;
+    --tag-bg: #eef2ff;
+    --card-bg: #fafafa;
+    --planned: #6b7280;
+    --planned-bg: #f1f2f4;
+    --progress: #b45309;
+    --progress-bg: #fef3c7;
+    --blocked: #b91c1c;
+    --blocked-bg: #fee2e2;
+    --verified: #15803d;
+    --verified-bg: #dcfce7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --fg: #e8e8e8;
+      --muted: #a0a0a0;
+      --border: #333740;
+      --code-bg: #1e2126;
+      --accent: #6fa8ff;
+      --tag-bg: #1c2333;
+      --card-bg: #191c21;
+      --planned: #9ca3af;
+      --planned-bg: #24272e;
+      --progress: #fbbf24;
+      --progress-bg: #3a2e0e;
+      --blocked: #f87171;
+      --blocked-bg: #3a1414;
+      --verified: #4ade80;
+      --verified-bg: #10321c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.6;
+  }
+  h1 { font-size: 1.7rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.25rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+  h3 { font-size: 1.05rem; margin-top: 1.5rem; }
+  code {
+    background: var(--code-bg);
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  pre {
+    background: var(--code-bg);
+    padding: 0.9rem 1rem;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: 0.85rem;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.92rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.6rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th { color: var(--muted); font-weight: 600; }
+  a { color: var(--accent); }
+  .muted { color: var(--muted); }
+  .badge {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+  .badge.planned { color: var(--planned); background: var(--planned-bg); }
+  .badge.progress { color: var(--progress); background: var(--progress-bg); }
+  .badge.blocked { color: var(--blocked); background: var(--blocked-bg); }
+  .badge.verified { color: var(--verified); background: var(--verified-bg); }
+  .stat-row { display: flex; gap: 1rem; flex-wrap: wrap; margin: 1rem 0 0.5rem; }
+  .stat {
+    flex: 1 1 140px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.9rem 1rem;
+  }
+  .stat .n { font-size: 1.6rem; font-weight: 700; }
+  .stat .l { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+  .bar-track {
+    height: 10px;
+    border-radius: 999px;
+    background: var(--planned-bg);
+    overflow: hidden;
+    margin: 0.4rem 0 0;
+  }
+  .bar-fill { height: 100%; background: var(--verified); border-radius: 999px 0 0 999px; }
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  .snapshot-note {
+    font-size: 0.85rem;
+    color: var(--muted);
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.7rem 1rem;
+    margin-top: 0.5rem;
+  }
+</style>
+</head>
+<body>
+
+<h1>TinyOS Goals — V&amp;V Progress Dashboard</h1>
+<p class="muted">Goals → Epics → Features → Stories → Tests → Reports, cross-referenced against session handovers.</p>
+<div class="snapshot-note">This page is a manually-updated status snapshot, not an auto-refreshing live feed — there is no build/server behind it. It should be updated in the same PR that changes any Epic/Feature/Story/Test status, per <a href="traceability-matrix.md"><code>goals/traceability-matrix.md</code></a>'s sync rule. Treat "last updated" below as the actual freshness signal, not the word "dashboard."</p>
+<p class="muted" style="margin-top:0.5rem">Last updated: 26 July 2026 · Session: <a href="../session/hand-2026-07-26/index.html">hand-2026-07-26</a></p>
+
+<h2>Overall progress</h2>
+<div class="stat-row">
+  <div class="stat"><div class="n">1&nbsp;/&nbsp;9</div><div class="l">Epics decomposed</div></div>
+  <div class="stat"><div class="n">4</div><div class="l">Features (EPIC-P0)</div></div>
+  <div class="stat"><div class="n">3&nbsp;/&nbsp;3</div><div class="l">Stories planned</div></div>
+  <div class="stat"><div class="n">0&nbsp;/&nbsp;3</div><div class="l">Tests verified</div></div>
+</div>
+<div class="bar-track"><div class="bar-fill" style="width:0%"></div></div>
+<p class="muted" style="font-size:0.85rem">0% of specified Tests have a passing Report. Expected — Phase 0 implementation hasn't started yet.</p>
+
+<h2>EPIC-P0 — Kernel Skeleton <span class="badge planned">PLANNED</span></h2>
+<p><a href="epics/EPIC-P0.md">epics/EPIC-P0.md</a> · Roadmap Phase 0 · Goals: G-RT-1, G-RT-2, G-RT-7, G-HW-4</p>
+
+<table>
+<thead><tr><th>Feature</th><th>Status</th><th>Stories</th></tr></thead>
+<tbody>
+<tr>
+  <td><a href="features/FEAT-P0-01.md">FEAT-P0-01</a> — Workspace bootstrap &amp; walking skeleton</td>
+  <td><span class="badge planned">PLANNED</span></td>
+  <td>
+    <a href="stories/STORY-P0-01-01.md">STORY-P0-01-01</a> <span class="badge planned">PLANNED</span> · Test: <a href="tests/TEST-P0-01-01-A.md">TEST-P0-01-01-A</a><br>
+    <a href="stories/STORY-P0-01-02.md">STORY-P0-01-02</a> <span class="badge planned">PLANNED</span> · Test: <a href="tests/TEST-P0-01-02-A.md">TEST-P0-01-02-A</a><br>
+    <a href="stories/STORY-P0-01-03.md">STORY-P0-01-03</a> <span class="badge planned">PLANNED</span> · Test: <a href="tests/TEST-P0-01-03-A.md">TEST-P0-01-03-A</a>
+  </td>
+</tr>
+<tr>
+  <td><a href="features/FEAT-P0-02.md">FEAT-P0-02</a> — Preemptive priority scheduler core</td>
+  <td><span class="badge planned">PLANNED</span></td>
+  <td class="muted">Not yet decomposed into Stories</td>
+</tr>
+<tr>
+  <td><a href="features/FEAT-P0-03.md">FEAT-P0-03</a> — Static/pool memory allocator</td>
+  <td><span class="badge planned">PLANNED</span></td>
+  <td class="muted">Not yet decomposed into Stories</td>
+</tr>
+<tr>
+  <td><a href="features/FEAT-P0-04.md">FEAT-P0-04</a> — x86_64 HAL backend &amp; ACPI manifest normalization</td>
+  <td><span class="badge planned">PLANNED</span></td>
+  <td class="muted">Not yet decomposed into Stories</td>
+</tr>
+</tbody>
+</table>
+
+<h2>Backlog — EPIC-P1 through EPIC-P8 <span class="badge planned">NOT DECOMPOSED</span></h2>
+<p>See <a href="epics/backlog.md">epics/backlog.md</a> for the full Goal-to-Epic mapping. Decomposed into Features/Stories just-in-time, when work on each begins — see <a href="#model">the model</a> below for why.</p>
+<table>
+<thead><tr><th>Epic</th><th>Roadmap phase</th><th>Goals</th></tr></thead>
+<tbody>
+<tr><td>EPIC-P1</td><td>Phase 1 — Determinism proof</td><td>G-RT-1, G-RT-3, G-PA-1</td></tr>
+<tr><td>EPIC-P1_5</td><td>Phase 1.5 — Deploy tooling</td><td>G-RC-6, G-DX-3</td></tr>
+<tr><td>EPIC-P2</td><td>Phase 2 — Shell &amp; UX</td><td>G-RT-5, G-RT-6</td></tr>
+<tr><td>EPIC-P3</td><td>Phase 3 — Connectivity</td><td>G-HW-2, G-PA-4</td></tr>
+<tr><td>EPIC-P4</td><td>Phase 4 — Host bridge</td><td>G-RC-1, G-RC-2</td></tr>
+<tr><td>EPIC-P5</td><td>Phase 5 — Agent Command Interface</td><td>G-AI-2 – G-AI-5, G-RC-2, G-RC-3</td></tr>
+<tr><td>EPIC-P6</td><td>Phase 6 — LLM integration</td><td>G-AI-1, G-AI-2, G-AI-3</td></tr>
+<tr><td>EPIC-P6B</td><td>Phase 6b — Heterogeneous compute</td><td>G-AI-6, G-HW-6</td></tr>
+<tr><td>EPIC-P7</td><td>Phase 7 — Edge bring-up</td><td>G-HW-1 – G-HW-5</td></tr>
+<tr><td>EPIC-P8</td><td>Phase 8 — Fleet mode</td><td>G-RC-4, G-AI-7</td></tr>
+</tbody>
+</table>
+
+<h2 id="model">The model</h2>
+<p>This folder is where TinyOS's goals become traceable, testable work — and stay traceable once they're built. It exists so that "does this Story actually verify a real Goal, and has it actually been tested?" has a written, checkable answer instead of a remembered one.</p>
+<pre>Goal  →  Epic  →  Feature  →  Story  →  Test  →  Report
+ │                                        │
+ └──────────── cross-referenced against Sessions ─────┘</pre>
+
+<table>
+<thead><tr><th>Level</th><th>What it is</th><th>Where it lives</th><th>Example ID</th></tr></thead>
+<tbody>
+<tr><td><strong>Goal</strong></td><td>A concrete, falsifiable goal from <a href="../SeedMVP.md">SeedMVP.md</a> Section 3. Not created here — referenced from here.</td><td><code>SeedMVP.md</code> §3</td><td><code>G-RT-1</code>, <code>G-PA-8</code></td></tr>
+<tr><td><strong>Epic</strong></td><td>Body of work mapped 1:1 to a Roadmap phase.</td><td><code>goals/epics/EPIC-&lt;phase&gt;.md</code></td><td><code>EPIC-P0</code></td></tr>
+<tr><td><strong>Feature</strong></td><td>A coherent capability within an Epic; usually one crate or a clear sub-area of one.</td><td><code>goals/features/FEAT-&lt;epic&gt;-&lt;NN&gt;.md</code></td><td><code>FEAT-P0-01</code></td></tr>
+<tr><td><strong>Story</strong></td><td>A single implementable, testable unit — small enough to build test-first in one sitting.</td><td><code>goals/stories/STORY-&lt;feature&gt;-&lt;NN&gt;.md</code></td><td><code>STORY-P0-01-01</code></td></tr>
+<tr><td><strong>Test</strong></td><td>Verifies a Story. Before code exists, it's a specification written first, per TDD.</td><td><code>goals/tests/TEST-&lt;story&gt;-&lt;letter&gt;.md</code></td><td><code>TEST-P0-01-01-A</code></td></tr>
+<tr><td><strong>Report</strong></td><td>Record of a Test actually running — result, tier, date. Filed once execution starts.</td><td><code>goals/reports/</code></td><td><code>REPORT-2026-MM-DD-NN</code></td></tr>
+</tbody>
+</table>
+
+<h3 id="status-lifecycle">Status lifecycle</h3>
+<p>
+  <span class="badge planned">PLANNED</span> defined, not started &nbsp;·&nbsp;
+  <span class="badge progress">IN PROGRESS</span> actively being worked on &nbsp;·&nbsp;
+  <span class="badge blocked">BLOCKED</span> cannot proceed, reason stated explicitly &nbsp;·&nbsp;
+  <span class="badge verified">VERIFIED</span> Test(s) passed, Report filed
+</p>
+<p class="muted">A Story is never Verified on implementation alone — only a passing Test with a filed Report earns that status.</p>
+
+<h3 id="jit-decomposition">Just-in-time decomposition</h3>
+<p>Only <code>EPIC-P0</code> is decomposed to Feature/Story/Test level — it's the next real work. Decomposing every future Epic today would produce dozens of Story files describing undesigned work, which this project's own principles argue against. Decompose an Epic when work on it is about to start, not before.</p>
+
+<h2>Folder layout</h2>
+<pre>goals/
+  index.html                   This dashboard
+  traceability-matrix.md       Master cross-reference table
+  epics/
+    EPIC-P0.md                 Fully decomposed (worked example)
+    backlog.md                 EPIC-P1 through EPIC-P8, stubbed
+  features/
+    FEAT-P0-01.md ...
+  stories/
+    STORY-P0-01-01.md ...
+  tests/
+    TEST-P0-01-01-A.md ...
+  reports/
+    README.md                  Report format/schema; empty until Phase 0 testing begins</pre>
+
+<footer>
+  TinyOS goals dashboard · <a href="traceability-matrix.md">traceability-matrix.md</a> for the full cross-reference table · <a href="../agent.md">agent.md</a> for agent orientation · <a href="../README.md">repository root README</a>
+</footer>
+
+</body>
+</html>

@@ -20,7 +20,7 @@ Follows: [03-cnc-kinematics-merge-handover.md](03-cnc-kinematics-merge-handover.
 
 - Renamed: `TinyOS26thJulySeedMVP.md` → `SeedMVP.md`
 - New: `agent.md`
-- New: `goals/README.md`, `goals/traceability-matrix.md`, `goals/epics/EPIC-P0.md`, `goals/epics/backlog.md`, `goals/features/FEAT-P0-01.md` through `FEAT-P0-04.md`, `goals/stories/STORY-P0-01-01.md` through `STORY-P0-01-03.md`, `goals/tests/TEST-P0-01-01-A.md` through `TEST-P0-01-03-A.md`, `goals/reports/README.md`
+- New: `goals/index.html` (superseded `goals/README.md`, see Handover 05), `goals/traceability-matrix.md`, `goals/epics/EPIC-P0.md`, `goals/epics/backlog.md`, `goals/features/FEAT-P0-01.md` through `FEAT-P0-04.md`, `goals/stories/STORY-P0-01-01.md` through `STORY-P0-01-03.md`, `goals/tests/TEST-P0-01-01-A.md` through `TEST-P0-01-03-A.md`, `goals/reports/README.md`
 - Updated: `README.md` (Repository Layout, "New here?" pointer), `docs/mvp-delivery-strategy.md` (top-level structure diagram), all files referencing the old seed-doc filename
 
 ## Next handover

@@ -18,4 +18,4 @@ The preemptive, priority-based scheduler with bounded interrupt latency and prio
 
 ## Status
 
-Not yet decomposed into Stories — per [`goals/README.md`](../README.md#just-in-time-decomposition-not-upfront-exhaustive-planning), decomposition happens when work on this Feature is about to start (immediately after `FEAT-P0-01` reaches Verified). When decomposed, Stories here should cover at minimum: task creation/priority assignment, context switch, priority inheritance on lock contention, and WCET budget enforcement.
+Not yet decomposed into Stories — per the [goals dashboard](../index.html#jit-decomposition), decomposition happens when work on this Feature is about to start (immediately after `FEAT-P0-01` reaches Verified). When decomposed, Stories here should cover at minimum: task creation/priority assignment, context switch, priority inheritance on lock contention, and WCET budget enforcement.
