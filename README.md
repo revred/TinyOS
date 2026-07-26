@@ -296,6 +296,8 @@ These are the rules the project will not compromise on, even under schedule pres
 
 Early design phase. Architecture and roadmap above are the north star; implementation is starting from the kernel skeleton outward. Contributions, critique, and hardware to test on are all welcome once Phase 0 lands.
 
+New here? Start with [`TinyOS26thJulySeedMVP.md`](TinyOS26thJulySeedMVP.md) for the founding intent, then [`HANDOVER.md`](HANDOVER.md) for a snapshot of what's decided, what's open, and what to work on next.
+
 ## License
 
 TBD.
