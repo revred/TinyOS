@@ -64,6 +64,18 @@ See [`CODING_STANDARDS.md`](CODING_STANDARDS.md) for the full standard, includin
 
 ---
 
+## Deployment Modes
+
+A TinyOS device is configured into one of a defined set of modes at boot/provisioning time. Modes are an explicit, auditable configuration choice, not an emergent side effect of which subsystems happen to be running.
+
+1. **Inference-only mode** — the device hosts a local (or externally supplied) LLM and serves tokens/results exclusively through an authenticated secure channel (HBP or WCI). No RT control task is active; the ACI exposes only inference-related capabilities. This is the mode for a pure "edge inference appliance" deployment with no physical actuation to protect.
+2. **Real-Time control mode** — the device runs RT control tasks (motion, actuation, sensing) with no inference workload resident at all. This is the mode for the CNC/co-bot-style deployments described in HBP/WCI, where determinism is the only concern and inference capability is simply absent, not merely idle.
+3. **Inference + Real-Time Execution mode** — both subsystems run concurrently on the same device: inference (local or driven by an external LLM over a secure channel) proposes actions, RT control tasks execute them, and every inference-originated command still passes through the ACI policy engine exactly as Design Pillar 5 requires. This is the mode where Non-Negotiable #6 (GPU/inference never jeopardizes CPU RT guarantees) is load-bearing rather than theoretical.
+
+More modes may be added as deployments demand them; each new mode is defined by which capability classes the ACI exposes and which subsystems are permitted to be resident, not by ad hoc configuration flags.
+
+---
+
 ## Target Hardware & Test Matrix
 
 TinyOS is **64-bit only** — no 32-bit boot path is planned or supported, on either architecture.
@@ -82,6 +94,15 @@ TinyOS is **64-bit only** — no 32-bit boot path is planned or supported, on ei
 
 - A mid-spec x86_64 laptop or NUC-class mini-PC, dual-boot or hypervisor-partitioned — validates the Windows/Linux host bridge and the DOS-style shell UX, not just the kernel.
 - At least one Tier 2 machine should carry a discrete GPU with dedicated VRAM, to validate the Unified Memory Manager's non-unified (explicit copy) fallback path against the Jetson's true-unified-memory path.
+
+### MVP hardware (bring-up / evaluation, to be purchased)
+
+For an economical first pass covering all three [Deployment Modes](#deployment-modes) across both supported architectures, two boards are enough to start:
+
+1. **NVIDIA Jetson Orin Nano Super Developer Kit (8GB)** — ARM64 with a CUDA-capable GPU and unified CPU/GPU memory. Covers Inference-only mode (small quantized model via Ollama), and — once TinyOS boots bare-metal on it — Real-Time control mode and the combined Inference + RT mode on the same board, since both subsystems need to coexist there to validate Non-Negotiable #6.
+2. **A budget x86_64 mini-PC / NUC-class box (Intel N100/N305 class)** — no meaningful GPU, so it isolates Real-Time control mode validation on x86_64 from any inference/GPU variable, and doubles as the Tier 2 host-bridge target.
+
+This pairing deliberately avoids a third, non-64-bit microcontroller board for "pure RT" testing — TinyOS's bare-metal, 64-bit-only design means real determinism numbers come from the Jetson and mini-PC directly, consistent with the [64-bit-only policy](#4-runs-where-the-work-happens--64-bit-only). Expand toward the full Tier 0–2 matrix below as the project grows past initial bring-up.
 
 ### Default supported set for v1
 
