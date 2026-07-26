@@ -35,6 +35,7 @@ See [`CODING_STANDARDS.md`](CODING_STANDARDS.md) for the full standard, includin
 
 ### 2. UX/UI strictly separated from control
 
+- **Remote control over an established secure channel is the primary means of UX and control** — [HBP](#inter-os-communication-the-host-bridge-protocol-hbp) for a co-resident host, [WCI](#remote-control-the-wireless-command-interface-wci) for wireless/networked callers. The local `TINYCMD` console is a first-class interface but not a privileged one: it authenticates and authorizes through the same gate as any remote caller.
 - The DOS-like shell (`TINYCMD`) is a **presentation and orchestration layer only**. It never has direct write access to real-time task state, drivers, or bus I/O.
 - All shell and UI actions go through a narrow, versioned **Command & Control API** — the same API used by scripts, remote hosts, and the LLM agent. One gate, many callers, one audit trail.
 - This means the UI can crash, hang, or be swapped out (text console today, a web dashboard tomorrow) without ever jeopardizing a real-time task that's mid-cycle.
@@ -161,6 +162,19 @@ See [`docs/wci-spec.md`](docs/wci-spec.md) for the detailed pairing flow, wire f
 
 ---
 
+## Tooling & Deployment
+
+Remote control over a secure channel isn't just the runtime UX model — it's the primary development workflow. A device running TinyOS is reachable for reboot or hot-deploy over:
+
+- a **peer-to-peer Ethernet cable** (link-local addressing, no switch or DHCP required) — for bring-up, recovery, and WiFi-unavailable situations, or
+- **WiFi**, reusing the same authenticated pairing and session model as [WCI](#remote-control-the-wireless-command-interface-wci), scoped to a distinct `deployer` capability.
+
+Non-core tasks and drivers can be **hot-deployed** without a reboot (atomic swap, automatic abort-and-keep-old-instance on a failed health check). Kernel-core updates go through a **reboot deploy** using A/B partition boot with automatic rollback to the last-known-good partition if the new image fails its boot-health check. A deploy can never leave a device unable to boot, and never blocks or delays an RT task while in progress.
+
+See [`docs/deploy-protocol.md`](docs/deploy-protocol.md) for the full spec, and [`CODING_STANDARDS.md`](CODING_STANDARDS.md#tooling) for the tooling standard this implements.
+
+---
+
 ## System Architecture (target)
 
 ```text
@@ -229,6 +243,7 @@ Each of these is a crate in a single Cargo workspace, per [`CODING_STANDARDS.md`
 
 - [ ] **Phase 0 — Kernel skeleton**: boot, context switch, preemptive priority scheduler, static memory pools, minimal HAL for one x86_64 target.
 - [ ] **Phase 1 — Determinism proof**: deadline monitor, priority inheritance, worst-case timing benchmarks and regression suite; CI gate on timing regressions, not just functional correctness.
+- [ ] **Phase 1.5 — Deploy tooling**: peer-to-peer Ethernet and WiFi deploy client, A/B partition boot with automatic rollback, hot-deploy for non-core tasks. See [`docs/deploy-protocol.md`](docs/deploy-protocol.md). Ships early because remote deploy is the primary development loop, not a later convenience.
 - [ ] **Phase 2 — Shell & UX**: TINYCMD, batch scripting, TASKMGR live view, config file loader.
 - [ ] **Phase 3 — Connectivity**: CAN, USB, Ethernet stacks; unify under one internal message bus with a single command dispatch path.
 - [ ] **Phase 4 — Host bridge**: Windows + Linux companion services, shared-memory or socket transport, cross-OS clock sync.
@@ -242,7 +257,7 @@ Each of these is a crate in a single Cargo workspace, per [`CODING_STANDARDS.md`
 
 ## Non-Negotiables
 
-These are the rules the project will not compromise on, even under schedule pressure:
+These are the rules the project will not compromise on, even under schedule pressure. They resolve in strict priority order — safety first, then security, then correctness, then performance — see [`CODING_STANDARDS.md`](CODING_STANDARDS.md#priority-ordering) for how that ordering governs day-to-day trade-offs.
 
 1. **The real-time core never blocks on UI, network, or LLM inference.** A hung shell or a stalled model call must never delay a scheduled task.
 2. **No agent — human or AI — gets a privileged bypass around the policy engine.** Every action, from any caller, goes through the same gate.
@@ -250,6 +265,8 @@ These are the rules the project will not compromise on, even under schedule pres
 4. **Determinism is tested, not assumed.** Timing regressions are CI failures, on par with functional test failures.
 5. **The system fails safe.** Watchdogs, deadline violations, and policy denials default to the safest known state, not to "keep trying."
 6. **GPU and inference work never jeopardizes CPU real-time guarantees.** Admission-controlled, never scheduler-privileged; a stalled or failed inference degrades or errors out through the ACI, it never blocks an RT task on any node.
+7. **Every feature is test-driven.** Tests are written before the implementation, security- and safety-relevant code gets adversarial tests, and a PR without corresponding tests doesn't merge. See [`CODING_STANDARDS.md`](CODING_STANDARDS.md#test-driven-development-mandatory).
+8. **Performance is a first-class goal, pursued only after 1–3 above hold.** TinyOS aims to extract the maximum throughput and lowest latency the target hardware allows — on constrained edge devices and full-capability laptops alike — but never by weakening safety, security, or correctness guarantees.
 
 ---
 

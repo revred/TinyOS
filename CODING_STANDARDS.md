@@ -2,6 +2,17 @@
 
 Status: **draft — governs all code from Phase 0 onward**
 
+## Priority ordering
+
+When any trade-off is required — in design, in code review, in a deadline crunch — TinyOS resolves it in this order, without exception:
+
+1. **Safety.** A decision that could harm a person, a machine, or a controlled process is never made for velocity, elegance, or convenience.
+2. **Security.** No privileged bypass, no unauthenticated command path, no shortcut around the ACI/HBP/WCI trust model — see [Non-Negotiables](README.md#non-negotiables).
+3. **Correctness.** Proven through TDD (below), not asserted. A feature is not done until its tests are.
+4. **Performance.** Once safety, security, and correctness hold, TinyOS competes on squeezing the maximum throughput and lowest latency out of the target hardware — from constrained edge devices to full-capability laptops. This is a first-class design goal, not an afterthought.
+
+Development speed and code convenience are weighed only against priority 4, and never against 1–3.
+
 ## Language policy
 
 TinyOS is written primarily in **Rust**. Rust is the default for every new crate — kernel, HAL, drivers, ACI, shell, host bridge services, and agent integration. A component is written in something other than Rust only when there is a specific, documented reason:
@@ -59,11 +70,29 @@ This is where TinyOS's coding standard diverges hardest from general Rust practi
 - Errors crossing a subsystem boundary (e.g. driver → kernel, ACI → agent) are part of that subsystem's public API and are documented like any other contract.
 - Silent error swallowing (`let _ = fallible_call()`) requires a comment stating why the error is genuinely safe to discard.
 
-## Testing
+## Test-Driven Development (mandatory)
 
-- Unit tests are co-located with the code they test (`#[cfg(test)]` modules), consistent with normal Rust convention.
-- Timing-sensitive code additionally requires a benchmark/regression entry under `/tests/` per Roadmap Phase 1 — a functional pass with a timing regression is a CI failure.
-- Hardware-in-the-loop (HIL) and QEMU-based integration tests live under `/tests/`, mirroring the [Target Hardware & Test Matrix](README.md#target-hardware--test-matrix) tiers — every driver targets at minimum a Tier 0 (QEMU/Renode) test before a Tier 1/2 hardware test is required.
+Every feature in TinyOS — kernel, driver, ACI capability, shell command, deploy tooling, agent integration, all of it — is built test-first. This is not a preference; it is how correctness is proven under Priority 3 above.
+
+- **Red, green, refactor.** A failing test is written and present before the implementation that makes it pass. A PR whose tests were written after the implementation (and clearly reverse-engineered from it) is not TDD and is treated as a gap, not a formality satisfied.
+- **No exceptions for "trivial" code.** Real-time paths, ACI capability checks, and deploy/hot-swap logic are exactly where an untested edge case turns into a safety or security incident — these get the most rigorous test-first treatment, not the least.
+- **Adversarial tests for security/safety-relevant code.** The ACI policy engine, HBP/WCI authentication and authority-lease logic, watchdog/failsafe paths, and deploy tooling all require tests that actively try to violate the invariant — an unauthenticated command, an expired lease, a replayed frame, a command issued mid-reboot — not just happy-path coverage.
+- **Timing-sensitive code** additionally requires a benchmark/regression entry under `/tests/` per Roadmap Phase 1 — a functional pass with a timing regression is a CI failure, exactly like a functional test failure.
+- **Hardware-in-the-loop (HIL) and QEMU-based integration tests** live under `/tests/`, mirroring the [Target Hardware & Test Matrix](README.md#target-hardware--test-matrix) tiers — every driver targets at minimum a Tier 0 (QEMU/Renode) test before a Tier 1/2 hardware test is required.
+- CI enforces this at the process level: a PR that changes implementation without a corresponding test change is flagged for review rather than silently merged.
+
+## Tooling
+
+Tooling is a first-class part of the coding standard, not an afterthought bolted on once the kernel works — a fast, secure, remote-first development loop is what makes squeezing performance out of real hardware (Priority 4) practical to iterate on at all.
+
+- **Reproducible builds.** The full system image builds from a single command against the pinned toolchain (see Toolchain, below); no developer-machine-specific state is allowed to leak into a build.
+- **Remote-first deploy.** A dedicated deploy tool connects to a running TinyOS device to reboot it onto a new image or hot-deploy an updated component, over either:
+  - a **peer-to-peer Ethernet cable** (link-local addressing, no switch or DHCP server required), or
+  - **WiFi**, reusing the [WCI](README.md#remote-control-the-wireless-command-interface-wci) authenticated pairing and session model.
+  Both mechanisms go through the same ACI capability gate as everything else — deploy is a scoped `deployer` capability, never a bypass — and are fully audited. See [`docs/deploy-protocol.md`](docs/deploy-protocol.md) for the wire-level spec.
+- **Hot deploy vs. reboot deploy.** Non-core tasks and drivers that support safe hot-swap can be updated live; kernel-core updates always go through a full reboot with A/B partition boot and automatic rollback on a failed boot-health check. A deploy is never allowed to leave a device in a state where it can neither run the old image nor the new one.
+- **Observability is mandatory, not optional.** Every subsystem ships with a way to inspect its live state remotely, over the same secure channel used for deploy — no subsystem is considered complete if the only way to debug it is a serial cable and a debugger breakpoint.
+- Tooling itself is held to the same standard as the OS it operates on: no privileged bypass, full audit trail, fail-safe defaults if the connection drops mid-operation.
 
 ## Commit & PR conventions
 
