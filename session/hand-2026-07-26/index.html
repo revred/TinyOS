@@ -120,13 +120,17 @@
     <span class="num">03</span><a href="03-cnc-kinematics-merge-handover.md">CNC kinematics merged into <code>motion</code></a>
     <p>Small follow-on correction: the trunnion-table kinematics module doesn't get its own crate — it lives inside <code>os/src/motion/</code> as a swappable submodule, consistent with the "don't split ahead of need" principle.</p>
   </li>
+  <li class="entry">
+    <span class="num">04</span><a href="04-seedmvp-agentmd-goals-vv-model-handover.md">SeedMVP rename, agent.md, and the Goals V&amp;V model</a>
+    <p>Seed specification renamed <code>TinyOS26thJulySeedMVP.md</code> → <code>SeedMVP.md</code> (all references updated). New <code>agent.md</code> as the single tool-agnostic entry point for any coding agent. New <code>goals/</code> Verification &amp; Validation model — Goals → Epics → Features → Stories → Tests → Reports — with <code>EPIC-P0</code> fully decomposed as the worked example and <code>EPIC-P1</code>–<code>EPIC-P8</code> stubbed for just-in-time decomposition.</p>
+  </li>
 </ol>
 
 <h2>Quick document reference</h2>
 <table>
 <thead><tr><th>Area</th><th>Document</th></tr></thead>
 <tbody>
-<tr><td>Founding intent &amp; master specification</td><td><code>TinyOS26thJulySeedMVP.md</code></td></tr>
+<tr><td>Founding intent &amp; master specification</td><td><code>SeedMVP.md</code></td></tr>
 <tr><td>Current design (living document)</td><td><code>README.md</code></td></tr>
 <tr><td>Coding standard</td><td><code>agent/CODING_STANDARDS.md</code></td></tr>
 <tr><td>MVP delivery strategy &amp; crate map</td><td><code>docs/mvp-delivery-strategy.md</code></td></tr>

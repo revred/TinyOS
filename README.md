@@ -259,8 +259,10 @@ TinyOS borrows MS-DOS 4+'s ergonomics deliberately — not out of nostalgia, but
 ## Repository Layout (planned)
 
 ```text
-/agent/                     Development guidelines (CODING_STANDARDS.md) — not code, not under os/
+/agent.md                   Single entry point for any coding agent (tool-agnostic)
+/agent/                      Development guidelines (CODING_STANDARDS.md) — not code, not under os/
 /docs/                      Architecture decision records, protocol specs, hardware bring-up notes
+/goals/                      Verification & Validation model: Goals → Epics → Features → Stories → Tests → Reports
 /session/                   Dated handover snapshots
 /os/                        The OS project — everything below this line compiles
   /Cargo.toml                Workspace manifest
@@ -322,7 +324,7 @@ These are the rules the project will not compromise on, even under schedule pres
 
 Early design phase. Architecture and roadmap above are the north star; implementation is starting from the kernel skeleton outward. Contributions, critique, and hardware to test on are all welcome once Phase 0 lands.
 
-New here? Start with [`TinyOS26thJulySeedMVP.md`](TinyOS26thJulySeedMVP.md) for the founding intent, then the latest dated handover under [`session/`](session/) — currently [`session/hand-2026-07-26/index.html`](session/hand-2026-07-26/index.html) — for a snapshot of what's decided, what's open, and what to work on next.
+New here? If you're a coding agent, start with [`agent.md`](agent.md). If you're a human, start with [`SeedMVP.md`](SeedMVP.md) for the founding intent, then the latest dated handover under [`session/`](session/) — currently [`session/hand-2026-07-26/index.html`](session/hand-2026-07-26/index.html) — for a snapshot of what's decided, what's open, and what to work on next. For traceable, testable work items, see [`goals/`](goals/).
 
 ## License
 

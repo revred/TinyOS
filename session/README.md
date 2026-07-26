@@ -15,6 +15,6 @@ Sort `session/` subfolders by date descending, then open that folder's `index.ht
 
 ## Relationship to other documents
 
-- [`TinyOS26thJulySeedMVP.md`](../TinyOS26thJulySeedMVP.md) is the founding intent and comprehensive master specification — it changes slowly and deliberately.
+- [`SeedMVP.md`](../SeedMVP.md) is the founding intent and comprehensive master specification — it changes slowly and deliberately.
 - [`README.md`](../README.md) is the current-state living design document — it changes continuously as decisions are made.
 - A `session/hand-*/index.html` is a **snapshot**, not a source of truth — if it disagrees with the README or the seed document, they win. A handover exists to orient a new reader quickly, not to replace the documents it points to.

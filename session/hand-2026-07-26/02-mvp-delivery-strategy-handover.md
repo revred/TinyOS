@@ -20,7 +20,7 @@ Added [`docs/mvp-delivery-strategy.md`](../../docs/mvp-delivery-strategy.md): th
 
 - New: `docs/mvp-delivery-strategy.md`
 - Updated: `README.md` (Repository Layout section rewritten to the concrete `os/src/` structure)
-- Updated: `TinyOS26thJulySeedMVP.md` (Section 12 cross-reference index)
+- Updated: `SeedMVP.md` (Section 12 cross-reference index)
 
 ## Next handover
 

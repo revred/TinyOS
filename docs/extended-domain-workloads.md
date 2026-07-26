@@ -67,9 +67,9 @@ The rocket landing controller and the rotary detonation engine are included in t
 ## What this document commits to, and what it doesn't
 
 - **Commits to**: the four new primitives above being a coherent, honest extension of the architecture, and the Tier A domains being genuinely near-term-credible on the existing MVP hardware plus domain-appropriate I/O.
-- **Does not commit to**: a roadmap phase, a timeline, or a hardware purchase for any Tier B or Tier C domain. None of the ten domains in this document are in the [MVP scope](../TinyOS26thJulySeedMVP.md#5-narrowing-to-the-mvp-configuration) defined by the master specification — that remains the 5-axis CNC (flagship), Wire DED arm, and resin-curing array from `docs/physical-ai-reference-workloads.md`.
+- **Does not commit to**: a roadmap phase, a timeline, or a hardware purchase for any Tier B or Tier C domain. None of the ten domains in this document are in the [MVP scope](../SeedMVP.md#5-narrowing-to-the-mvp-configuration) defined by the master specification — that remains the 5-axis CNC (flagship), Wire DED arm, and resin-curing array from `docs/physical-ai-reference-workloads.md`.
 - **Does not commit to**: TinyOS being a credible platform for actual rocket flight or actual detonation-engine control without substantial, dedicated domain partnership and safety-certification work far beyond what a software architecture document can establish on its own.
 
 ## Status
 
-This document is a vision-tier extension of the goal taxonomy in [`TinyOS26thJulySeedMVP.md`](../TinyOS26thJulySeedMVP.md) (Section 3.1, Physical AI Goals) and the primitive architecture in `docs/physical-ai-reference-workloads.md`. It should be read as evidence toward "how general is this architecture, really," not as an additional set of committed reference workloads.
+This document is a vision-tier extension of the goal taxonomy in [`SeedMVP.md`](../SeedMVP.md) (Section 3.1, Physical AI Goals) and the primitive architecture in `docs/physical-ai-reference-workloads.md`. It should be read as evidence toward "how general is this architecture, really," not as an additional set of committed reference workloads.

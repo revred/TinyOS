@@ -5,7 +5,7 @@ Status: **design phase — no implementation code exists yet**
 
 ## Start here
 
-- **Founding intent & master specification:** [`TinyOS26thJulySeedMVP.md`](../../TinyOS26thJulySeedMVP.md) — Section 1 is the fixed original ambition; the rest is a comprehensive, actively-maintained specification (goal taxonomy, hardware catalog, MVP narrowing, testing, reliability, security, codebase governance).
+- **Founding intent & master specification:** [`SeedMVP.md`](../../SeedMVP.md) — Section 1 is the fixed original ambition; the rest is a comprehensive, actively-maintained specification (goal taxonomy, hardware catalog, MVP narrowing, testing, reliability, security, codebase governance).
 - **Current state of the design:** [`README.md`](../../README.md) — the living document. If it disagrees with anything in this handover, the README wins; a handover is a snapshot, not a source of truth.
 - **How to write code here:** [`agent/CODING_STANDARDS.md`](../../agent/CODING_STANDARDS.md) — Rust-first policy, `unsafe` boundaries, real-time coding discipline, mandatory TDD, the crate-size ceiling, SOLID enforcement, and the safety > security > correctness > performance priority ordering.
 

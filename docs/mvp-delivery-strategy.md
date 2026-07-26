@@ -8,19 +8,21 @@ Every other document in this repository specifies *what* TinyOS must do and *why
 
 ## A naming collision, resolved
 
-The README's planned Repository Layout (written before the `agent/` guidelines folder existed) used `/agent/` as the code crate housing local LLM runtime integration. That now collides with `agent/CODING_STANDARDS.md` at the repository root. This document resolves it: **all Rust workspace crates move under `os/src/`**, and the LLM-integration crate is renamed **`os/src/inference/`** (matching the "Agentic Inference" goal category name already used in [`TinyOS26thJulySeedMVP.md`](../TinyOS26thJulySeedMVP.md#32-agentic-inference-goals) §3.2) rather than sitting at a top-level `agent/`, so there is no ambiguity anywhere in the tree between "the folder with development guidelines" and "a folder full of Rust source." The README's Repository Layout section is updated to match this document rather than the other way around.
+The README's planned Repository Layout (written before the `agent/` guidelines folder existed) used `/agent/` as the code crate housing local LLM runtime integration. That now collides with `agent/CODING_STANDARDS.md` at the repository root. This document resolves it: **all Rust workspace crates move under `os/src/`**, and the LLM-integration crate is renamed **`os/src/inference/`** (matching the "Agentic Inference" goal category name already used in [`SeedMVP.md`](../SeedMVP.md#32-agentic-inference-goals) §3.2) rather than sitting at a top-level `agent/`, so there is no ambiguity anywhere in the tree between "the folder with development guidelines" and "a folder full of Rust source." The README's Repository Layout section is updated to match this document rather than the other way around.
 
 ## Top-level repository structure
 
 The repository root separates **project documentation and governance** (which a human or an AI reads) from **the OS itself** (everything that compiles) — the latter lives entirely under one directory, `os/`, with every line of code — Rust or otherwise — inside `os/src/`, per the project's own convention: any code lives in `os/src`, full stop, nothing compiled sits loose at the repository root or scattered across sibling top-level folders.
 
 ```text
+/agent.md                  Single entry point for any coding agent (tool-agnostic)
 /agent/                    Development guidelines: CODING_STANDARDS.md (not code — not under os/)
 /docs/                     Architecture specs (HBP, WCI, deploy protocol, driver model, inference, workloads, this document)
+/goals/                    Verification & Validation model: Goals → Epics → Features → Stories → Tests → Reports
 /session/                  Dated handover snapshots (session/hand-YYYY-MM-DD/index.html)
 /MsDOS/                    Git submodule — Microsoft's released MS-DOS source, reference-only
 /README.md
-/TinyOS26thJulySeedMVP.md
+/SeedMVP.md
 /os/                       The OS project — everything below this line compiles
   /Cargo.toml              Workspace manifest (members are the os/src/* crates)
   /rust-toolchain.toml     Pinned toolchain version
@@ -103,4 +105,4 @@ Concretely, in order:
 
 ## Status
 
-This document is the concrete companion to Roadmap Phase 0 and to Section 10 (Roadmap Alignment) of [`TinyOS26thJulySeedMVP.md`](../TinyOS26thJulySeedMVP.md). The crate map will be revised as real implementation surfaces seams the design didn't anticipate — per [`agent/CODING_STANDARDS.md`](../agent/CODING_STANDARDS.md#crate-size-ceiling-hard-limit-no-exceptions), a crate approaching its size ceiling triggers a split PR, and this document should be updated in the same PR that performs that split, not left to drift out of sync with the actual workspace.
+This document is the concrete companion to Roadmap Phase 0 and to Section 10 (Roadmap Alignment) of [`SeedMVP.md`](../SeedMVP.md). The crate map will be revised as real implementation surfaces seams the design didn't anticipate — per [`agent/CODING_STANDARDS.md`](../agent/CODING_STANDARDS.md#crate-size-ceiling-hard-limit-no-exceptions), a crate approaching its size ceiling triggers a split PR, and this document should be updated in the same PR that performs that split, not left to drift out of sync with the actual workspace.
