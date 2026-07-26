@@ -237,6 +237,7 @@ TinyOS borrows MS-DOS 4+'s ergonomics deliberately — not out of nostalgia, but
 - A blue-screen full-view task manager (`TASKMGR.SYS`-style) for real-time task/thread status, deadlines, and bus traffic — evoking the DOS 4 `MEM`/`DOSSHELL` aesthetic.
 - Configuration via plain, human-readable text (`TINYOS.CFG`, `AUTOEXEC.TCB`) — inspectable, diffable, versionable, no hidden registry.
 - No modality trap: the shell never blocks the kernel, and the kernel never depends on the shell being alive.
+- **DOS and POSIX/Linux command compatibility, side by side.** `TINYCMD` accepts both `DIR`/`COPY`/`DEL`-style DOS syntax and `ls`/`cp`/`rm`-style POSIX syntax against one canonical command core, so operators from either world are at home immediately. See [`docs/cli-compatibility-mvp.md`](docs/cli-compatibility-mvp.md) for the MVP verb set and architecture. (The [`MsDOS`](MsDOS) submodule — Microsoft's officially released MS-DOS source — is kept as a reference for historical command behavior, not as code TinyOS builds on.)
 
 ---
 
@@ -265,7 +266,7 @@ Each of these is a crate in a single Cargo workspace, per [`CODING_STANDARDS.md`
 - [ ] **Phase 0 — Kernel skeleton**: boot, context switch, preemptive priority scheduler, static memory pools, minimal HAL for one x86_64 target.
 - [ ] **Phase 1 — Determinism proof**: deadline monitor, priority inheritance, worst-case timing benchmarks and regression suite; CI gate on timing regressions, not just functional correctness.
 - [ ] **Phase 1.5 — Deploy tooling**: peer-to-peer Ethernet and WiFi deploy client, A/B partition boot with automatic rollback, hot-deploy for non-core tasks. See [`docs/deploy-protocol.md`](docs/deploy-protocol.md). Ships early because remote deploy is the primary development loop, not a later convenience.
-- [ ] **Phase 2 — Shell & UX**: TINYCMD, batch scripting, TASKMGR live view, config file loader.
+- [ ] **Phase 2 — Shell & UX**: TINYCMD core verb engine + DOS/POSIX front-ends (MVP set per [`docs/cli-compatibility-mvp.md`](docs/cli-compatibility-mvp.md)), batch scripting, TASKMGR live view, config file loader.
 - [ ] **Phase 3 — Connectivity**: CAN, USB, Ethernet stacks; unify under one internal message bus with a single command dispatch path.
 - [ ] **Phase 4 — Host bridge**: Windows + Linux companion services, shared-memory or socket transport, cross-OS clock sync.
 - [ ] **Phase 5 — Agent Command Interface**: capability registry, policy engine, full audit trail, human-equivalent permission model for machine callers.
