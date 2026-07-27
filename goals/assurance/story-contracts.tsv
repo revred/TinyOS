@@ -33,7 +33,7 @@ STORY-P1-03-01	FEAT-P1-03	D04,D08	SEC-03,SEC-19	C0,C1,C3	baseline-debt	Per-task 
 STORY-P1-03-02	FEAT-P1-03	D04,D05,D08	SEC-03,SEC-14,SEC-19	C0,C1,C3	baseline-debt	W^X sealing and generation-safe teardown must hold adversarially in both directions before frame reuse and a real loaded workload must be contained and audited when it exceeds its granted capabilities
 STORY-P1-03-03	FEAT-P1-03	D04,D05,D08	SEC-03,SEC-14,SEC-19	C0,C1,C3	baseline-debt	Import resolution must give every call site a decided target so a refused capability faults at a named address rather than an arbitrary one, and the system image itself must load and schedule a real task
 STORY-P1-04-01	FEAT-P1-04	D03,D05,D06	SEC-19,SEC-20	C0,C1	baseline-debt	Timer-driven preemption and priority inheritance must bound latency without granting priority from class
-STORY-P1-04-02	FEAT-P1-04	D03	SEC-14,SEC-19,SEC-20	C0,C1	specified	WCET overrun enforcement must fire declared policy within bounded ticks and audit every decision
+STORY-P1-04-02	FEAT-P1-04	D03	SEC-14,SEC-19,SEC-20	C0,C1	baseline-debt	WCET overrun enforcement must fire declared policy within bounded ticks and audit every decision
 STORY-P1-05-01	FEAT-P1-05	D05,D07	SEC-14,SEC-19,SEC-20	C1,C2	specified	Hostile saturation must degrade only the offender with RT reserves held and recovery bounded and complete
 STORY-P1-06-01	FEAT-P1-06	D03,D05	SEC-14,SEC-19,SEC-20	C0,C1	specified	Decision-to-actuation latency must stay inside a scheduler-enforced bound with late actuation prevented
 STORY-P9-01-01	FEAT-P9-01	D08,D25	SEC-14,SEC-19	C0,C1	specified	No plaintext survives teardown must be a measured invariant with a scanner proven able to fail rather than a property holding by accident of implementation

@@ -197,7 +197,7 @@ pub const DOUBLE_FAULT_VECTOR: u64 = hal_x86_64::fault::DOUBLE_FAULT_VECTOR;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sched::{Priority, Scheduler, WcetBudgetTicks};
+    use crate::sched::{OverrunPolicy, Priority, Scheduler, WcetBudgetTicks};
 
     // A task has to be created by a real `Scheduler` — `TaskId` has no public
     // constructor, deliberately (see `sched::TaskId`), so these tests build
@@ -214,7 +214,12 @@ mod tests {
         for slot in ids.iter_mut().take(count) {
             *slot = Some(
                 scheduler
-                    .create_task(priority, WcetBudgetTicks(1_000), dummy_entry)
+                    .create_task(
+                        priority,
+                        WcetBudgetTicks(1_000),
+                        OverrunPolicy::TripToSafeState,
+                        dummy_entry,
+                    )
                     .expect("slot available"),
             );
         }

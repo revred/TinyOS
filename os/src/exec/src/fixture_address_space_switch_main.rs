@@ -66,7 +66,7 @@ use kernel::context::{self, Context};
 use kernel::fault::{Disposition, FaultReport, FaultingContext};
 use kernel::measure::write_result;
 use kernel::mem::Pool;
-use kernel::sched::{Priority, Scheduler, TaskId, TaskState, WcetBudgetTicks};
+use kernel::sched::{OverrunPolicy, Priority, Scheduler, TaskId, TaskState, WcetBudgetTicks};
 
 const FRAMES: usize = 64;
 const STACK_SIZE: usize = 8_192;
@@ -326,12 +326,20 @@ fn run() -> bool {
             Ok(p) => p,
             Err(_) => return false,
         };
-        let Ok(task_a) = scheduler.create_task(priority, WcetBudgetTicks(1_000), task_a_entry)
-        else {
+        let Ok(task_a) = scheduler.create_task(
+            priority,
+            WcetBudgetTicks(1_000),
+            OverrunPolicy::TripToSafeState,
+            task_a_entry,
+        ) else {
             return false;
         };
-        let Ok(task_b) = scheduler.create_task(priority, WcetBudgetTicks(1_000), task_b_entry)
-        else {
+        let Ok(task_b) = scheduler.create_task(
+            priority,
+            WcetBudgetTicks(1_000),
+            OverrunPolicy::TripToSafeState,
+            task_b_entry,
+        ) else {
             return false;
         };
         if scheduler.set_address_space(task_a, cr3_a).is_none()

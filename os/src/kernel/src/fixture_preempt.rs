@@ -48,7 +48,7 @@ use kernel::context::{self, Context};
 use kernel::dispatch;
 use kernel::measure::write_result;
 use kernel::preempt::{self, TickOutcome};
-use kernel::sched::{Priority, Scheduler, TaskId, TaskState, WcetBudgetTicks};
+use kernel::sched::{OverrunPolicy, Priority, Scheduler, TaskId, TaskState, WcetBudgetTicks};
 
 /// Two tasks: the busy-looping victim and its preemptor.
 const TASKS: usize = 2;
@@ -325,7 +325,14 @@ unsafe fn create(slot: usize, priority: u8, entry: extern "C" fn() -> !) -> Opti
     unsafe {
         let scheduler = &mut *(&raw mut SCHEDULER);
         let priority = Priority::try_new(priority).ok()?;
-        let task = scheduler.create_task(priority, WcetBudgetTicks(1_000_000), entry).ok()?;
+        let task = scheduler
+            .create_task(
+                priority,
+                WcetBudgetTicks(1_000_000),
+                OverrunPolicy::TripToSafeState,
+                entry,
+            )
+            .ok()?;
         if task.index() != slot {
             return None;
         }

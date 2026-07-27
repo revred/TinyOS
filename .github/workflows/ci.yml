@@ -193,6 +193,58 @@ jobs:
       - name: TEST-P1-04-01-A — priority inversion avoided under real preemption
         run: cargo run -p xtask -- qemu-x86_64 --fixture=priority-inversion
 
+      # STORY-P1-04-02: the timer now enforces WCET budgets, not just measures
+      # them. One step per declared policy arm, all three driving the same
+      # enforcement path in kernel::wcet — the offending task's declaration is
+      # the only thing that differs between them.
+      #
+      # The restart step's real content is not "the task ran again": it is
+      # that enforcements are spaced a full budget apart, which is the only
+      # observable consequence of the kernel having reset the budget window.
+      # Without that assertion the fixture passed with every scheduler
+      # mutation removed, because the fixture's own context rewind reproduced
+      # the visible half. See REPORT-2026-07-28-04.
+      - name: TEST-P1-04-02-A — WCET overrun restarts the task from its entry point
+        run: cargo run -p xtask -- qemu-x86_64 --fixture=wcet-restart
+
+      # The degrade step fails unless a competitor at a priority *between* the
+      # offender's original and its declared floor makes no progress at all
+      # before the degrade and starts winning selections after it. Without
+      # that competitor, "degrade" is indistinguishable from "reset the budget
+      # and carry on".
+      - name: TEST-P1-04-02-A — WCET overrun degrades the task below a real competitor
+        run: cargo run -p xtask -- qemu-x86_64 --fixture=wcet-degrade
+
+      # This fixture's *correct* outcome is a failure exit code: the system
+      # enters its declared safe state, which at Tier 0 is a fail-closed stop.
+      #
+      # Exit 1 alone is NOT sufficient evidence here, and that is the
+      # difference between this step and the broken-boot one above. A fixture
+      # that failed for any other reason also exits 1, so the exit code cannot
+      # distinguish "tripped correctly" from "broke". A deliberate
+      # falsification confirmed it: with enforcement removed, this fixture
+      # still exited 1. The serial capture is therefore part of the assertion.
+      - name: TEST-P1-04-02-A — WCET overrun trips the system to its safe state (expect failure)
+        run: |
+          set +e
+          cargo run -p xtask -- qemu-x86_64 --fixture=wcet-trip --serial-capture=wcet-trip.log
+          code=$?
+          set -e
+          if [ "$code" -ne 1 ]; then
+            echo "expected xtask exit code 1 (fail-closed stop) for the wcet-trip fixture, got $code"
+            exit 1
+          fi
+          if ! grep -q 'task_finished=true' wcet-trip.log; then
+            echo "the offending task was not actually Finished by the kernel:"
+            cat wcet-trip.log
+            exit 1
+          fi
+          if ! grep -q 'TINYOS-RESULT/1 fixture=wcet-trip ok=true' wcet-trip.log; then
+            echo "wcet-trip exited 1 but did not report a correct trip:"
+            cat wcet-trip.log
+            exit 1
+          fi
+
       # STORY-P1-01-02's gate. Unlike the two steps above, this one *does*
       # assert about the numbers — but only the stable statistics (min, p50),
       # only over the median of three release-profile runs, and only against a

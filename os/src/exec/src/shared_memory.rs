@@ -311,7 +311,7 @@ mod tests {
     use crate::pe::SectionDescriptor;
     use hal_x86_64::paging::PageTable;
     use kernel::mem::Pool;
-    use kernel::sched::{Priority, Scheduler, WcetBudgetTicks};
+    use kernel::sched::{OverrunPolicy, Priority, Scheduler, WcetBudgetTicks};
 
     const IMAGE_BASE: u64 = 0x1_4000_0000;
     const SHAREE_VIRT: u64 = 0x1_5000_0000;
@@ -333,8 +333,22 @@ mod tests {
 
     fn two_tasks() -> (TaskId, TaskId) {
         let mut sched: Scheduler<4> = Scheduler::new();
-        let owner = sched.create_task(priority(1), WcetBudgetTicks(1000), dummy_entry).unwrap();
-        let sharee = sched.create_task(priority(1), WcetBudgetTicks(1000), dummy_entry).unwrap();
+        let owner = sched
+            .create_task(
+                priority(1),
+                WcetBudgetTicks(1000),
+                OverrunPolicy::TripToSafeState,
+                dummy_entry,
+            )
+            .unwrap();
+        let sharee = sched
+            .create_task(
+                priority(1),
+                WcetBudgetTicks(1000),
+                OverrunPolicy::TripToSafeState,
+                dummy_entry,
+            )
+            .unwrap();
         (owner, sharee)
     }
 

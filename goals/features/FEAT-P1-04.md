@@ -1,6 +1,6 @@
 # FEAT-P1-04 — Timer-Driven Preemption, Deadline Monitor & WCET Watchdog
 
-Status: **In Progress — 1 of 2 Stories Verified**
+Status: **Complete — 2 of 2 Stories Verified** (assurance `baseline-debt`; `LE-09` hardware debt open, and the Feature's title names a deadline monitor this Feature does not deliver — see below)
 Epic: [`EPIC-P1`](../epics/EPIC-P1.md)
 Introduced in: [`session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md`](../../session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md)
 
@@ -21,9 +21,11 @@ Give the scheduler its teeth (Goals **G-RT-1**, **G-RT-3**): `EPIC-P0` left a co
 | Story | Summary | Status |
 |---|---|---|
 | [`STORY-P1-04-01`](../stories/STORY-P1-04-01.md) | Timer-driven preemption: tick → interrupt-driven dispatch, priority-inheritance under real preemption | **Verified** (Tier 0 + Host, 2026-07-28, `REPORT-2026-07-28-03`; assurance `baseline-debt`) |
-| [`STORY-P1-04-02`](../stories/STORY-P1-04-02.md) | Deadline monitor & WCET watchdog on the real timer; overrun → declared fault policy | Specified |
+| [`STORY-P1-04-02`](../stories/STORY-P1-04-02.md) | Deadline monitor & WCET watchdog on the real timer; overrun → declared fault policy | **Verified** (Tier 0 + Host, 2026-07-28, `REPORT-2026-07-28-04`; assurance `baseline-debt`) |
 
-`STORY-P1-04-01` closed `LE-01` (priority inheritance's behavioural proof, open since `EPIC-P0`) and `LE-14` (extended-state save/restore — in the ISR stub, so it covers every tick rather than only preempting ones). `LE-02` is untouched and is `-04-02`'s to close: `wcet::record_tick` is still not driven by the real timer, and no overrun trips a declared policy.
+`STORY-P1-04-01` closed `LE-01` (priority inheritance's behavioural proof, open since `EPIC-P0`) and `LE-14` (extended-state save/restore — in the ISR stub, so it covers every tick rather than only preempting ones). `STORY-P1-04-02` closed `LE-02`: `wcet::record_tick` is driven by the real timer, and an overrun trips the policy the task declared at creation.
+
+**What this Feature does not deliver, stated rather than blurred.** Its title names a *deadline monitor* as well as a WCET watchdog. A declared deadline is a different quantity from a declared execution budget, and only the latter is enforced — see `STORY-P1-04-02`'s explicit scope. The Feature exits with that gap named. Two further items are open rather than closed: `LE-20` (neither preemption nor enforcement runs on the shipping `os` image — both are proven in fixtures only) and `LE-22` (degrade and priority inheritance have not been reconciled; a boosted holder that is degraded has the degrade undone by the subsequent unlock). Neither is a defect in what this Feature claims; both are named so nobody has to rediscover them.
 
 ## Containment contract
 

@@ -46,7 +46,7 @@ use kernel::dispatch;
 use kernel::fault::{Disposition, FaultReport, FaultingContext};
 use kernel::measure::write_result;
 use kernel::mem::Pool;
-use kernel::sched::{Priority, Scheduler, TaskId, TaskState, WcetBudgetTicks};
+use kernel::sched::{OverrunPolicy, Priority, Scheduler, TaskId, TaskState, WcetBudgetTicks};
 
 // The linker script's section-boundary symbols (`targets/x86_64-tinyos.ld`)
 // — the layout the W^X kernel tree is built from, so the permission map can
@@ -425,13 +425,20 @@ fn run() -> bool {
         let rw_page_entry: extern "C" fn() -> ! =
             core::mem::transmute((IMAGE_BASE + PAGE_SIZE) as usize);
 
-        let Ok(task_write) =
-            scheduler.create_task(high, WcetBudgetTicks(1_000), task_write_rx_entry)
-        else {
+        let Ok(task_write) = scheduler.create_task(
+            high,
+            WcetBudgetTicks(1_000),
+            OverrunPolicy::TripToSafeState,
+            task_write_rx_entry,
+        ) else {
             return false;
         };
-        let Ok(task_exec_rw) = scheduler.create_task(low, WcetBudgetTicks(1_000), rw_page_entry)
-        else {
+        let Ok(task_exec_rw) = scheduler.create_task(
+            low,
+            WcetBudgetTicks(1_000),
+            OverrunPolicy::TripToSafeState,
+            rw_page_entry,
+        ) else {
             return false;
         };
         if scheduler.set_address_space(task_write, cr3_task).is_none()
@@ -494,9 +501,12 @@ fn run() -> bool {
     let task_probe = unsafe {
         let scheduler = &mut *(&raw mut SCHEDULER);
         let Ok(priority) = Priority::try_new(8) else { return false };
-        let Ok(task_probe) =
-            scheduler.create_task(priority, WcetBudgetTicks(1_000), task_stale_probe_entry)
-        else {
+        let Ok(task_probe) = scheduler.create_task(
+            priority,
+            WcetBudgetTicks(1_000),
+            OverrunPolicy::TripToSafeState,
+            task_stale_probe_entry,
+        ) else {
             return false;
         };
         if scheduler.set_address_space(task_probe, cr3_task).is_none() {

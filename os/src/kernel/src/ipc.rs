@@ -180,7 +180,7 @@ impl<const CAP: usize, const MSG_LEN: usize> Channel<CAP, MSG_LEN> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sched::{Priority, Scheduler, WcetBudgetTicks};
+    use crate::sched::{OverrunPolicy, Priority, Scheduler, WcetBudgetTicks};
 
     #[allow(clippy::empty_loop)]
     extern "C" fn dummy_entry() -> ! {
@@ -193,8 +193,22 @@ mod tests {
 
     fn two_tasks() -> (TaskId, TaskId) {
         let mut sched: Scheduler<4> = Scheduler::new();
-        let a = sched.create_task(priority(1), WcetBudgetTicks(1000), dummy_entry).unwrap();
-        let b = sched.create_task(priority(1), WcetBudgetTicks(1000), dummy_entry).unwrap();
+        let a = sched
+            .create_task(
+                priority(1),
+                WcetBudgetTicks(1000),
+                OverrunPolicy::TripToSafeState,
+                dummy_entry,
+            )
+            .unwrap();
+        let b = sched
+            .create_task(
+                priority(1),
+                WcetBudgetTicks(1000),
+                OverrunPolicy::TripToSafeState,
+                dummy_entry,
+            )
+            .unwrap();
         (a, b)
     }
 
@@ -221,9 +235,30 @@ mod tests {
     #[test]
     fn a_third_task_cannot_send_or_receive() {
         let mut sched: Scheduler<4> = Scheduler::new();
-        let sender = sched.create_task(priority(1), WcetBudgetTicks(1000), dummy_entry).unwrap();
-        let receiver = sched.create_task(priority(1), WcetBudgetTicks(1000), dummy_entry).unwrap();
-        let outsider = sched.create_task(priority(1), WcetBudgetTicks(1000), dummy_entry).unwrap();
+        let sender = sched
+            .create_task(
+                priority(1),
+                WcetBudgetTicks(1000),
+                OverrunPolicy::TripToSafeState,
+                dummy_entry,
+            )
+            .unwrap();
+        let receiver = sched
+            .create_task(
+                priority(1),
+                WcetBudgetTicks(1000),
+                OverrunPolicy::TripToSafeState,
+                dummy_entry,
+            )
+            .unwrap();
+        let outsider = sched
+            .create_task(
+                priority(1),
+                WcetBudgetTicks(1000),
+                OverrunPolicy::TripToSafeState,
+                dummy_entry,
+            )
+            .unwrap();
         let mut channel: Channel<4, 16> = Channel::new(sender, receiver);
 
         assert_eq!(

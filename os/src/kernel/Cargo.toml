@@ -84,6 +84,17 @@ fixture-preempt = []
 # `xtask qemu-x86_64 --fixture=priority-inversion`, never enabled in a real
 # boot image.
 fixture-priority-inversion = []
+# `STORY-P1-04-02`/`TEST-P1-04-02-A` clauses 4-7: a task that exceeds its
+# declared WCET budget under the real local-APIC timer has the consequence it
+# declared at creation applied to it. One fixture per policy arm, all three
+# sharing `fixture_wcet.rs` so the arms cannot drift apart — only one of these
+# three is ever enabled at a time. Never enabled in a real boot image.
+fixture-wcet-restart = []
+fixture-wcet-degrade = []
+# This fixture's *correct* result is a QEMU isa-debug-exit **Failure** code:
+# its whole claim is that the system stops. Same precedent as
+# `fixture-broken-boot` and `fixture-idt-apic-unrouted`.
+fixture-wcet-trip = []
 # The same measurement fixture with one measured phase deliberately made ~8x
 # slower, so `xtask check-timing-regression --inject-regression` can prove the
 # gate actually fails — `STORY-P1-01-02`'s "prove it can fail" criterion, and

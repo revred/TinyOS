@@ -167,7 +167,7 @@ pub unsafe fn on_timer_tick<const N: usize>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sched::{TaskState, WcetBudgetTicks};
+    use crate::sched::{OverrunPolicy, TaskState, WcetBudgetTicks};
 
     #[allow(clippy::empty_loop)]
     extern "C" fn dummy_entry() -> ! {
@@ -180,8 +180,22 @@ mod tests {
 
     fn scheduler_with_two() -> (Scheduler<4>, TaskId, TaskId) {
         let mut sched: Scheduler<4> = Scheduler::new();
-        let low = sched.create_task(priority(5), WcetBudgetTicks(1_000), dummy_entry).unwrap();
-        let high = sched.create_task(priority(25), WcetBudgetTicks(1_000), dummy_entry).unwrap();
+        let low = sched
+            .create_task(
+                priority(5),
+                WcetBudgetTicks(1_000),
+                OverrunPolicy::TripToSafeState,
+                dummy_entry,
+            )
+            .unwrap();
+        let high = sched
+            .create_task(
+                priority(25),
+                WcetBudgetTicks(1_000),
+                OverrunPolicy::TripToSafeState,
+                dummy_entry,
+            )
+            .unwrap();
         (sched, low, high)
     }
 
@@ -251,7 +265,14 @@ mod tests {
     #[test]
     fn the_candidate_is_the_task_the_dispatcher_itself_would_select() {
         let (mut sched, low, high) = scheduler_with_two();
-        let medium = sched.create_task(priority(15), WcetBudgetTicks(1_000), dummy_entry).unwrap();
+        let medium = sched
+            .create_task(
+                priority(15),
+                WcetBudgetTicks(1_000),
+                OverrunPolicy::TripToSafeState,
+                dummy_entry,
+            )
+            .unwrap();
 
         // `low` is running, so it is not Ready and cannot be its own
         // candidate; `high` outranks `medium`.
@@ -282,7 +303,14 @@ mod tests {
     #[test]
     fn a_boosted_holder_is_no_longer_preemptible_by_the_medium_task() {
         let (mut sched, low, _high) = scheduler_with_two();
-        let medium = sched.create_task(priority(15), WcetBudgetTicks(1_000), dummy_entry).unwrap();
+        let medium = sched
+            .create_task(
+                priority(15),
+                WcetBudgetTicks(1_000),
+                OverrunPolicy::TripToSafeState,
+                dummy_entry,
+            )
+            .unwrap();
 
         // Before the boost: medium outranks the holder and would preempt it.
         let before = (low, sched.live_priority_of(low).unwrap());
@@ -307,7 +335,14 @@ mod tests {
         assert_eq!(sched.live_priority_of(low), Some(priority(25)));
 
         let mut empty: Scheduler<1> = Scheduler::new();
-        let gone = empty.create_task(priority(3), WcetBudgetTicks(10), dummy_entry).unwrap();
+        let gone = empty
+            .create_task(
+                priority(3),
+                WcetBudgetTicks(10),
+                OverrunPolicy::TripToSafeState,
+                dummy_entry,
+            )
+            .unwrap();
         empty.free_task_for_test(gone);
         assert_eq!(empty.live_priority_of(gone), None);
         // And a tick naming a task that no longer exists decides nothing.

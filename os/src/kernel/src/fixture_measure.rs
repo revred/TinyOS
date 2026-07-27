@@ -41,7 +41,7 @@ use kernel::dispatch;
 use kernel::fault::{Disposition, FaultReport, FaultingContext};
 use kernel::measure::{Calibration, Environment, Metric, Report, Samples, Stopwatch};
 use kernel::mem::Pool;
-use kernel::sched::{Priority, Scheduler, TaskState, WcetBudgetTicks};
+use kernel::sched::{OverrunPolicy, Priority, Scheduler, TaskState, WcetBudgetTicks};
 
 /// Every phase's sample capacity. One shared buffer in `.bss`, cleared
 /// between phases (the reuse pattern [`Samples::clear`] exists for), rather
@@ -264,7 +264,15 @@ fn phase_dispatch_select<S: CycleSource>(
         let Ok(priority) = Priority::try_new(priority) else {
             return false;
         };
-        if scheduler.create_task(priority, WcetBudgetTicks(1_000), dispatch_yield_forever).is_ok() {
+        if scheduler
+            .create_task(
+                priority,
+                WcetBudgetTicks(1_000),
+                OverrunPolicy::TripToSafeState,
+                dispatch_yield_forever,
+            )
+            .is_ok()
+        {
             created += 1;
         }
     }
@@ -318,8 +326,12 @@ fn phase_dispatch_round<S: CycleSource>(
     let Ok(priority) = Priority::try_new(11) else {
         return false;
     };
-    let Ok(task) = scheduler.create_task(priority, WcetBudgetTicks(1_000), dispatch_yield_forever)
-    else {
+    let Ok(task) = scheduler.create_task(
+        priority,
+        WcetBudgetTicks(1_000),
+        OverrunPolicy::TripToSafeState,
+        dispatch_yield_forever,
+    ) else {
         return false;
     };
     if task.index() != 0 {
