@@ -36,21 +36,42 @@ Two smaller notes. `wcet::record_tick` takes `&mut Scheduler`, and calling it fr
 
 ### After it, in order of how cheap they are
 
+- **Fix the timing gate (`LE-16` + `LE-18`).** `main`'s CI is red on it right now, and the section below shows it is measuring the runner rather than the code. This outranks everything else in this list on *cost of leaving it*: a gate nobody trusts is one people learn to re-run, and the next real timing regression will be waved through by exactly that habit. It belongs under `FEAT-P1-01` as a fourth Story.
 - **`LE-20` — the shipping image does not preempt.** `os` installs no `TickHook`, so it still runs its workload cooperatively. Small, and the same "proven in a fixture, not on the real boot path" shape `LE-05` had for a whole Feature. It should not be allowed to sit as long.
 - **`FEAT-P1-05` / `FEAT-P1-06`** — the two proof Features, and `-06` is the Epic's flagship exit.
 - **`FEAT-P9-01`'s two Stories** — the dump-scan audit and the staging-arena wipe. Independent of everything above, no hardware precondition, and the audit is the instrument `EPIC-P9`'s own falsification tests need. Pick these up whenever `EPIC-P1` stalls.
 
-## The state of the tree — read this before you type anything
+## The state of the tree
 
-**The work is on a branch and is not merged, not pushed, and not entirely committed.**
+**Everything is committed, merged to `main` and pushed. The working tree is clean.** The branch
+`feat/p1-04-preemption-and-epic-p9` was merged with `--no-ff`, so its four commits stay visible as a unit.
 
-- Branch `feat/p1-04-preemption-and-epic-p9`, three commits ahead of `main` (`5ae9904` FEAT-P1-03 completion, `27126e1` preemption, `4944fbe` `EPIC-P9`).
-- **Only `HEAD` is verified.** The tree had never been committed incrementally, and fourteen files carry changes from more than one body of work, so commits 1 and 2 do not pass `check-assurance-spine` standalone — the expected counts and the contract rows landed in different commits. If you need per-commit green, squash; do not try to "fix" the intermediate commits.
-- **Three files are uncommitted, deliberately**, because they are `STORY-P1-04-02`'s opening move rather than part of any commit above: `goals/stories/STORY-P1-04-02.md` (finalized criteria), `goals/tests/TEST-P1-04-02-A.md` (new), and `os/src/xtask/src/assurance.rs` (expected Test count 33 → 34). Commit them with your first implementation commit, or on their own — but do not lose them, and note that the spine gate already expects the higher count.
+```
+7500e33  The timing-gate flake, settled: a markdown-only commit swung it 2x
+9ffdf44  Record the timing-gate CI flake with its evidence, and the Windows lint gap
+f58dd8d  Fix the clippy break CI caught, and record why local verification missed it
+c72a1b6  Merge: timer-driven preemption and the EPIC-P9 confidentiality decomposition
+  4596d11  Start STORY-P1-04-02 with its Test document
+  4944fbe  Decompose memory confidentiality into EPIC-P9
+  27126e1  Give the timer a consumer: dispatch is now preemptive
+  5ae9904  Complete FEAT-P1-03
+```
 
-## Two CI facts you will otherwise rediscover the hard way
+Two things about that history worth knowing before you use it:
 
-**The timing gate is flaky on the GitHub runner, and there is now evidence rather than suspicion.** `D05/dispatch_select_highest_priority_ready` sits almost exactly on its own tolerance boundary under CI conditions. Three consecutive runs, same baseline and same limit throughout:
+- **Only the merge point and later are verified.** The tree had never been committed incrementally — the
+  `FEAT-P1-03` work arrived already uncommitted — and fourteen files carry changes from more than one body of
+  work, so `5ae9904` and `27126e1` do not pass `check-assurance-spine` standalone. Do not try to "fix" them;
+  bisecting across them will produce confusing results, and that is a property of how the tree arrived, not a
+  defect to repair.
+- **`f58dd8d` exists because CI caught something local verification could not.** See the Windows lint gap
+  below — run that command before you push.
+
+## The one regression this session leaves behind, and what it actually is
+
+**`main`'s CI is red on the timing gate, it is not the code, and fixing it properly is the highest-value unowned work in the register.** Treat this section as a work item, not as background.
+
+`D05/dispatch_select_highest_priority_ready` sits almost exactly on its own tolerance boundary under CI conditions. Four consecutive runs, same baseline and same limit throughout:
 
 | Run | Commit | observed p50 | limit | Verdict |
 |---|---|---|---|---|
@@ -65,7 +86,37 @@ The baseline is 76 and the tolerance is `max(60%, 24 cycles)`, so the limit is 1
 
 **Practical consequence: this step's verdict currently carries no information about the code.** Read the `observed` value, and compare it against the 90–182 range recorded above before concluding anything. A genuine regression would have to clear that band to be visible at all, which is a fair statement of how weak this gate is on this runner.
 
-**Do not "fix" it by widening the tolerance or re-recording the baseline.** That is precisely the move Handover 05 recorded as a mistake — it looks harmless, is hard to argue against later, and would permanently destroy the only gate this project has against timing regressions in exchange for suppressing a symptom. `LE-18` is unowned and needs a Story that decides what these baselines are *of* — per-runner baselines, a noise-floor calibration step, or moving the gate off shared CI hardware entirely. **That Story is the fix, and it is now the highest-value unowned item in the register.**
+### The diagnosis, from the two runs' full statistics
+
+Comparing the good run against the bad one — again, **identical binaries** — every gated metric moved together:
+
+| Metric | `f58dd8d` p50 | `9ffdf44` p50 | ratio |
+|---|---|---|---|
+| `D07/pool_u64x64_alloc_free_round_trip` | 12 | 26 | 2.17x |
+| `D07/pool_u64x4_alloc_denied_exhausted` | 22 | 26 | 1.18x |
+| `D04/context_switch_yield_roundtrip_2switches` | 168 | 312 | 1.86x |
+| `D05/dispatch_select_highest_priority_ready` | 90 | **182** | **2.02x** |
+| `D05/dispatch_run_once_cooperative_round` | 200 | 364 | 1.82x |
+
+**Finding 1 — the noise is global, not per-metric.** Everything scales by roughly 1.8–2.2x between runs. Nothing about `D05/dispatch_select` is specially unstable; it is simply the metric with the least headroom, so it is the one that trips first. The runner's speed varies about twofold and drags every measurement with it.
+
+**Finding 2 — the committed baselines are mutually inconsistent, and this is the part nobody had noticed.** In *both* runs, two metrics report `improved (is the baseline stale?)` by large factors — `D07/pool_u64x64_alloc_free_round_trip` at baseline 70 against observed 12–26, and `D05/dispatch_run_once_cooperative_round` at baseline 446 against observed 200–364. Three-to-six times faster than baseline. Meanwhile `D05/dispatch_select`'s baseline of 76 is *tighter* than anything the runner actually achieves. Those baselines cannot all have been captured under the same conditions. The gate is not merely noisy — **it is comparing against a ruler assembled from measurements taken on different days under different loads**, which is why one metric has no headroom while its neighbours have several multiples of it.
+
+### The fix, and the shape it should take
+
+This project has already solved exactly this problem once, and the precedent is the answer. `kernel::fixture_idt_apic_timer` gates on `MAX_INTERVAL_RATIO` — *"a self-consistency bound rather than a fixed microsecond figure, since QEMU's own APIC-timer-to-wall-clock relationship under software emulation is not itself a stable absolute number this fixture should depend on."* That reasoning applies verbatim here, and the timing gate never got the memo.
+
+Given Finding 1, the strong fix is **to stop gating on absolute cycle counts and gate on same-run relationships instead**. Every metric moves together, so a ratio between two metrics measured in the same run is far more stable than either absolute — and a genuine regression in one operation changes the ratio while a slow runner does not. Concretely, the shapes worth evaluating, cheapest first:
+
+1. **Normalise each run against a same-run reference metric** before comparison, so the baseline is a set of ratios rather than a set of cycle counts. Smallest change to `xtask::gate`, and it directly answers Finding 1.
+2. **Re-record all baselines in a single coherent run**, because Finding 2 shows they are not currently comparable with each other. **Read the caution below before doing this.**
+3. **Move the gate off shared CI hardware** — the only thing that fixes absolute numbers, and it is blocked on `LE-09`.
+
+**The caution, stated sharply because it is easy to misread.** Handover 05 records that re-recording a baseline or widening a tolerance *to make a failing gate green* is a mistake — it looks harmless, is hard to argue against later, and destroys the signal in exchange for suppressing a symptom. That still stands, and item 2 above is **not** an exemption from it. The distinction is the evidence: re-recording is defensible here **only** as part of a Story that fixes the methodology first, and only because Finding 2 independently shows the existing baselines were never mutually consistent. Re-recording on its own, without item 1, would produce a gate that is green today and exactly as uninformative as it is now. If you find yourself reaching for `--update-baseline` and nothing else, stop.
+
+Note also `LE-19` part (b): `--update-baseline` rewrites every measured row, so item 2 cannot currently refresh one metric without silently re-recording the rest. That open item is a prerequisite for doing item 2 safely, not a separate concern.
+
+**Ownership.** This is `LE-16` (the gate only detects ~1.6x-or-worse regressions) meeting `LE-18` (it is host-condition-sensitive), and the work belongs under `FEAT-P1-01`, which owns the gate — a fourth Story alongside `STORY-P1-01-01`/`-02`/`-03`. It has no Story document yet; write one when you pick it up, with a Test document that includes a **deliberately-injected regression that the new gate still catches**, since a gate made noise-tolerant is worthless if it has also been made blind. `--inject-regression` already exists for exactly that purpose.
 
 **A Windows development machine cannot reproduce CI's lint job.** CI runs `cargo clippy --workspace --all-targets`. On Windows that command fails outright — every `no_std` binary needs `hal_x86_64::{boot,interrupts,qemu_exit,serial}`, all gated `not(target_os = "windows")`. The command used throughout this session, `--workspace --lib --tests`, never lints a binary at all, and that is how a `deref_addrof` break reached `main`. What does work locally:
 
@@ -104,7 +155,9 @@ Run that before pushing. It is the mirror image of `LE-12` — that one says CI 
 
 **Reframed:** `LE-11` (`Context::new` seeds task `rflags` with `IF` set). Under preemption this is now *load-bearing by design* — it is what re-enables interrupts across a switch into a task — rather than an accident to be mitigated. Still open for fixtures that arm no IDT.
 
-**Open, unowned:** `LE-08`, `LE-10`, `LE-12`, `LE-18`, `LE-19` part (b). **Open, owned:** `LE-03`, `LE-09`, `LE-15`, `LE-16`.
+**A live regression, and the first thing to fix:** `LE-16` + `LE-18` together — the timing gate is red on `main` and is measuring the GitHub runner, not this kernel. Diagnosed with evidence above (global ~2x run-to-run variance, plus baselines that are not mutually consistent). Belongs under `FEAT-P1-01` as a fourth Story; **no Story document exists yet.** Formally both loose ends are still open — `LE-18` unowned, `LE-16` owned-but-unscheduled — and this session did not change that. What it changed is that there is now a diagnosis instead of a suspicion.
+
+**Open, unowned:** `LE-08`, `LE-10`, `LE-12`, `LE-19` part (b). **Open, owned:** `LE-03`, `LE-09`, `LE-15`.
 
 Full register with origins and fix paths: [Handover 09 §Loose-ends](09-story-p1-04-01-preemption.md#loose-ends-register-canonical-as-of-this-handover).
 
@@ -113,17 +166,25 @@ Still unowned and unscheduled from Handover 06, unchanged: clean task terminatio
 ## How to verify you have a good starting state
 
 ```
-git checkout feat/p1-04-preemption-and-epic-p9
+git checkout main            # 7500e33; the work is merged, nothing to restore
 cd os
 cargo test --workspace                                    # 383 passing
 cargo fmt --all -- --check
-cargo clippy --workspace --lib --tests -- -D warnings
 cargo run -p xtask --quiet -- check-assurance-spine        # 22 Features / 47 Stories / 34 Tests / 40 Reports
 cargo run -p xtask --quiet -- check-image-size             # os, 74,568 bytes
 cargo run -p xtask --quiet -- qemu-x86_64 --fixture=preempt
 cargo run -p xtask --quiet -- qemu-x86_64 --fixture=priority-inversion
 cargo run -p xtask --quiet -- qemu-x86_64 --fixture=os
 ```
+
+**And the lint command CI actually uses**, which is *not* `--workspace --lib --tests` and cannot be run as
+`--all-targets` on Windows (see the gap recorded above):
+
+```
+cargo clippy -p kernel --bins --target targets/x86_64-tinyos.json -Zjson-target-spec   -Zbuild-std=core,compiler_builtins -Zbuild-std-features=compiler-builtins-mem -- -D warnings
+```
+
+Repeat for `-p exec` and `-p os`. All three must be clean before you push.
 
 Every Tier 0 fixture should pass, with exactly two exceptions that are *supposed* to return exit 1: `broken-boot` and `idt-apic-unrouted`, each of whose documented pass condition is a distinguishable failure. `STORY-P1-04-02` will add a third (`wcet-trip`).
 
