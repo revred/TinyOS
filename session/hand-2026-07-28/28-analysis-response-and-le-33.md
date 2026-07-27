@@ -120,6 +120,29 @@ time**, not as satisfiable obligations. Otherwise the contract presents as close
 cheapest lie is available again. The row names where it belongs: `goals/assurance/README.md`, and
 ideally inside `check-assurance-spine` so the shape cannot be got wrong by hand.
 
+### `LE-36` — this session broke another session's gate, and the protocol had no rule for it (new)
+
+Registered against my own work. The `LE-29` edit above was hand-built, and it **consumed the tab
+separating `summary` from `origin`**, leaving a 7-field row in an 8-field file. I caught it with my
+own field-count check and repaired it several tool calls later.
+
+In that window, `check-assurance-spine` failed for the `STORY-P1-07-02` session, which had changed
+nothing, in a file it was correctly leaving alone, for a reason it could not diagnose from its own
+tree. Their handling was better than `CONCURRENT_SESSIONS.md` asked for: they did not touch the
+file, did not reach for `--no-verify`, verified their subset in a throwaway worktree over clean
+`HEAD`, and waited for the row to complete.
+
+**Rule 2 worked — the gate caught it. No rule prevented it.** `CONCURRENT_SESSIONS.md` covered
+staging, unread commits, numbering, rewriting others' documents and rebasing, and said nothing about
+leaving a machine-checked shared file unparseable between steps. It now has a **rule 8**: validate a
+hand-edited machine-checked file before your next tool call, and — the more valuable half —
+the prescribed response when you hit someone else's broken row, taken directly from what that
+session actually did.
+
+What is still missing is a machine. Nothing validates a spine TSV at write time, so rule 8 is prose,
+and the next occurrence depends on someone remembering it. `LE-28`, `LE-33` and now `LE-36` are the
+same sentence in three places.
+
 ### `LE-31` — first pass done, and it changes the conclusion
 
 The audit was run mechanically over `story-contracts.tsv` against the domain tier table. It confirms
@@ -165,7 +188,7 @@ indistinguishable from a charter amendment.
 ## Verification
 
 ```text
-check-assurance-spine        green — 35 loose ends (24 open), was 32 (21)
+check-assurance-spine        green — 36 loose ends (25 open), was 32 (21)
 check-performance-catalogue  green — 625 cells (25 x 25)
 cargo test -p xtask          137 passed
 cargo test --workspace       549 passed

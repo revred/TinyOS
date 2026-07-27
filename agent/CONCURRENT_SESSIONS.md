@@ -44,6 +44,27 @@ Another agent's commits may already be on `main` that were not there when you st
 
 If a session ran concurrently, its handover states which commits arrived mid-session and what they touched. Handovers 01 and 19 both do this; the reader's alternative is reconstructing a race from a commit graph.
 
+**8. Never leave a machine-checked shared file invalid between tool calls.**
+
+Later on 2026-07-28, a hand-built edit to [`goals/assurance/loose-ends.tsv`](../goals/assurance/loose-ends.tsv)
+consumed the tab separating two fields, leaving a 7-field row in an 8-field file. The session that
+made it caught the break with its own field-count check and repaired it several steps later. In
+between, `check-assurance-spine` failed for a **different** session that had changed nothing — in a
+file they were correctly leaving alone, for a reason they could not diagnose from their own tree.
+
+Rule 2 worked: their pre-commit caught it rather than letting a broken spine ship. But no rule
+prevented it. So: **when you hand-edit a machine-checked file, validate it before your next tool
+call** — a field-count pass or the relevant `check-*` subcommand — not several steps later when you
+happen to look. The edit is not finished until the file parses.
+
+And when you *hit* someone else's broken row, the response is the one the `STORY-P1-07-02` session
+used, which is better than this document previously asked for:
+
+- **Do not repair it.** It is mid-edit, not abandoned. This is rule 5's sibling.
+- **Do not reach for `--no-verify`.** The gate is right; your tree is just not the whole tree.
+- **Verify your own subset in a throwaway worktree over clean `HEAD`**, then wait for the row to
+  complete.
+
 ## The rule for counts and totals
 
 The five spine-count re-syncs have one cause worth naming separately, because it recurs anywhere two sessions share a repository:
