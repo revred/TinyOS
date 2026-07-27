@@ -112,6 +112,8 @@ Beyond these three committed reference workloads, [`docs/extended-domain-workloa
 
 TinyOS is **64-bit only** — no 32-bit boot path is planned or supported, on either architecture.
 
+**Which architecture carries which claim** ([ADR 0004](docs/adr/0004-arm64-is-the-real-time-tier.md), accepted 2026-07-28): **ARM64 is the real-time tier of record** — worst-case latency bounds, WCET claims and jitter envelopes are stated and gated on ARM64 hardware, because x86 System Management Interrupts are entered above the kernel, cannot be masked, observed or attributed by the OS, and therefore make any x86_64 worst-case bound a claim about the firmware rather than about TinyOS. **x86_64 remains a full first-class target** for throughput, rich-workload, host-bridge and developer-experience claims, and remains the Tier 0 CI gate. Nothing is de-scoped; what changes is which architecture a *bound* may be quoted from.
+
 **Committed hardware scope:** x86_64/Intel-and-AMD-chipset PCs and ARM64 boards that expose a standard hardware description (ACPI or Device Tree/SBSA/EBBR) — this includes Windows-PC-class laptops/NUCs and Jetson-class or comparable ARM64 SBCs. **Apple Silicon is explicitly tracked as best-effort, not committed**, because Apple does not publish public hardware interfaces for it; see the [Universal Driver Model](docs/universal-driver-model.md#the-apple-silicon-constraint-stated-plainly) for why this isn't a design gap TinyOS can architect around on its own.
 
 ### Tier 0 — Emulated (CI gate, every commit)
@@ -122,7 +124,7 @@ TinyOS is **64-bit only** — no 32-bit boot path is planned or supported, on ei
 ### Tier 1 — Edge device (primary mission target)
 
 - **Jetson Orin Nano** (ARM64) — the standard edge target for new hardware bring-up; its integrated GPU and unified CPU/GPU memory make it the reference platform for the Unified Memory Manager and GPU-accelerated local inference (Ollama) validation — see [Heterogeneous Compute & Distributed Inference](docs/inference-architecture.md).
-- A second, non-NVIDIA ARM64 board (e.g. Raspberry Pi 4/5) — portability check so the HAL doesn't quietly grow Jetson-only assumptions. Not expected to have comparable GPU/VRAM capability; used for CPU-side/HAL portability, not inference validation.
+- **Raspberry Pi 5** (ARM64, BCM2712) — **`EPIC-P1`'s first physical timing target, being brought up now** by [`FEAT-P1-07`](goals/features/FEAT-P1-07.md). It is the board that closes `LE-09`, the release-blocking hardware-tier debt every timing Report in this repository currently carries. Also serves the original portability purpose — a second, non-NVIDIA ARM64 board so the HAL doesn't quietly grow Jetson-only assumptions. Not expected to have comparable GPU/VRAM capability; used for CPU-side/HAL portability and real-time measurement, not inference validation.
 
 ### Tier 2 — Laptop / x86_64 (host-bridge + full UX validation)
 
@@ -144,7 +146,9 @@ This pairing deliberately avoids a third, non-64-bit microcontroller board for "
 2. Jetson Orin Nano — primary real-world edge target.
 3. Generic x86_64 laptop/NUC — host-bridge and shell UX target.
 
-Raspberry Pi and real CAN/USB hardware-in-the-loop rigs are added from Phase 3 onward, once the bus stack exists.
+Real CAN/USB hardware-in-the-loop rigs are added from Phase 3 onward, once the bus stack exists.
+
+**Corrected 2026-07-28.** This line previously placed Raspberry Pi at "Phase 3 onward" alongside the HIL rigs. That is superseded: a Raspberry Pi 5 is in hand and is `EPIC-P1`'s (Phase 1) first physical timing target — see [`FEAT-P1-07`](goals/features/FEAT-P1-07.md). The two were never the same commitment. The HIL rigs wait on the bus stack; the Pi 5 waits on nothing, because the slice that reaches it needs no bus, no network and no drivers — the firmware loads the image from SD and the debug UART carries the results. Note that on a Pi 5 the reverse is emphatically true of networking: USB, Ethernet and GPIO all sit behind the RP1 southbridge over PCIe, so peer-to-peer Ethernet is *not* a near-term transport on this board (`LE-26`).
 
 ---
 
