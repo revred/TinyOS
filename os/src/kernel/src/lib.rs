@@ -18,6 +18,7 @@ pub mod ipc;
 pub mod lock;
 pub mod measure;
 pub mod mem;
+pub mod preempt;
 pub mod sched;
 pub mod spoor;
 pub mod spoor_journal;

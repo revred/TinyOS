@@ -1,6 +1,6 @@
 # FEAT-P1-04 — Timer-Driven Preemption, Deadline Monitor & WCET Watchdog
 
-Status: **Specified — no Story started**
+Status: **In Progress — 1 of 2 Stories Verified**
 Epic: [`EPIC-P1`](../epics/EPIC-P1.md)
 Introduced in: [`session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md`](../../session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md)
 
@@ -20,8 +20,10 @@ Give the scheduler its teeth (Goals **G-RT-1**, **G-RT-3**): `EPIC-P0` left a co
 
 | Story | Summary | Status |
 |---|---|---|
-| [`STORY-P1-04-01`](../stories/STORY-P1-04-01.md) | Timer-driven preemption: tick → interrupt-driven dispatch, priority-inheritance under real preemption | Specified |
+| [`STORY-P1-04-01`](../stories/STORY-P1-04-01.md) | Timer-driven preemption: tick → interrupt-driven dispatch, priority-inheritance under real preemption | **Verified** (Tier 0 + Host, 2026-07-28, `REPORT-2026-07-28-03`; assurance `baseline-debt`) |
 | [`STORY-P1-04-02`](../stories/STORY-P1-04-02.md) | Deadline monitor & WCET watchdog on the real timer; overrun → declared fault policy | Specified |
+
+`STORY-P1-04-01` closed `LE-01` (priority inheritance's behavioural proof, open since `EPIC-P0`) and `LE-14` (extended-state save/restore — in the ISR stub, so it covers every tick rather than only preempting ones). `LE-02` is untouched and is `-04-02`'s to close: `wcet::record_tick` is still not driven by the real timer, and no overrun trips a declared policy.
 
 ## Containment contract
 

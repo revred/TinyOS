@@ -110,6 +110,89 @@ jobs:
       - name: TEST-P1-02-02-A — a fault inside the fault path lands on the IST stack
         run: cargo run -p xtask -- qemu-x86_64 --fixture=double-fault
 
+      # STORY-P1-03-01: two tasks, each with a genuinely distinct real CR3,
+      # switched between via kernel::context::switch_address_space. Task A's
+      # own page tables have no entry at all for task B's private address, so
+      # its adversarial probe raises a real #PF, contained the same way
+      # fixture=fault already proves — and task B keeps running afterward.
+      - name: STORY-P1-03-01 — two real address spaces, switched by CR3, isolated by a real fault
+        run: cargo run -p xtask -- qemu-x86_64 --fixture=address-space-switch
+
+      # STORY-P1-03-02 Part A. W^X proven adversarially in BOTH directions
+      # with the enforcement bits actually on (CR0.WP and EFER.NXE — without
+      # them a ring-0 W^X claim is vacuous, which is why enabling them is
+      # part of the fixture, not an assumption behind it): a task writes its
+      # own RX page, another executes its own RW page, each raising a real
+      # #PF contained to itself. The same run retires the boot-time all-RWX
+      # identity map for a W^X kernel tree built from the linker's own
+      # section symbols, proves the kernel directories are *shared* (one
+      # physical PD read back through every tree, not a per-space copy),
+      # audits every leaf of both live trees for W+X and for writable
+      # aliases of executable frames, and finishes with generation-safe
+      # teardown checked by a stale-mapping probe task.
+      - name: TEST-P1-03-02-A (A1-A4) — W^X both directions, shared kernel PDs, sealing, teardown
+        run: cargo run -p xtask -- qemu-x86_64 --fixture=wx-seal
+
+      # STORY-P1-03-02 Part B — the first real task. The real boot path
+      # (ACPI topology + PCI bus 0, same calls and same success gates as
+      # kernel_main) then loads the real blue-sharc.exe through the real
+      # PE64/TXE pipeline into its own W^X address space and schedules it
+      # through the CR3-aware dispatcher. The load-time capability gate
+      # refuses its real 205-import surface and journals the refusal; the
+      # image is then run anyway under an explicit override policy, and its
+      # own CRT's call to an unallowlisted Win32 API through an unpatched
+      # IAT faults for real and is contained. Nothing in that fault is
+      # staged, which is exactly why this step is worth running: it is the
+      # first time this project's containment is exercised by a real
+      # workload's own defect rather than by a fixture built to fault.
+      - name: TEST-P1-03-02-A (I1-I5) — the first real task, contained and audited
+        run: cargo run -p xtask -- qemu-x86_64 --fixture=first-task
+
+      # STORY-P1-03-03. The system image itself: `os` is the first binary in
+      # this project's history whose *real* boot path discovers hardware,
+      # brings up W^X memory protection, loads a real PE64 through the real
+      # loader, resolves its imports against the capability allowlist, and
+      # schedules it as a task under its own CR3. Before this, the shipping
+      # binary was `kernel`, which could never link `exec` (cyclic crate
+      # dependency) and so had never created a task at all. This step fails
+      # if the workload's granted `GetCurrentProcess` call does not return
+      # the correct pseudo-handle, or if its denied call is not contained.
+      - name: TEST-P1-03-03-A — the system image boots, loads and runs a real task
+        run: cargo run -p xtask -- qemu-x86_64 --fixture=os
+
+      # STORY-P1-03-03: FEAT-P1-03's last exit criterion. Two dispatch
+      # rounds through the production CR3-aware dispatcher differing only in
+      # whether the selected task's address space is already loaded, so the
+      # difference between them is what isolation costs per scheduling
+      # decision. Reported, deliberately not gated: at Tier 0 the cross-space
+      # figure is dominated by TCG's own TLB-flush emulation rather than by
+      # the instruction, so thresholding it would gate the emulator.
+      - name: TEST-P1-03-03-A — D04 same-space vs cross-space dispatch cost
+        run: cargo run -p xtask -- measure --runs=1 --fixture=dispatch
+
+      # STORY-P1-04-01: the first genuinely preemptive dispatch this kernel
+      # has performed. A low-priority task whose body contains no switch, no
+      # hlt and no scheduler call is taken off the CPU by a real local-APIC
+      # tick in favour of a task the tick hook itself made Ready, and — the
+      # adversarial half, LE-14 — the SSE register it was using survives a
+      # preemption in which the preempting task deliberately writes a
+      # different value into it. That second check is not decoration: it is
+      # what caught the extended-state save being in the wrong place (around
+      # the context switch rather than around the whole ISR), which every
+      # non-preempting tick would otherwise have walked straight through.
+      - name: TEST-P1-04-01-A — a task that never yields is preempted, with its SSE state intact
+        run: cargo run -p xtask -- qemu-x86_64 --fixture=preempt
+
+      # STORY-P1-04-01, closing STORY-P0-02-03's own host-only caveat: the
+      # classic three-task inversion scenario under genuine preemption. Low
+      # holds the lock, high preempts and blocks on it, medium spins at a
+      # priority between them. The build fails unless the dispatch order is
+      # low -> high -> low -> high *and* medium's counter is frozen across
+      # that window while medium is demonstrably Ready throughout — both,
+      # because either alone can be satisfied for the wrong reason.
+      - name: TEST-P1-04-01-A — priority inversion avoided under real preemption
+        run: cargo run -p xtask -- qemu-x86_64 --fixture=priority-inversion
+
       # STORY-P1-01-02's gate. Unlike the two steps above, this one *does*
       # assert about the numbers — but only the stable statistics (min, p50),
       # only over the median of three release-profile runs, and only against a

@@ -9,16 +9,28 @@
 //! task yields back cooperatively by calling [`crate::context::switch`]
 //! itself, into the caller-supplied `dispatcher_ctx`.
 //!
-//! **Scope note.** This is a *cooperative* dispatcher, not a preemptive
-//! one: there is still no timer interrupt / IDT in this kernel
-//! (`STORY-P0-05-02`'s named gap), so nothing forces a running task to
-//! yield — it must call `switch` back itself. This is enough to
-//! behaviorally prove `STORY-P0-02-03`'s and `STORY-P0-02-04`'s own claims
-//! for a task that yields at controlled points (this module's own test
-//! does exactly that: a boosted lock holder is actually *chosen and run*
-//! ahead of an uninvolved, higher-static-priority Ready task) — but it
-//! does not prove true preemption of a task that never yields voluntarily,
-//! which still needs the timer/IDT this kernel doesn't have.
+//! **Scope note, and what changed in `STORY-P1-04-01`.** The functions in
+//! this module are *cooperative*: they switch into a task and wait for that
+//! task to switch back. Nothing here forces a yield, and that is still true.
+//!
+//! What is no longer true is that nothing in the kernel can. Dispatch became
+//! genuinely preemptive in `STORY-P1-04-01` without a line of this module
+//! changing, and the reason is worth understanding before modifying either
+//! side: a timer interrupt suspends the running task by calling
+//! [`switch`](crate::context::switch) *from interrupt context* into the same
+//! `dispatcher_ctx` this module's own switch call is suspended at
+//! ([`crate::preempt::on_timer_tick`]). Control therefore returns to
+//! [`run_once`] at exactly the point it would have if the task had yielded —
+//! and the task, still `TaskState::Running`, is returned to `Ready` by the
+//! code below, which is precisely the right behaviour for a preempted task
+//! and required no special case. The dispatcher does not know or need to
+//! know how it got control back.
+//!
+//! The consequence for anyone editing this module: **the caller's
+//! `dispatcher_ctx` is now reachable from an interrupt**, so the invariant
+//! that it is the caller's own currently-suspended slot is load-bearing
+//! against a second, asynchronous writer rather than only against this
+//! module's own discipline.
 //!
 //! Blocking a task (e.g. on a contended [`crate::lock::PriorityInheritingLock`])
 //! is the caller's responsibility, done between rounds via
@@ -29,6 +41,31 @@
 
 use crate::context::{switch, Context};
 use crate::sched::{Scheduler, TaskId, TaskState};
+
+/// How a dispatch round must transfer control into the selected task
+/// (`STORY-P1-03-02`, review D7): the pure, host-testable half of `CR3`
+/// awareness. `switch_address_space` itself is a real `mov cr3` that no
+/// host process can retire, so the *decision* is factored out here and the
+/// hardware arm is proven under Tier 0.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SwitchPlan {
+    /// `Tcb::address_space` is `None`: a plain [`switch`], exactly what
+    /// every task before this Story got — no `CR3` touch at all.
+    Plain,
+    /// `Tcb::address_space` is `Some`: install this `CR3` via
+    /// [`crate::context::switch_address_space`] before the register swap.
+    InstallAddressSpace(u64),
+}
+
+/// The dispatch arm `address_space` selects — the whole decision, kept as
+/// one pure function so both arms are pinned by host tests even though only
+/// Tier 0 can execute the install arm's `CR3` write.
+pub const fn switch_plan(address_space: Option<u64>) -> SwitchPlan {
+    match address_space {
+        None => SwitchPlan::Plain,
+        Some(cr3) => SwitchPlan::InstallAddressSpace(cr3),
+    }
+}
 
 /// Selects the highest-priority Ready task in `scheduler` and runs it for
 /// one cooperative slice: switches from `dispatcher_ctx` into
@@ -70,6 +107,55 @@ pub unsafe fn run_once<const N: usize>(
     let task_ctx = unsafe { (*contexts).as_mut_ptr().add(idx) };
     // SAFETY: forwarded from this function's own contract.
     unsafe { switch(dispatcher_ctx, task_ctx) };
+    if scheduler.state_of(task) == Some(TaskState::Running) {
+        scheduler.set_state(task, TaskState::Ready);
+    }
+    Some(task)
+}
+
+/// [`run_once`], `CR3`-aware (`STORY-P1-03-02`): selects exactly as
+/// [`run_once`] does, then transfers control per [`switch_plan`] over the
+/// selected task's `Tcb::address_space` — a plain [`switch`] for a task
+/// with no dedicated space (every pre-existing Story's tasks, bit-for-bit
+/// the behavior [`run_once`] has always had), or
+/// [`crate::context::switch_address_space`] installing the task's own
+/// `CR3` first when it has one.
+///
+/// A separate function rather than a change to [`run_once`], deliberately:
+/// [`run_once`]'s existing tests are the no-regression guard for the
+/// `Plain` arm, and this function is the one place the plan meets the
+/// hardware.
+///
+/// # Safety
+/// [`run_once`]'s contract, plus [`crate::context::switch_address_space`]'s
+/// for any task whose `address_space` is `Some`: that value must be the
+/// physical, page-aligned address of a fully populated PML4 mapping
+/// everything the incoming task's saved registers/stack — and the kernel
+/// code/IDT servicing it — need, or the install is an immediate,
+/// unrecoverable fault.
+#[cfg(not(target_os = "windows"))]
+pub unsafe fn run_once_in_space<const N: usize>(
+    scheduler: &mut Scheduler<N>,
+    dispatcher_ctx: *mut Context,
+    contexts: *mut [Context; N],
+) -> Option<TaskId> {
+    let task = scheduler.highest_priority_ready()?;
+    scheduler.set_state(task, TaskState::Running);
+    let plan = switch_plan(scheduler.address_space_of(task).flatten());
+    let idx = task.index();
+    // SAFETY: identical to `run_once`'s — `idx < N` since the `TaskId` came
+    // from this same `Scheduler<N>`, and the two context pointers satisfy
+    // the switch contract per this function's own.
+    let task_ctx = unsafe { (*contexts).as_mut_ptr().add(idx) };
+    match plan {
+        // SAFETY: forwarded from this function's own contract.
+        SwitchPlan::Plain => unsafe { switch(dispatcher_ctx, task_ctx) },
+        // SAFETY: forwarded from this function's own contract (the `Some`
+        // clause above).
+        SwitchPlan::InstallAddressSpace(cr3) => unsafe {
+            crate::context::switch_address_space(dispatcher_ctx, task_ctx, cr3)
+        },
+    }
     if scheduler.state_of(task) == Some(TaskState::Running) {
         scheduler.set_state(task, TaskState::Ready);
     }
@@ -205,6 +291,34 @@ mod tests {
         // above have returned.
         let log = unsafe { &RUN_LOG[..RUN_LOG_LEN] };
         assert_eq!(log, &[1, 0, 1], "medium, then boosted-low, then medium again");
+    }
+
+    // STORY-P1-03-02 AC I1 (review D7): both arms of the CR3 decision,
+    // pinned on the host. `None` — the default every task ever created by
+    // any pre-existing Story has — plans a plain switch; `Some` plans an
+    // install of exactly that CR3.
+    #[test]
+    fn the_switch_plan_covers_both_arms_and_defaults_to_plain() {
+        assert_eq!(switch_plan(None), SwitchPlan::Plain);
+        assert_eq!(switch_plan(Some(0x1234_5000)), SwitchPlan::InstallAddressSpace(0x1234_5000));
+    }
+
+    // The scheduler read the plan consumes: a live task with no space, a
+    // live task with one, and an unknown task each answer distinguishably.
+    #[test]
+    fn address_space_of_distinguishes_none_some_and_unknown() {
+        let mut sched: Scheduler<N> = Scheduler::new();
+        let plain = sched.create_task(priority(3), WcetBudgetTicks(100), low_entry).unwrap();
+        let spaced = sched.create_task(priority(3), WcetBudgetTicks(100), low_entry).unwrap();
+        sched.set_address_space(spaced, 0x9000).unwrap();
+
+        assert_eq!(sched.address_space_of(plain), Some(None));
+        assert_eq!(sched.address_space_of(spaced), Some(Some(0x9000)));
+        assert_eq!(switch_plan(sched.address_space_of(plain).flatten()), SwitchPlan::Plain);
+        assert_eq!(
+            switch_plan(sched.address_space_of(spaced).flatten()),
+            SwitchPlan::InstallAddressSpace(0x9000)
+        );
     }
 
     // With no Ready task at all, `run_once` returns `None` and switches

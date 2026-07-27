@@ -42,6 +42,7 @@
 pub mod acpi;
 #[cfg(not(target_os = "windows"))]
 pub mod boot;
+pub mod extended_state;
 pub mod fault;
 pub mod gdt;
 pub mod idt;
@@ -51,6 +52,7 @@ pub mod paging;
 pub mod pci;
 #[cfg(not(target_os = "windows"))]
 pub mod qemu_exit;
+pub mod rflags;
 #[cfg(not(target_os = "windows"))]
 pub mod serial;
 pub mod tsc;

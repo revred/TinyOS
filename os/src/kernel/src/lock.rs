@@ -11,21 +11,26 @@
 //! unlocked, with no path that leaves a task permanently boosted
 //! (`STORY-P0-02-03` acceptance criterion 2).
 //!
-//! **Scope note.** This kernel has no ready-queue/priority-based dispatch
-//! loop yet — `STORY-P0-02-02`'s `context::switch` is a raw two-context
-//! primitive, invoked explicitly by whoever calls it, not a scheduler that
-//! picks the next task to run by priority on its own. This module can
-//! therefore prove the *bookkeeping* half of priority inheritance
-//! end-to-end (a contended lock boosts the holder; an uncontended unlock
-//! restores it exactly) but not the *behavioral* half (that a real,
-//! running medium-priority task is actually preempted in favor of the
-//! now-boosted holder) — that needs a real dispatcher, which is a concrete
-//! prerequisite this Story surfaces rather than silently assumes exists.
-//! The adversarial test below constructs the classic three-task scenario
-//! and asserts on the resulting priority *values* (the boosted holder
-//! outranks the medium task after contention, and is restored after
-//! release) rather than on live preemption, which is the furthest this
-//! Story's acceptance criteria can be verified without that dispatcher.
+//! **Scope note — the behavioral half, and when it closed.** This module's
+//! host tests prove the *bookkeeping* of priority inheritance end to end (a
+//! contended lock boosts the holder; an uncontended unlock restores it
+//! exactly) by asserting on the resulting priority *values*. When
+//! `STORY-P0-02-03` was written that was as far as its acceptance criteria
+//! could be verified: this kernel had no priority-based dispatch loop —
+//! `context::switch` was a raw two-context primitive invoked explicitly by
+//! whoever called it — so the *behavioral* claim, that a real, running
+//! medium-priority task is actually kept from starving the now-boosted
+//! holder, had no way to be demonstrated. That gap was recorded here as a
+//! concrete prerequisite rather than assumed away.
+//!
+//! `STORY-P0-02-05` closed half of it (`dispatch::run_once` selects and
+//! actually runs a boosted holder ahead of an uninvolved higher-static-priority
+//! task), and **`STORY-P1-04-01` closed the rest**: under genuine
+//! timer-driven preemption, `kernel::fixture_priority_inversion` runs the
+//! classic three-task scenario for real and asserts both the dispatch order
+//! taken (`low → high → low → high`) and that the medium task — `Ready`
+//! throughout, and demonstrably able to run afterwards — makes no progress
+//! at all while the boosted holder finishes. See `TEST-P1-04-01-A` clause 6.
 //!
 //! **`STORY-P0-06-03`**: every boost and every restore also stamps a
 //! [`crate::spoor::Spoor`] into a caller-supplied

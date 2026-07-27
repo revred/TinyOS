@@ -25,6 +25,10 @@ mod fixture_measure;
 mod fixture_pci_enumeration;
 #[cfg(feature = "fixture-pool-bench")]
 mod fixture_pool_bench;
+#[cfg(feature = "fixture-preempt")]
+mod fixture_preempt;
+#[cfg(feature = "fixture-priority-inversion")]
+mod fixture_priority_inversion;
 
 // `boot` (the PVH entry glue) is only referenced by the linker (via
 // `ENTRY(_start)`/`KEEP(...)` in `targets/x86_64-tinyos.ld`), never by Rust
@@ -52,7 +56,9 @@ use hal_x86_64::qemu_exit::{exit_qemu, QemuExitCode};
         feature = "fixture-pool-bench",
         feature = "fixture-measure",
         feature = "fixture-fault",
-        feature = "fixture-double-fault"
+        feature = "fixture-double-fault",
+        feature = "fixture-preempt",
+        feature = "fixture-priority-inversion"
     ),
     allow(unused_imports)
 )]
@@ -78,7 +84,9 @@ use kernel::capacities::MAX_CPUS;
     feature = "fixture-pool-bench",
     feature = "fixture-measure",
     feature = "fixture-fault",
-    feature = "fixture-double-fault"
+    feature = "fixture-double-fault",
+    feature = "fixture-preempt",
+    feature = "fixture-priority-inversion"
 )))]
 const BOOT_TIMER_INITIAL_COUNT: u32 = 1_000_000;
 
@@ -106,7 +114,9 @@ extern "C" fn kernel_main(
             feature = "fixture-pool-bench",
             feature = "fixture-measure",
             feature = "fixture-fault",
-            feature = "fixture-double-fault"
+            feature = "fixture-double-fault",
+            feature = "fixture-preempt",
+            feature = "fixture-priority-inversion"
         ),
         allow(unused_variables)
     )]
@@ -189,6 +199,24 @@ extern "C" fn kernel_main(
         }
     }
 
+    #[cfg(feature = "fixture-preempt")]
+    {
+        if fixture_preempt::run() {
+            exit_qemu(QemuExitCode::Success)
+        } else {
+            exit_qemu(QemuExitCode::Failure)
+        }
+    }
+
+    #[cfg(feature = "fixture-priority-inversion")]
+    {
+        if fixture_priority_inversion::run() {
+            exit_qemu(QemuExitCode::Success)
+        } else {
+            exit_qemu(QemuExitCode::Failure)
+        }
+    }
+
     #[cfg(not(any(
         feature = "fixture-broken-boot",
         feature = "fixture-context-switch",
@@ -198,7 +226,9 @@ extern "C" fn kernel_main(
         feature = "fixture-pool-bench",
         feature = "fixture-measure",
         feature = "fixture-fault",
-        feature = "fixture-double-fault"
+        feature = "fixture-double-fault",
+        feature = "fixture-preempt",
+        feature = "fixture-priority-inversion"
     )))]
     {
         // SAFETY: `start_info_paddr` is the physical address the PVH
@@ -242,8 +272,10 @@ extern "C" fn kernel_main(
 /// `agent/CODING_STANDARDS.md#real-time-discipline-kernel-and-driver-code`);
 /// this last-resort handler reports failure to the QEMU harness rather than
 /// looping silently, so a boot-time panic is distinguishable in CI.
-/// The default `#UD`/`#GP`/`#PF` entry point for every build except the
-/// fault fixture, which supplies its own (`STORY-P1-02-01`).
+/// The default `#UD`/`#GP`/`#PF` entry point for every build except the fault
+/// fixture (`STORY-P1-02-01`) and the measurement fixture, both of which
+/// supply their own so a deliberate fault can be survived and re-triggered
+/// instead of halting the run (`LE-17`, `fixture_measure::tinyos_fault_entry`).
 ///
 /// The `hal_x86_64::fault` stubs call this symbol the same way `boot.rs` calls
 /// `kernel_main`: the HAL declares it, the binary defines it, so the HAL needs
@@ -259,7 +291,11 @@ extern "C" fn kernel_main(
 /// # Safety
 /// Called only by the fault stubs, with `frame` pointing at the `FaultFrame`
 /// they just built on the faulting stack.
-#[cfg(not(any(feature = "fixture-fault", feature = "fixture-double-fault")))]
+#[cfg(not(any(
+    feature = "fixture-fault",
+    feature = "fixture-double-fault",
+    feature = "fixture-measure"
+)))]
 #[no_mangle]
 extern "C" fn tinyos_fault_entry(frame: *const hal_x86_64::fault::FaultFrame) -> ! {
     use core::fmt::Write;
@@ -293,11 +329,29 @@ extern "C" fn tinyos_fault_entry(frame: *const hal_x86_64::fault::FaultFrame) ->
 
     let report = FaultReport { vector: frame.vector, context: FaultingContext::Kernel };
     let disposition = Disposition::of(&report);
-    // Audited even here, where there is no journal to keep it in: the pair is
-    // computed on the same path the fixture's is, so a policy change can never
-    // apply to one and not the other.
-    let _ = kernel::fault::audit(&report, disposition);
-    let _ = writeln!(serial, "tinyos fault disposition={disposition:?} — halting");
+    // Spoor's first production call site (`STORY-P1-03-02` acceptance
+    // criterion I5): the audit pair is journaled, not discarded — closing
+    // the sentence four `FEAT-P0-06` Reports repeated ("no production call
+    // site or capacity constant added yet"). The journal is a static in the
+    // shipping binary, sized by `kernel::capacities::SPOOR_JOURNAL_CAPACITY`;
+    // on this halting path its contents are summarized over COM1, which is
+    // all the persistence this kernel has until a storage Story lands.
+    static mut FAULT_JOURNAL: kernel::spoor_journal::SpoorJournal<
+        { kernel::capacities::SPOOR_JOURNAL_CAPACITY },
+    > = kernel::spoor_journal::SpoorJournal::new();
+    // SAFETY: single-CPU kernel, and this handler never returns — no
+    // concurrent access to the journal static is possible.
+    let journal_len = unsafe {
+        let journal = &mut *(&raw mut FAULT_JOURNAL);
+        for spoor in kernel::fault::audit(&report, disposition) {
+            journal.append(spoor);
+        }
+        journal.len()
+    };
+    let _ = writeln!(
+        serial,
+        "tinyos fault disposition={disposition:?} spoor_journal_len={journal_len} — halting"
+    );
 
     exit_qemu(QemuExitCode::Failure)
 }
