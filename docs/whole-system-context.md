@@ -105,27 +105,27 @@ The repository's existing correction remains important: `blue.atom` and `blue-sh
 ## Application execution architecture
 
 ```text
-┌──────────────────── application package / remote content ────────────────────┐
-│ signed native TXE │ managed AOT │ runtime graph │ game data │ web content    │
-└────────────────────────────────┬─────────────────────────────────────────────┘
-                                 │ RCG admission when executable
-┌────────────────────────────────▼─────────────────────────────────────────────┐
-│ C3 application Protection Domains                                             │
-│ Rust / Go / .NET AOT / JS runtime / browser controller / game / TLE / WST    │
-└───────────────┬───────────────────────┬───────────────────────┬───────────────┘
-                │ typed IPC             │ page grants           │ endpoint caps
-┌───────────────▼───────────────────────▼───────────────────────▼───────────────┐
-│ C2 restartable brokers                                                        │
-│ storage │ network │ GPU │ display │ audio │ input │ codecs │ secrets │ loader │
-└────────────────────────────────┬─────────────────────────────────────────────┘
-                                 │ fixed kernel ABI
-┌────────────────────────────────▼─────────────────────────────────────────────┐
+┌───────────────────── application package / remote content ─────────────────────┐
+│ signed native TXE │ managed AOT │ runtime graph │ game data │ web content      │
+└────────────────────────────────────────┬───────────────────────────────────────┘
+                                  │ RCG admission when executable
+┌────────────────────────────────────────▼───────────────────────────────────────┐
+│ C3 application Protection Domains                                              │
+│ Rust / Go / .NET AOT / JS runtime / browser controller / game / TLE / WST      │
+└────────────────────┬───────────────────┬───────────────────┬───────────────────┘
+                    │ typed IPC         │ page grants       │ endpoint caps
+┌────────────────────▼───────────────────▼───────────────────▼───────────────────┐
+│ C2 restartable brokers                                                         │
+│ storage │ network │ GPU │ display │ audio │ input │ codecs │ secrets │ loader  │
+└────────────────────────────────────────┬───────────────────────────────────────┘
+                                  │ fixed kernel ABI
+┌────────────────────────────────────────▼───────────────────────────────────────┐
 │ C1 minimal kernel: MMU │ scheduler │ capability space │ IPC │ fault │ teardown │
-└────────────────────────────────┬─────────────────────────────────────────────┘
-                                 │ measured one-shot handoff
-┌────────────────────────────────▼─────────────────────────────────────────────┐
-│ C0 verified boot and recovery                                                 │
-└───────────────────────────────────────────────────────────────────────────────┘
+└────────────────────────────────────────┬───────────────────────────────────────┘
+                                  │ measured one-shot handoff
+┌────────────────────────────────────────▼───────────────────────────────────────┐
+│ C0 verified boot and recovery                                                  │
+└────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### What “native support” means

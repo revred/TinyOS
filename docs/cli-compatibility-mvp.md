@@ -11,25 +11,25 @@ Reference note: the [`MsDOS`](../MsDOS) submodule (Microsoft's officially releas
 ## Architecture
 
 ```text
-"DIR /S *.TXT"        "ls -R *.txt"
-      │                      │
-      ▼                      ▼
-┌───────────┐         ┌────────────┐
-│ DOS parser │         │ POSIX parser│    ← two thin syntax front-ends
-└─────┬─────┘         └──────┬─────┘
-      │                      │
-      └──────────┬───────────┘
-                  ▼
-        ┌───────────────────┐
-        │  Canonical Verb    │   list / copy / move / delete / mkdir / rmdir /
-        │  Core (TinyCmd)     │   view / find-text / sort-stream / page /
-        │                     │   tree / env-get / env-set / task-list / task-kill / ...
-        └─────────┬──────────┘
-                  ▼
-        ┌───────────────────┐
-        │   Agent Command     │   ← same ACI gate as HBP/WCI/agent callers
-        │   Interface (ACI)   │
-        └───────────────────┘
+"DIR /S *.TXT"          "ls -R *.txt"
+      │                       │
+      ▼                       ▼
+┌────────────┐         ┌───────────────┐
+│ DOS parser │         │ POSIX parser  │    ← two thin syntax front-ends
+└──────┬─────┘         └───────┬───────┘
+       │                       │
+       └───────────┬───────────┘
+                    ▼
+         ┌───────────────────────┐
+         │   Canonical Verb      │   list / copy / move / delete / mkdir / rmdir /
+         │   Core (TinyCmd)      │   view / find-text / sort-stream / page /
+         │                       │   tree / env-get / env-set / task-list / task-kill / ...
+         └───────────┬───────────┘
+                     ▼
+         ┌───────────────────────┐
+         │   Agent Command       │   ← same ACI gate as HBP/WCI/agent callers
+         │   Interface (ACI)     │
+         └───────────────────────┘
 ```
 
 - Both front-ends emit the same internal, typed command struct (verb + normalized arguments). Everything downstream of that point — capability check, audit log, execution — is syntax-agnostic.

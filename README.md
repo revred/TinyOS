@@ -236,7 +236,7 @@ See [`docs/deploy-protocol.md`](docs/deploy-protocol.md) for the full spec, and 
 ┌─────────────────────────────────────────────────────────────────┐
 │                         TinyOS Shell (UX)                        │
 │   TINYCMD (DOS-style CLI)  │  Status/Monitor TUI  │  Web Console  │
-└──────────────────────────┬────────────────────────────────────--┘
+└──────────────────────────┬───────────────────────────────────────┘
                             │  Command & Control API (versioned, audited)
 ┌──────────────────────────▼──────────────────────────────────────┐
 │                     Agent Command Interface (ACI)                │
@@ -247,7 +247,7 @@ See [`docs/deploy-protocol.md`](docs/deploy-protocol.md) for the full spec, and 
 │  Local Agent   │     │   Human Operator   │   │  Remote / Fleet   │
 │ (Ollama / LLM) │     │   (shell / scripts)│   │ (host, bus, net)  │
 └───────┬───────┘     └─────────┬─────────┘   └─────────┬─────────┘
-        └───────────────────────┴──────────────────────-┘
+        └───────────────────────┴───────────────────────┘
                                  │
 ┌────────────────────────────────▼────────────────────────────────┐
 │                      TinyOS Real-Time Kernel                     │
@@ -255,10 +255,10 @@ See [`docs/deploy-protocol.md`](docs/deploy-protocol.md) for the full spec, and 
 │  Static memory pools  │ Deadline monitor      │ Watchdog/failsafe │
 └──────┬────────────┬────────────┬──────────────┬──────────────┬──┘
        │             │            │              │              │
-   ┌───▼───┐    ┌────▼────┐  ┌────▼────┐   ┌─────▼─────┐  ┌─────▼─────┐
-   │  CAN   │    │   USB   │  │Ethernet │   │Host Bridge│  │   HAL /    │
-   │  Bus   │    │ Stack   │  │/TCP-IP  │   │ (Win/Lin) │  │  Drivers   │
-   └───────┘    └────────┘  └────────┘   └───────────┘  └───────────┘
+  ┌──────▼──────┐ ┌──────▼──────┐ ┌──────▼──────┐ ┌──────▼──────┐ ┌──────▼──────┐
+  │     CAN     │ │     USB     │ │  Ethernet   │ │ Host Bridge │ │    HAL /    │
+  │     Bus     │ │    Stack    │ │  /TCP-IP    │ │ (Win/Lin)   │ │   Drivers   │
+  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘
 ```
 
 ---

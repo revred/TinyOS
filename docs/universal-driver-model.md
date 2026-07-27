@@ -18,24 +18,24 @@ TinyOS targets x86_64 (Intel/AMD PC-class chipsets) and ARM64 (Jetson-class SoCs
 ## Architecture
 
 ```text
-┌────────────────────────────────────────────────────────────┐
-│                     Vendor Driver (userspace)                │
-│   Implements the DCI trait for its device class + optional   │
-│   vendor extension capabilities                              │
-└───────────────────────────┬──────────────────────────────--──┘
-                             │  Driver Capability Interface (DCI)
-                             │  (versioned, stable, admission-controlled)
-┌───────────────────────────▼──────────────────────────────--──┐
-│                Universal Driver Interface (UDI)                │
-│   Class contracts: storage, network, HID, display, GPU/compute,│
-│   CAN, sensor, ... — one Rust trait per class                  │
-└───────────────────────────┬──────────────────────────────--──┘
-                             │  DMA/IRQ/MMIO grants, capability-scoped
-┌───────────────────────────▼──────────────────────────────--──┐
-│                Hardware Abstraction Layer (HAL)                 │
-│   Bus enumeration (PCIe, USB, platform/MMIO, CAN) + unified     │
-│   hardware manifest (ACPI/Device Tree normalized to one model)  │
-└──────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│                   Vendor Driver (userspace)                   │
+│   Implements the DCI trait for its device class + optional    │
+│                 vendor extension capabilities                 │
+└───────────────────────────────┬───────────────────────────────┘
+                                │  Driver Capability Interface (DCI)
+                                │  (versioned, stable, admission-controlled)
+┌───────────────────────────────▼───────────────────────────────┐
+│               Universal Driver Interface (UDI)                │
+│ Class contracts: storage, network, HID, display, GPU/compute, │
+│          CAN, sensor, ... — one Rust trait per class          │
+└───────────────────────────────┬───────────────────────────────┘
+                                │  DMA/IRQ/MMIO grants, capability-scoped
+┌───────────────────────────────▼───────────────────────────────┐
+│               Hardware Abstraction Layer (HAL)                │
+│   Bus enumeration (PCIe, USB, platform/MMIO, CAN) + unified   │
+│ hardware manifest (ACPI/Device Tree normalized to one model)  │
+└───────────────────────────────────────────────────────────────┘
 ```
 
 ### Userspace-first driver isolation
