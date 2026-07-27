@@ -26,7 +26,7 @@ The point is not convenience. Hardware evidence that no tool can reproduce is an
 
 ## Named debt this Story leaves open
 
-- **No CI integration.** Per the recorded §7.4 decision (option (b), [Handover 18](../../session/hand-2026-07-28/18-feat-p1-07-acceptance-and-spine.md)), hardware runs stay manual and land in Reports; CI stays Tier 0. The ratio baselines therefore stay Tier 0 and `LE-23` is unaffected either way.
+- **No CI integration.** Per the recorded §7.4 decision (option (b), [Handover 19](../../session/hand-2026-07-28/19-feat-p1-07-acceptance-and-spine.md)), hardware runs stay manual and land in Reports; CI stays Tier 0. The ratio baselines therefore stay Tier 0 and `LE-23` is unaffected either way.
 - **No deploy loop.** This is a bring-up run path, not `EPIC-P1_5`'s deploy tooling, and it makes no signing, atomicity or rollback claim.
 - `LE-26` is raised, not closed.
 

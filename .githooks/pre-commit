@@ -1,0 +1,38 @@
+#!/bin/sh
+#
+# TinyOS pre-commit gate.
+#
+# Why this exists, precisely: on 2026-07-28 a commit pushed a broken assurance
+# spine to `main`. The gate had been run *before* staging, `git add -A` then
+# swept in a half-finished Feature from a concurrent working tree, and the gate
+# was never re-run. CI went red on 585a027.
+#
+# The discipline ("run check-assurance-spine before you commit") was already
+# written down and already believed. What was missing was a machine that runs it
+# at the moment that matters, which is after staging and not before. That is all
+# this hook is.
+#
+# It runs the three checks that are fast, deterministic, and answer questions
+# about the *repository* rather than about the machine — so they cannot fail for
+# reasons a committer has no control over. Timing gates are deliberately absent:
+# they measure the host, and a host-sensitive pre-commit hook trains people to
+# pass --no-verify, which would be strictly worse than having no hook.
+#
+# Install (once per clone):
+#     git config core.hooksPath .githooks
+#
+# If a check fails, fix the tree. Do not reach for --no-verify: the one time
+# this repository shipped past this gate, it shipped a broken spine.
+
+set -e
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root/os"
+
+echo "pre-commit: checking the assurance spine, the performance catalogue and crate sizes..."
+
+cargo run -q -p xtask -- check-assurance-spine
+cargo run -q -p xtask -- check-performance-catalogue
+cargo run -q -p xtask -- check-crate-sizes
+
+echo "pre-commit: ok"

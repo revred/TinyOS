@@ -8,7 +8,7 @@ Introduced in: [`session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md`](..
 
 Two things that share one set of registers: a periodic tick (GIC distributor/redistributor and CPU interface, `CNTP_*_EL0` or `CNTV_*_EL0`), and the decision about *which counter microbenchmarks read* — the question `STORY-P1-01-03` raised as `LE-15` and deliberately deferred until a board existed.
 
-**A board exists, and the decision is recorded** (user confirmation, [Handover 18](../../session/hand-2026-07-28/18-feat-p1-07-acceptance-and-spine.md) §7.5): **`PMCCNTR_EL0`, the PMU cycle counter, becomes the ARM64 `CycleSource` for microbenchmarks; `CNTVCT_EL0` stays the `Timebase`/wall-clock source.** The two roles are genuinely different and `hal::time` already separates them.
+**A board exists, and the decision is recorded** (user confirmation, [Handover 19](../../session/hand-2026-07-28/19-feat-p1-07-acceptance-and-spine.md) §7.5): **`PMCCNTR_EL0`, the PMU cycle counter, becomes the ARM64 `CycleSource` for microbenchmarks; `CNTVCT_EL0` stays the `Timebase`/wall-clock source.** The two roles are genuinely different and `hal::time` already separates them.
 
 The arithmetic that forces it: at 54 MHz one `CNTVCT_EL0` tick is ~18.5 ns, and a Cortex-A76 at ~2.4 GHz retires roughly **44 cycles per tick**. `D05/dispatch_select` measures a Tier 0 p50 of ~168 cycles. Read through `CNTVCT_EL0` that entire operation is **under four ticks** — quantisation noise, not a measurement. It is exactly the failure mode `LE-24` already documents for `D07`, arriving on a second axis.
 

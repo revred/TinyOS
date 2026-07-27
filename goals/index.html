@@ -574,7 +574,20 @@
   <td><span class="badge planned">SPECIFIED</span></td>
   <td>
     <a href="stories/STORY-P1-06-01.md">STORY-P1-06-01</a> <span class="badge planned">SPECIFIED</span> — bounded decision-to-actuation path: declared budget, enforced deadline, measured distribution, demonstrated failure behaviour<br>
-    <span class="muted">The Epic's exit: the first end-to-end, scheduler-enforced decision-to-actuation bound. Re-check <code>LE-08</code> (no I/O APIC device-IRQ route) when this Feature picks its output primitive.</span>
+    <span class="muted">The Epic's exit: the first end-to-end, scheduler-enforced decision-to-actuation bound. Re-check <code>LE-08</code> (no I/O APIC device-IRQ route) when this Feature picks its output primitive. Under <a href="../docs/adr/0004-arm64-is-the-real-time-tier.md">ADR 0004</a> its <em>bound</em> is quotable from ARM64 hardware; a Tier 0 or x86_64 run of it is mechanism evidence.</span>
+  </td>
+</tr>
+<tr>
+  <td><a href="features/FEAT-P1-07.md">FEAT-P1-07</a> — Raspberry Pi 5 hardware tier: first measured evidence</td>
+  <td><span class="badge planned">SPECIFIED</span></td>
+  <td>
+    <a href="stories/STORY-P1-07-01.md">STORY-P1-07-01</a> <span class="badge planned">SPECIFIED</span> — AArch64 target spec, boot stub, <code>EL2 &rarr; EL1</code>, PL011, first byte on the wire<br>
+    <a href="stories/STORY-P1-07-02.md">STORY-P1-07-02</a> <span class="badge planned">SPECIFIED</span> — exception vectors; a fault prints a decoded <code>ESR_EL1</code> instead of hanging<br>
+    <a href="stories/STORY-P1-07-03.md">STORY-P1-07-03</a> <span class="badge planned">SPECIFIED</span> — flat identity MMU, Normal cacheable RAM, Device MMIO, caches on — <em>not</em> address spaces<br>
+    <a href="stories/STORY-P1-07-04.md">STORY-P1-07-04</a> <span class="badge planned">SPECIFIED</span> — GIC + generic-timer tick; <code>LE-15</code> resolved as the <code>PMCCNTR_EL0</code>/<code>CNTVCT_EL0</code> split<br>
+    <a href="stories/STORY-P1-07-05.md">STORY-P1-07-05</a> <span class="badge planned">SPECIFIED</span> — host-side run path: SD image, serial capture, the existing UART pass/fail exit codes<br>
+    <a href="stories/STORY-P1-07-06.md">STORY-P1-07-06</a> <span class="badge planned">SPECIFIED</span> — <code>fixture_measure</code> on the board, batched iteration, the first hardware Report<br>
+    <span class="muted">Added 2026-07-28 when a board became available. <strong>The only Feature that can close <code>LE-09</code></strong> — and it closes on <code>-06</code>'s Report and nothing earlier. Order is not negotiable: <code>-02</code> before <code>-03</code> and <code>-04</code>, because on this board a fault with no vector table is a silent hang with no output at all. Deliberately not an ARM64 port — no address spaces, no preemption, no RP1/PCIe/Ethernet, no device-tree parser, single core.</span>
   </td>
 </tr>
 </tbody>
