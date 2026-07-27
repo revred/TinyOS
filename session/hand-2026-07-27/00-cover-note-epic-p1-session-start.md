@@ -15,3 +15,12 @@ New session folder per the naming convention (all handovers from one calendar da
 2. **`STORY-P1-01-01`** — the measurement harness, strict TDD (failing tests + `TEST-P1-01-01-A` before implementation), arch-neutral API (cycle source behind a trait — the Pi 5 slice reuses it), subsuming `pool-bench` (`LE-06`). `REPORT-2026-07-27-01`'s scored-against-catalogue discipline is the template its Reports follow.
 3. **`LE-09` proposal** — one-page minimal ARM64/Pi 5 slice scoping with two sequencing options; the user decides.
 4. Then `STORY-P1-01-02` (baselines + regression gate, demonstrated to fail), then `FEAT-P1-02`.
+
+## Status of this mandate, end of day (added 2026-07-27, after Handovers 02–03)
+
+1. **`LE-07` CI probe** — done and closed, as recorded above.
+2. **`STORY-P1-01-01`** — **delivered and functionally Verified** (Tier 0 + Host), strict TDD with the Red run recorded, arch-neutral cycle source behind `hal::time::CycleSource`, `pool-bench` refactored onto it (closing `LE-06`), evidence in [`REPORT-2026-07-27-02`](../../goals/reports/REPORT-2026-07-27-02.md) and [`Handover 02`](02-story-p1-01-01-measurement-harness.md). Assurance state `baseline-debt`, no guardrail closed. Two real bugs found by running host-verified code on target for the first time — one of them a production scheduler function that could not execute on the target binary at all.
+3. **`LE-09` proposal** — **filed** as [`Handover 03`](03-le-09-arm64-pi5-slice-proposal.md), with two sequencing options and a recommendation. **Awaiting the user's decision**; nothing started.
+4. **`STORY-P1-01-02`** (baselines + regression gate) — not started, and now has a concrete design constraint from today's measurements: Tier 0 run-to-run p99 variation of 39–61% means the gate must not threshold tail percentiles under emulation.
+
+The canonical loose-ends register moved to [`Handover 02`](02-story-p1-01-01-measurement-harness.md#loose-ends-register-canonical-as-of-this-handover) and now runs `LE-01`–`LE-14`: `LE-06` and `LE-07` closed, four new items opened by the harness Story.
