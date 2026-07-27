@@ -134,6 +134,77 @@ extern "C" fn dispatch_yield_forever() -> ! {
     }
 }
 
+/// Iterations inside one timed region of [`phase_reference_loop`]. Chosen so
+/// the reference lands in the same order of magnitude as the metrics it
+/// normalises (tens to low hundreds of cycles) rather than orders away from
+/// all of them, where quantisation would dominate every ratio.
+///
+/// **Part of the reference's definition — see [`phase_reference_loop`] before
+/// changing it.**
+const REFERENCE_ITERATIONS: usize = 64;
+
+/// The measurement reference (`STORY-P1-01-04`, `TEST-P1-01-04-A` clause 1):
+/// a fixed integer computation that the timing gate normalises every other
+/// metric against.
+///
+/// # Do not change this function
+///
+/// Not a style request. `xtask`'s timing gate no longer compares absolute
+/// cycle counts — between two CI runs of *identical binaries* every gated
+/// metric moved together by 1.8–2.2x and the gate reported `REGRESSED` about
+/// code that had not changed. It now compares each metric's **same-run ratio
+/// to this loop**, so that a slow runner cancels out and a real regression
+/// does not. Editing the body of this function silently re-points every
+/// committed baseline ratio in `goals/performance/baselines/`, and the gate
+/// cannot tell that from a regression in everything at once. If it genuinely
+/// has to change, re-record the baselines in the same commit and say so.
+///
+/// **Why it touches nothing.** No scheduler, no pool, no context switch, no
+/// fault path, no allocation, no memory it did not bring with it — so no
+/// change to any code this project gates can move it. That independence is the
+/// entire reason it can serve as a denominator.
+///
+/// **Why it is measured like everything else.** Same [`Stopwatch`], same
+/// [`Calibration`], same [`Samples`] buffer, same `summarize`, same envelope.
+/// A reference measured through a different path would import its own
+/// systematic error into every ratio instead of cancelling out of them.
+///
+/// [`core::hint::black_box`] **inside** the loop is load-bearing, and the first
+/// draft of this function got it wrong in a way worth recording: with the
+/// barrier only on the input and the result, the release profile fully
+/// unrolled the 64 iterations and closed-formed the whole recurrence into a
+/// single multiply-add, and the reference measured **16 cycles** — smaller
+/// than the metrics it exists to normalise, with 2-cycle quantisation
+/// amplifying into every ratio. A reference that optimises to nothing divides
+/// every ratio by noise. Per-iteration the barrier forces a genuine dependent
+/// chain, which is the cost this phase claims to be timing.
+#[inline(never)]
+fn phase_reference_loop<S: CycleSource>(
+    source: &S,
+    calibration: &Calibration,
+    samples: &mut Samples<SAMPLES>,
+) -> bool {
+    let mut last: u64 = 0;
+    for index in 0..(WARMUP + SAMPLES) {
+        let watch = Stopwatch::start(source);
+        let mut accumulator = core::hint::black_box(0x9E37_79B9_7F4A_7C15u64);
+        for step in 0..REFERENCE_ITERATIONS {
+            accumulator = core::hint::black_box(
+                accumulator.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(step as u64 | 1),
+            );
+        }
+        let cycles = watch.stop(calibration);
+        if index >= WARMUP {
+            samples.record(cycles);
+        }
+        last = accumulator;
+    }
+    // The computation is deterministic, so every iteration must have produced
+    // the same value. A reference whose result varies is a reference that did
+    // not run the work it claims to have timed.
+    last != 0
+}
+
 /// D07 (`PERF-D07-G01`..`G07`): `Pool<u64, 64>` alloc/free round trip — the
 /// same operation shape `fixture_pool_bench` measures, here as the harness's
 /// canonical D07 metric so `xtask measure` reports one comparable number for
@@ -489,7 +560,7 @@ extern "C" fn tinyos_fault_entry(frame: *const FaultFrame) -> ! {
 
 /// How many metrics this fixture measures — the fixed capacity of the
 /// collected-summary array below.
-const METRICS: usize = 6;
+const METRICS: usize = 7;
 
 /// One measured phase, held until every phase has run.
 ///
@@ -611,31 +682,38 @@ pub fn run() -> bool {
     let samples: &mut Samples<SAMPLES> = unsafe { &mut *core::ptr::addr_of_mut!(SAMPLE_BUFFER) };
 
     let mut ok = conformance_ok;
-    let mut collected: [Option<Measured>; METRICS] = [None, None, None, None, None, None];
+    let mut collected: [Option<Measured>; METRICS] = [None, None, None, None, None, None, None];
+
+    // The reference goes first: it is the denominator of every ratio the gate
+    // compares, so a run in which it did not happen is not a run with one
+    // metric missing — it is a run with no gated evidence at all.
+    ok &= phase_reference_loop(&source, &calibration, samples);
+    ok &= collect(&mut collected, 0, "REF", "fixed_integer_loop", samples);
+    let _ = writeln!(serial, "fixture-measure phase 1/7 done (REF gate reference)");
 
     ok &= phase_pool_alloc_free(&source, &calibration, samples);
-    ok &= collect(&mut collected, 0, "D07", "pool_u64x64_alloc_free_round_trip", samples);
-    let _ = writeln!(serial, "fixture-measure phase 1/6 done (D07 alloc/free)");
+    ok &= collect(&mut collected, 1, "D07", "pool_u64x64_alloc_free_round_trip", samples);
+    let _ = writeln!(serial, "fixture-measure phase 2/7 done (D07 alloc/free)");
 
     ok &= phase_pool_denial(&source, &calibration, samples);
-    ok &= collect(&mut collected, 1, "D07", "pool_u64x4_alloc_denied_exhausted", samples);
-    let _ = writeln!(serial, "fixture-measure phase 2/6 done (D07 denial)");
+    ok &= collect(&mut collected, 2, "D07", "pool_u64x4_alloc_denied_exhausted", samples);
+    let _ = writeln!(serial, "fixture-measure phase 3/7 done (D07 denial)");
 
     ok &= phase_context_switch(&source, &calibration, samples);
-    ok &= collect(&mut collected, 2, "D04", "context_switch_yield_roundtrip_2switches", samples);
-    let _ = writeln!(serial, "fixture-measure phase 3/6 done (D04 context switch)");
+    ok &= collect(&mut collected, 3, "D04", "context_switch_yield_roundtrip_2switches", samples);
+    let _ = writeln!(serial, "fixture-measure phase 4/7 done (D04 context switch)");
 
     ok &= phase_dispatch_select(&source, &calibration, samples);
-    ok &= collect(&mut collected, 3, "D05", "dispatch_select_highest_priority_ready", samples);
-    let _ = writeln!(serial, "fixture-measure phase 4/6 done (D05 selection)");
+    ok &= collect(&mut collected, 4, "D05", "dispatch_select_highest_priority_ready", samples);
+    let _ = writeln!(serial, "fixture-measure phase 5/7 done (D05 selection)");
 
     ok &= phase_dispatch_round(&source, &calibration, samples);
-    ok &= collect(&mut collected, 4, "D05", "dispatch_run_once_cooperative_round", samples);
-    let _ = writeln!(serial, "fixture-measure phase 5/6 done (D05 dispatch round)");
+    ok &= collect(&mut collected, 5, "D05", "dispatch_run_once_cooperative_round", samples);
+    let _ = writeln!(serial, "fixture-measure phase 6/7 done (D05 dispatch round)");
 
     ok &= phase_fault_latency(&calibration);
-    ok &= collect(&mut collected, 5, "D02", "fault_ud2_capture_terminate_kernel_context", samples);
-    let _ = writeln!(serial, "fixture-measure phase 6/6 done (D02 fault latency)");
+    ok &= collect(&mut collected, 6, "D02", "fault_ud2_capture_terminate_kernel_context", samples);
+    let _ = writeln!(serial, "fixture-measure phase 7/7 done (D02 fault latency)");
 
     let environment = Environment {
         tier: "T0",

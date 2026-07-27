@@ -1,0 +1,25 @@
+le_id	summary	origin	owner_path	ownership	state	raised_in	closed_in
+LE-01	Priority-inheritance behavioral half never verified	STORY-P0-02-03	STORY-P1-04-01 criterion 3	owned	closed	hand-2026-07-26/32	hand-2026-07-28/09
+LE-02	WCET enforcement has no timer and no watchdog behind it	STORY-P0-02-04	STORY-P1-04-02	owned	closed	hand-2026-07-26/32	hand-2026-07-28/11
+LE-03	No real fault handling for the remaining vectors; #XF (19) #MC (18) and every other vector still reach the shared fail-closed default	hand-2026-07-26/32	FEAT-P1-02	owned	open	hand-2026-07-26/32	-
+LE-04	No TSS/IST; a fault during fault handling triple-faults	hand-2026-07-26/32	STORY-P1-02-02	owned	closed	hand-2026-07-26/32	hand-2026-07-27/07
+LE-05	exec::AddressSpace built but never installed	STORY-P0-05-02	FEAT-P1-03	owned	closed	hand-2026-07-26/32	hand-2026-07-27/05
+LE-06	pool-bench was a divergent sibling harness	hand-2026-07-26/35	STORY-P1-01-01	owned	closed	hand-2026-07-26/35	hand-2026-07-27/05
+LE-07	CI has never been observed running any of this work	hand-2026-07-26/07	Phase-independent	owned	closed	hand-2026-07-26/07	hand-2026-07-27/05
+LE-08	I/O APIC device-IRQ routing deferred; local APIC only	STORY-P0-04-02	First Story routing a device IRQ	deferred-with-trigger	open	hand-2026-07-26/32	-
+LE-09	No hardware tier; every timing number is Tier 0 and every timing claim carries release-blocking hardware debt	hand-2026-07-27/37 directive 1	Option B with the carve-out; a Pi 5 must produce a measurement	owned	open	hand-2026-07-27/37	-
+LE-10	ECAM/MCFG config access and PCI bridge traversal deferred	STORY-P0-04-03	First Story needing extended config space	deferred-with-trigger	open	hand-2026-07-26/32	-
+LE-11	Context::new seeds task rflags with IF set; reframed as load-bearing under preemption but still open for fixtures that arm no IDT	STORY-P1-01-01	FEAT-P1-02	owned	open	hand-2026-07-27/05	-
+LE-12	CI clippy never lints target-only fixture code	STORY-P1-01-01	Per-fixture target clippy in the CI lint job	unowned	open	hand-2026-07-27/05	-
+LE-13	Measurement ran dev-profile binaries	STORY-P1-01-01	STORY-P1-01-02	owned	closed	hand-2026-07-27/05	hand-2026-07-27/09
+LE-14	context::switch saves no SSE/x87 state; closed in the ISR stub rather than on the switch path	STORY-P1-01-01 and ADR 0003	FEAT-P1-04	owned	closed	hand-2026-07-27/05	hand-2026-07-28/09
+LE-15	The AArch64 generic timer is a 54 MHz system counter; decide when a board exists	STORY-P1-01-03	Gated on LE-09	owned	open	hand-2026-07-27/08	-
+LE-16	The Tier 0 timing gate detects only ~1.6x-or-worse regressions	STORY-P1-01-02	Fourth Story under FEAT-P1-01; gate on same-run ratios	owned	open	hand-2026-07-27/09	-
+LE-17	The fault path has no timing baseline	STORY-P1-02-01	A fault-latency fixture_measure phase	owned	closed	hand-2026-07-27/07	hand-2026-07-27/09
+LE-18	The timing gate is host-condition-sensitive; identical binaries move every gated metric together by 1.8-2.2x so the verdict carries no information about the code	STORY-P1-02-02	Fourth Story under FEAT-P1-01; needs a decision about what baselines are of	unowned	open	hand-2026-07-27/09	-
+LE-19	--update-baseline rewrites every measured row; part (a) closed, part (b) open to refresh a named metric without touching the rest	hand-2026-07-27/09	Prerequisite of the LE-16 and LE-18 Story	unowned	open	hand-2026-07-27/09	-
+LE-20	Preemption proven in fixtures but the shipping image installed no TickHook; was a denial-of-service hole, not a wiring gap	STORY-P1-04-01	STORY-P1-04-03	owned	closed	hand-2026-07-28/09	hand-2026-07-28/13
+LE-21	The graceful-degradation tier is a downgrade attack on the forged-kernel defence; a TPM-unreachable fallback is strictly easier than forging measurements	hand-2026-07-28/07 section 8.1	STORY-P9-04-02; a named exit criterion of EPIC-P9	owned	open	hand-2026-07-28/07	-
+LE-22	Degrade and priority inheritance are unreconciled; PriorityInheritingLock restores a pre-boost priority on unlock so a degrade applied to a boosted holder is silently undone, and degrading a boosted task discards a boost a waiter depends on	hand-2026-07-28/11	Doc comments in both modules is minutes; reconciling it is a Story	unowned	open	hand-2026-07-28/11	-
+LE-23	The committed timing baselines are ratios recorded on a Windows dev host and have never met a Linux CI runner; ratios should transfer where absolutes could not, and that is STORY-P1-01-04's central untested claim	STORY-P1-01-04	First CI run of the ratio gate is its test	unowned	open	hand-2026-07-28/15	-
+LE-24	D07/pool_u64x64_alloc_free_round_trip medians to 0 cycles because the operation costs less than the harness's own calibrated rdtsc overhead, so it is not measurable at Tier 0 by this harness at all; it is ungated rather than fixed	STORY-P1-01-04	Needs a batched-iteration measurement shape or LE-09's board	unowned	open	hand-2026-07-28/15	-

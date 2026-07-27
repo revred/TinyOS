@@ -46,6 +46,13 @@ struct MeasurableTarget {
     feature: Option<&'static str>,
 }
 
+/// Every `--fixture=` value the `measure` subcommand accepts.
+///
+/// A *separate namespace* from [`FIXTURES`], which `qemu-x86_64` accepts.
+/// `dispatch` and `dispatch-measure` are the two names for the same binary,
+/// one per subcommand. `list-fixtures` prints both sets for this reason.
+const MEASURABLE_FIXTURES: &[&str] = &["measure", "measure-regression", "pool-bench", "dispatch"];
+
 /// Maps a `--fixture=` value to what must be built, or `None` if that
 /// fixture emits no measurement envelope.
 fn measurable_fixture(name: &str) -> Option<MeasurableTarget> {
@@ -74,6 +81,334 @@ fn measurable_fixture(name: &str) -> Option<MeasurableTarget> {
     }
 }
 
+/// One bootable Tier 0 QEMU fixture.
+///
+/// This table is the single source of truth for what `--fixture=` accepts. It
+/// exists because the set was previously discoverable only by reading this
+/// file's match arms or grepping `.github/workflows/ci.yml`, which meant an
+/// agent could not enumerate the test harness without reverse-engineering it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Fixture {
+    /// `--fixture=` value, or `""` for the default no-fixture boot.
+    name: &'static str,
+    package: &'static str,
+    binary: &'static str,
+    feature: Option<&'static str>,
+    /// Whether a *passing* run exits non-zero. Three fixtures document a
+    /// distinguishable failure as their pass condition.
+    expects_failure: bool,
+    /// The Test document that owns this fixture's pass condition.
+    owning_test: &'static str,
+    summary: &'static str,
+}
+
+/// Every Tier 0 fixture, in roadmap order.
+const FIXTURES: &[Fixture] = &[
+    Fixture {
+        name: "",
+        package: "kernel",
+        binary: "kernel",
+        feature: None,
+        expects_failure: false,
+        owning_test: "TEST-P0-01-01-A",
+        summary: "Default boot: kernel reaches its halt state",
+    },
+    Fixture {
+        name: "broken-boot",
+        package: "kernel",
+        binary: "kernel",
+        feature: Some("fixture-broken-boot"),
+        expects_failure: true,
+        owning_test: "TEST-P0-01-03-A",
+        summary: "Deliberately-broken boot exits with a distinguishable failure code",
+    },
+    Fixture {
+        name: "context-switch",
+        package: "kernel",
+        binary: "kernel",
+        feature: Some("fixture-context-switch"),
+        expects_failure: false,
+        owning_test: "TEST-P0-02-02-A",
+        summary: "Cooperative context switch preserves callee-saved state",
+    },
+    Fixture {
+        name: "pool-bench",
+        package: "kernel",
+        binary: "kernel",
+        feature: Some("fixture-pool-bench"),
+        expects_failure: false,
+        owning_test: "TEST-P1-01-01-A",
+        summary: "Fixed-capacity pool reports through the measurement harness",
+    },
+    Fixture {
+        name: "idt-apic-timer",
+        package: "kernel",
+        binary: "kernel",
+        feature: Some("fixture-idt-apic-timer"),
+        expects_failure: false,
+        owning_test: "TEST-P0-04-02-A",
+        summary: "Local-APIC timer ticks at a bounded interval ratio",
+    },
+    Fixture {
+        name: "idt-apic-unrouted",
+        package: "kernel",
+        binary: "kernel",
+        feature: Some("fixture-idt-apic-unrouted"),
+        expects_failure: true,
+        owning_test: "TEST-P0-04-02-A",
+        summary: "An unrouted vector reaches the fail-closed default handler",
+    },
+    Fixture {
+        name: "pci-enumeration",
+        package: "kernel",
+        binary: "kernel",
+        feature: Some("fixture-pci-enumeration"),
+        expects_failure: false,
+        owning_test: "TEST-P0-04-03-A",
+        summary: "PCI enumeration builds a bounded device table",
+    },
+    // `address-space` (`TEST-P0-05-02-A`) boots a different binary package
+    // (`exec`'s `exec-fixture`, not `kernel`) entirely — see `exec/Cargo.toml`'s
+    // `[[bin]]` comment for why `exec`'s Tier 0 fixture can't just be another
+    // `kernel` Cargo feature like `broken-boot`/`context-switch` are.
+    Fixture {
+        name: "address-space",
+        package: "exec",
+        binary: "exec-fixture",
+        feature: None,
+        expects_failure: false,
+        owning_test: "TEST-P0-05-02-A",
+        summary: "A process page table is constructed and validated",
+    },
+    Fixture {
+        name: "win32-shim",
+        package: "exec",
+        binary: "win32-shim-fixture",
+        feature: None,
+        expects_failure: false,
+        owning_test: "TEST-P0-05-03-A",
+        summary: "Win32 shim bounds-checks buffers and gates calls through a policy",
+    },
+    Fixture {
+        name: "blue-sharc",
+        package: "exec",
+        binary: "blue-sharc-fixture",
+        feature: None,
+        expects_failure: false,
+        owning_test: "TEST-P0-05-04-A",
+        summary: "A packed TXE container loads and its imports resolve",
+    },
+    Fixture {
+        name: "blue-sharc-broken",
+        package: "exec",
+        binary: "blue-sharc-broken-fixture",
+        feature: None,
+        expects_failure: false,
+        owning_test: "TEST-P0-05-04-A",
+        summary: "A malformed TXE container is rejected rather than mapped",
+    },
+    Fixture {
+        name: "shared-memory",
+        package: "exec",
+        binary: "shared-memory-fixture",
+        feature: None,
+        expects_failure: false,
+        owning_test: "TEST-P0-07-02-A",
+        summary: "Shared-memory grants check ownership, vacancy and escalation",
+    },
+    Fixture {
+        name: "measure",
+        package: "kernel",
+        binary: "kernel",
+        feature: Some("fixture-measure"),
+        expects_failure: false,
+        owning_test: "TEST-P1-01-01-A",
+        summary: "Measurement harness emits a parseable TINYOS-MEAS/1 envelope",
+    },
+    Fixture {
+        name: "fault",
+        package: "kernel",
+        binary: "kernel",
+        feature: Some("fixture-fault"),
+        expects_failure: false,
+        owning_test: "TEST-P1-02-01-A",
+        summary: "Three real faults, each contained to one task",
+    },
+    Fixture {
+        name: "double-fault",
+        package: "kernel",
+        binary: "kernel",
+        feature: Some("fixture-double-fault"),
+        expects_failure: false,
+        owning_test: "TEST-P1-02-02-A",
+        summary: "A fault inside the fault path lands on the IST stack",
+    },
+    Fixture {
+        name: "address-space-switch",
+        package: "exec",
+        binary: "address-space-switch-fixture",
+        feature: None,
+        expects_failure: false,
+        owning_test: "TEST-P1-03-01-A",
+        summary: "Two real address spaces, switched by CR3, isolated by a real fault",
+    },
+    Fixture {
+        name: "wx-seal",
+        package: "exec",
+        binary: "wx-seal-fixture",
+        feature: None,
+        expects_failure: false,
+        owning_test: "TEST-P1-03-02-A",
+        summary: "W^X both directions, shared kernel PDs, sealing and teardown",
+    },
+    Fixture {
+        name: "first-task",
+        package: "exec",
+        binary: "first-task-fixture",
+        feature: None,
+        expects_failure: false,
+        owning_test: "TEST-P1-03-02-A",
+        summary: "The first real scheduled task, contained and audited",
+    },
+    Fixture {
+        name: "dispatch-measure",
+        package: "exec",
+        binary: "dispatch-measure-fixture",
+        feature: None,
+        expects_failure: false,
+        owning_test: "TEST-P1-03-03-A",
+        summary: "D04 same-space vs cross-space dispatch cost",
+    },
+    // The system image (`STORY-P1-03-03`): the real boot path that discovers
+    // hardware, installs W^X address spaces, and schedules a real loaded task.
+    // Lives in its own top-level package because it depends on *both* `kernel`
+    // and `exec`, which `kernel`'s own binary can never do.
+    Fixture {
+        name: "os",
+        package: "os",
+        binary: "os",
+        feature: None,
+        expects_failure: false,
+        owning_test: "TEST-P1-03-03-A",
+        summary: "The shipping image boots, loads and runs a real task",
+    },
+    // `STORY-P1-04-03`: the same system image, embedding a real PE64 whose
+    // `.text` is a two-byte self-jump. It is the only difference between this
+    // build and the one above, which is what makes it evidence that the
+    // *shipping* hook enforces rather than that a fixture can be made to.
+    Fixture {
+        name: "os-runaway",
+        package: "os",
+        binary: "os",
+        feature: Some("fixture-os-runaway"),
+        expects_failure: false,
+        owning_test: "TEST-P1-04-03-A",
+        summary: "The shipping image enforces its budget on a workload that never yields",
+    },
+    Fixture {
+        name: "preempt",
+        package: "kernel",
+        binary: "kernel",
+        feature: Some("fixture-preempt"),
+        expects_failure: false,
+        owning_test: "TEST-P1-04-01-A",
+        summary: "A task that never yields is preempted, with its SSE state intact",
+    },
+    Fixture {
+        name: "priority-inversion",
+        package: "kernel",
+        binary: "kernel",
+        feature: Some("fixture-priority-inversion"),
+        expects_failure: false,
+        owning_test: "TEST-P1-04-01-A",
+        summary: "Priority inversion avoided under real preemption",
+    },
+    Fixture {
+        name: "wcet-restart",
+        package: "kernel",
+        binary: "kernel",
+        feature: Some("fixture-wcet-restart"),
+        expects_failure: false,
+        owning_test: "TEST-P1-04-02-A",
+        summary: "WCET overrun restarts the task from its entry point",
+    },
+    Fixture {
+        name: "wcet-degrade",
+        package: "kernel",
+        binary: "kernel",
+        feature: Some("fixture-wcet-degrade"),
+        expects_failure: false,
+        owning_test: "TEST-P1-04-02-A",
+        summary: "WCET overrun degrades the task below a real competitor",
+    },
+    // `wcet-trip`'s correct outcome is exit 1: the system enters its declared
+    // safe state, which at Tier 0 is a fail-closed stop. Its CI step expects
+    // failure, as `broken-boot` and `idt-apic-unrouted` already do.
+    Fixture {
+        name: "wcet-trip",
+        package: "kernel",
+        binary: "kernel",
+        feature: Some("fixture-wcet-trip"),
+        expects_failure: true,
+        owning_test: "TEST-P1-04-02-A",
+        summary: "WCET overrun trips the system to its safe state",
+    },
+];
+
+/// Resolves a `--fixture=` value, treating absence as the default boot.
+fn qemu_fixture(name: Option<&str>) -> Option<&'static Fixture> {
+    let requested = name.unwrap_or_default();
+    FIXTURES.iter().find(|fixture| fixture.name == requested)
+}
+
+/// One `xtask` subcommand, for the generated usage text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Subcommand {
+    name: &'static str,
+    summary: &'static str,
+}
+
+/// Every subcommand `main` dispatches. Kept beside the dispatch table so the
+/// usage text cannot drift out of sync with what the binary actually accepts.
+const SUBCOMMANDS: &[Subcommand] = &[
+    Subcommand { name: "help", summary: "Print this text" },
+    Subcommand { name: "qemu-x86_64", summary: "Boot a Tier 0 fixture under QEMU" },
+    Subcommand { name: "list-fixtures", summary: "List every Tier 0 fixture and its owning Test" },
+    Subcommand { name: "list-status", summary: "Emit Epic/Feature/Story state as TSV on stdout" },
+    Subcommand { name: "measure", summary: "Run a measurable fixture and emit its envelope" },
+    Subcommand {
+        name: "check-timing-regression",
+        summary: "Gate measured cycles against the committed baselines",
+    },
+    Subcommand {
+        name: "check-assurance-spine",
+        summary: "Validate contracts, loose ends and the Story/Feature join",
+    },
+    Subcommand { name: "check-crate-sizes", summary: "Enforce the 20,000-LOC crate ceiling" },
+    Subcommand { name: "check-image-size", summary: "Enforce the system-image size ceiling" },
+    Subcommand {
+        name: "check-performance-catalogue",
+        summary: "Validate the 625-test performance catalogue",
+    },
+    Subcommand {
+        name: "governance-fixture-test",
+        summary: "Prove the governance fixtures catch what they claim",
+    },
+    Subcommand { name: "pack-txe", summary: "Pack a PE64 into a TXE container" },
+    Subcommand { name: "make-probe-pe", summary: "Generate a probe PE64 test input" },
+];
+
+/// Renders the usage text from [`SUBCOMMANDS`].
+fn usage() -> String {
+    let mut text = String::from("usage: cargo run -p xtask -- <command> [options]\n\ncommands:\n");
+    let width = SUBCOMMANDS.iter().map(|entry| entry.name.len()).max().unwrap_or(0);
+    for entry in SUBCOMMANDS {
+        text.push_str(&format!("  {:width$}  {}\n", entry.name, entry.summary));
+    }
+    text.push_str("\nrun `list-fixtures` for every --fixture= value.");
+    text
+}
+
 /// QEMU's own process exit code when the guest writes to the isa-debug-exit
 /// port: `(value << 1) | 1`. See `kernel/src/qemu_exit.rs`.
 const QEMU_EXIT_SUCCESS: i32 = (0x10 << 1) | 1; // 33
@@ -82,13 +417,61 @@ const QEMU_EXIT_FAILURE: i32 = (0x11 << 1) | 1; // 35
 fn main() -> ExitCode {
     let mut args = env::args().skip(1);
     let Some(command) = args.next() else {
-        eprintln!(
-            "usage: cargo run -p xtask -- <qemu-x86_64|measure|check-timing-regression|check-assurance-spine|check-crate-sizes|check-image-size|check-performance-catalogue|governance-fixture-test|pack-txe> [options]"
-        );
+        eprintln!("{}", usage());
         return ExitCode::from(XtaskExit::HarnessError as u8);
     };
 
     match command.as_str() {
+        "help" | "--help" | "-h" => {
+            println!("{}", usage());
+            ExitCode::SUCCESS
+        }
+        // Emitted rather than committed: a generated file checked into the tree
+        // is one more thing that can drift from the documents it summarises,
+        // which is the problem this replaces.
+        "list-status" => {
+            let result = os_root().and_then(|root| {
+                let repo_root = root.parent().ok_or_else(|| {
+                    format!("could not resolve repository root from {}", root.display())
+                })?;
+                assurance::artifact_statuses(repo_root)
+            });
+            match result {
+                Ok(statuses) => {
+                    println!("id\tstate\tdetail");
+                    for status in statuses {
+                        println!("{}\t{}\t{}", status.id, status.state, status.detail);
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(message) => {
+                    eprintln!("xtask: status headers invalid: {message}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        "list-fixtures" => {
+            println!("qemu-x86_64 --fixture= (boot a Tier 0 fixture under QEMU)\n");
+            println!("{:<22} {:<7} {:<30} {:<8} TEST", "FIXTURE", "PACKAGE", "BINARY", "EXIT");
+            for fixture in FIXTURES {
+                let name = if fixture.name.is_empty() { "(none)" } else { fixture.name };
+                let exit = if fixture.expects_failure { "failure" } else { "success" };
+                println!(
+                    "{:<22} {:<7} {:<30} {:<8} {}",
+                    name, fixture.package, fixture.binary, exit, fixture.owning_test
+                );
+                println!("{:<22} {}", "", fixture.summary);
+            }
+            // A separate namespace, and one that has caught people out: CI runs
+            // `measure --fixture=dispatch`, which `qemu-x86_64` does not accept.
+            println!("\nmeasure --fixture= (run a measurable fixture; separate namespace)\n");
+            println!("{:<22} {:<7} BINARY", "FIXTURE", "PACKAGE");
+            for name in MEASURABLE_FIXTURES {
+                let target = measurable_fixture(name).expect("listed fixture must resolve");
+                println!("{:<22} {:<7} {}", name, target.package, target.binary);
+            }
+            ExitCode::SUCCESS
+        }
         "qemu-x86_64" => {
             // Collected once rather than consumed by successive `find_map`s:
             // `args` is a by-value iterator, so a second search would only
@@ -103,61 +486,13 @@ fn main() -> ExitCode {
             // hand-driving QEMU. Opt-in, so CI's steps are unchanged.
             let serial_capture =
                 rest.iter().find_map(|a| a.strip_prefix("--serial-capture=").map(PathBuf::from));
-            // `address-space` (`TEST-P0-05-02-A`) boots a different binary
-            // package (`exec`'s `exec-fixture`, not `kernel`) entirely —
-            // see `exec/Cargo.toml`'s `[[bin]]` comment for why `exec`'s
-            // Tier 0 fixture can't just be another `kernel` Cargo feature
-            // like `broken-boot`/`context-switch` are.
-            let (package, binary, feature) = match fixture.as_deref() {
-                None => ("kernel", "kernel", None),
-                // The system image (`STORY-P1-03-03`): the real boot path
-                // that discovers hardware, installs W^X address spaces, and
-                // schedules a real loaded task. Lives in its own top-level
-                // package because it depends on *both* `kernel` and `exec`,
-                // which `kernel`'s own binary can never do.
-                Some("os") => ("os", "os", None),
-                // `STORY-P1-04-03`: the same system image, embedding a real
-                // PE64 whose `.text` is a two-byte self-jump. It is the only
-                // difference between this build and the one above, which is
-                // what makes it evidence that the *shipping* hook enforces
-                // rather than that a fixture can be made to.
-                Some("os-runaway") => ("os", "os", Some("fixture-os-runaway")),
-                Some("broken-boot") => ("kernel", "kernel", Some("fixture-broken-boot")),
-                Some("context-switch") => ("kernel", "kernel", Some("fixture-context-switch")),
-                Some("address-space") => ("exec", "exec-fixture", None),
-                Some("win32-shim") => ("exec", "win32-shim-fixture", None),
-                Some("blue-sharc") => ("exec", "blue-sharc-fixture", None),
-                Some("blue-sharc-broken") => ("exec", "blue-sharc-broken-fixture", None),
-                Some("shared-memory") => ("exec", "shared-memory-fixture", None),
-                Some("address-space-switch") => ("exec", "address-space-switch-fixture", None),
-                Some("wx-seal") => ("exec", "wx-seal-fixture", None),
-                Some("first-task") => ("exec", "first-task-fixture", None),
-                Some("dispatch-measure") => ("exec", "dispatch-measure-fixture", None),
-                Some("idt-apic-timer") => ("kernel", "kernel", Some("fixture-idt-apic-timer")),
-                Some("idt-apic-unrouted") => {
-                    ("kernel", "kernel", Some("fixture-idt-apic-unrouted"))
-                }
-                Some("pci-enumeration") => ("kernel", "kernel", Some("fixture-pci-enumeration")),
-                Some("pool-bench") => ("kernel", "kernel", Some("fixture-pool-bench")),
-                Some("measure") => ("kernel", "kernel", Some("fixture-measure")),
-                Some("fault") => ("kernel", "kernel", Some("fixture-fault")),
-                Some("double-fault") => ("kernel", "kernel", Some("fixture-double-fault")),
-                Some("preempt") => ("kernel", "kernel", Some("fixture-preempt")),
-                Some("priority-inversion") => {
-                    ("kernel", "kernel", Some("fixture-priority-inversion"))
-                }
-                Some("wcet-restart") => ("kernel", "kernel", Some("fixture-wcet-restart")),
-                Some("wcet-degrade") => ("kernel", "kernel", Some("fixture-wcet-degrade")),
-                // `wcet-trip`'s correct outcome is exit 1: the system enters
-                // its declared safe state, which at Tier 0 is a fail-closed
-                // stop. Its CI step expects failure, as `broken-boot` and
-                // `idt-apic-unrouted` already do.
-                Some("wcet-trip") => ("kernel", "kernel", Some("fixture-wcet-trip")),
-                Some(other) => {
-                    eprintln!("xtask: unknown --fixture value '{other}'");
-                    return ExitCode::from(XtaskExit::HarnessError as u8);
-                }
+            let Some(selected) = qemu_fixture(fixture.as_deref()) else {
+                let name = fixture.as_deref().unwrap_or_default();
+                eprintln!("xtask: unknown --fixture value '{name}'");
+                eprintln!("xtask: run `cargo run -p xtask -- list-fixtures` for every fixture");
+                return ExitCode::from(XtaskExit::HarnessError as u8);
             };
+            let (package, binary, feature) = (selected.package, selected.binary, selected.feature);
             match qemu_x86_64(package, binary, feature, serial_capture.as_deref(), Profile::Dev) {
                 Ok(code) => ExitCode::from(code as u8),
                 Err(message) => {
@@ -210,7 +545,7 @@ fn main() -> ExitCode {
             match result {
                 Ok(summary) => {
                     println!(
-                        "assurance-spine-check: {} Features, {} Stories, {} Tests, {} Reports, {} containment classes, {} boundary tests, {} security controls, {} Protection Domain contracts, {} code-admission gates, {} class communication pairs, {} application/platform targets, {} landing zones, {} selected Story/performance contracts, {} selected application/performance contracts",
+                        "assurance-spine-check: {} Features, {} Stories, {} Tests, {} Reports, {} containment classes, {} boundary tests, {} security controls, {} Protection Domain contracts, {} code-admission gates, {} class communication pairs, {} application/platform targets, {} landing zones, {} selected Story/performance contracts, {} selected application/performance contracts, {} loose ends ({} open), {} status headers",
                         summary.feature_count,
                         summary.story_count,
                         summary.test_count,
@@ -224,7 +559,10 @@ fn main() -> ExitCode {
                         summary.application_platform_count,
                         summary.landing_zone_count,
                         summary.selected_performance_contracts,
-                        summary.selected_application_performance_contracts
+                        summary.selected_application_performance_contracts,
+                        summary.loose_end_count,
+                        summary.open_loose_end_count,
+                        summary.status_header_count
                     );
                     ExitCode::SUCCESS
                 }
@@ -373,6 +711,7 @@ fn main() -> ExitCode {
         }
         other => {
             eprintln!("xtask: unknown command '{other}'");
+            eprintln!("{}", usage());
             ExitCode::from(XtaskExit::HarnessError as u8)
         }
     }
@@ -791,15 +1130,28 @@ fn check_timing_regression(
         &baseline,
         &measured.envelopes,
         profile.name(),
-        gate::TIER0_TOLERANCE,
+        gate::TIER0_POLICY,
     )
     .map_err(|error| format!("{error}"))?;
 
+    // The reference's absolute value is the direct measure of how fast this
+    // runner was, and reading it is how anyone diagnoses this gate in future
+    // (`TEST-P1-01-04-A` clause 6). It goes first, before any verdict, because
+    // every ratio below is denominated in it.
+    let reference_p50 = comparisons
+        .iter()
+        .find(|c| c.key == gate::REFERENCE_METRIC && c.statistic == "p50")
+        .map(|c| c.observed_cycles)
+        .unwrap_or(0);
     println!(
-        "\ntiming gate: {runs} runs, {} profile, tolerance = max({}%, {} cycles) applied to the median across runs",
+        "\ntiming gate: {runs} runs, {} profile. Gated quantity is each metric's same-run ratio to\n\
+         `{}` (median of the per-run ratios), tolerance = max({}%, {} ppm).\n\
+         This run's reference measured p50={reference_p50} cycles — that is how fast the machine was,\n\
+         and a ratio gate is what keeps that number out of the verdict.",
         profile.name(),
-        gate::TIER0_TOLERANCE.relative_percent,
-        gate::TIER0_TOLERANCE.absolute_cycles
+        gate::REFERENCE_METRIC,
+        gate::TIER0_POLICY.ratio.relative_percent,
+        gate::TIER0_POLICY.ratio.absolute_floor,
     );
     let mut regressed = 0usize;
     for comparison in &comparisons {
@@ -810,16 +1162,43 @@ fn check_timing_regression(
                 "REGRESSED"
             }
             gate::Verdict::ImprovedBeyondTolerance => "improved (is the baseline stale?)",
+            gate::Verdict::ReportedNotGated => "reported, NOT gated",
+        };
+        // Both numbers on every line: the one that decided the verdict, named
+        // by its unit, and the other one labelled with what it is — so a
+        // reader is never left guessing which number produced the verdict.
+        // The reference is the one row whose cycles *are* the gated quantity,
+        // so it must not also be captioned "not gated".
+        let (unit, aside) = match comparison.quantity {
+            gate::Quantity::RatioPpm => (
+                "ppm",
+                format!(
+                    "[{} -> {} cycles, not gated]",
+                    comparison.baseline_cycles, comparison.observed_cycles
+                ),
+            ),
+            gate::Quantity::Cycles => {
+                ("cyc", "[structural band on the reference, not a regression check]".to_string())
+            }
         };
         println!(
-            "  {:<52} {:<4} baseline={:<7} observed={:<7} limit={:<7} {}",
+            "  {:<52} {:<4} baseline={:<9} observed={:<9} limit={:<9} {unit}  {aside:<46}  {verdict}",
             comparison.key,
             comparison.statistic,
             comparison.baseline,
             comparison.observed,
             comparison.limit,
-            verdict
         );
+    }
+
+    // A metric that is measured but carries no verdict has to say why, on
+    // every run, in the gate's own output — not only in a source comment
+    // somebody would have to go looking for.
+    if !gate::UNGATED_AT_TIER0.is_empty() {
+        println!("\nmeasured and baselined, but deliberately carrying no verdict:");
+        for (metric, reason) in gate::UNGATED_AT_TIER0 {
+            println!("  {metric}\n    {reason}");
+        }
     }
 
     // The tails are printed and explicitly *not* gated: Tier 0 run-to-run p99
@@ -840,16 +1219,26 @@ fn check_timing_regression(
     println!(
         "\nTier 0 (QEMU/TCG) evidence only: this gate detects regressions in the mechanism it \
          measures. It closes no PERF guardrail, and hardware-tier timing debt stays open until \
-         measured on the Raspberry Pi 5 (loose end LE-09)."
+         measured on the Raspberry Pi 5 (loose end LE-09).\n\
+         A uniform slowdown of everything, the reference included, passes by construction — that \
+         is the price of a verdict that survives a busy runner, and LE-16 is restated in ratio \
+         units rather than closed (STORY-P1-01-04)."
     );
 
     if regressed > 0 {
         eprintln!("xtask: {regressed} gated statistic(s) regressed beyond tolerance");
         return Ok(XtaskExit::KernelBootFailed);
     }
+    // Count what was actually gated, not what was printed. Reporting 14 when
+    // two of those statistics deliberately carry no verdict would overstate
+    // the gate's coverage by exactly the amount this Story removed.
+    let gated = comparisons
+        .iter()
+        .filter(|comparison| comparison.verdict != gate::Verdict::ReportedNotGated)
+        .count();
     println!(
-        "check-timing-regression: no regression across {} gated statistics",
-        comparisons.len()
+        "check-timing-regression: no regression across {gated} gated statistics ({} reported without a verdict)",
+        comparisons.len() - gated
     );
     Ok(XtaskExit::KernelBootSucceeded)
 }
@@ -958,4 +1347,82 @@ fn os_root() -> Result<PathBuf, String> {
         .and_then(Path::parent)
         .map(Path::to_path_buf)
         .ok_or_else(|| format!("could not resolve os/ root from {manifest_dir}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+    use std::fs;
+
+    fn repo_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .expect("xtask manifest lives at os/src/xtask")
+            .to_path_buf()
+    }
+
+    #[test]
+    fn fixture_names_are_unique() {
+        let mut seen = BTreeSet::new();
+        for fixture in FIXTURES {
+            assert!(seen.insert(fixture.name), "duplicate fixture `{}`", fixture.name);
+        }
+    }
+
+    #[test]
+    fn the_default_boot_resolves_without_a_fixture_flag() {
+        let default = qemu_fixture(None).expect("the no-fixture boot must resolve");
+        assert_eq!(default.package, "kernel");
+        assert!(!default.expects_failure);
+    }
+
+    #[test]
+    fn an_unknown_fixture_is_rejected() {
+        assert!(qemu_fixture(Some("no-such-fixture")).is_none());
+    }
+
+    #[test]
+    fn exactly_three_fixtures_document_failure_as_their_pass_condition() {
+        // `broken-boot`, `idt-apic-unrouted` and `wcet-trip`. Pinned so that
+        // adding a fourth is a deliberate act: these three are the ones whose
+        // CI steps invert the exit code, and two of them still have the
+        // exit-code hole `wcet-trip` closed.
+        let failing: Vec<&str> =
+            FIXTURES.iter().filter(|f| f.expects_failure).map(|f| f.name).collect();
+        assert_eq!(failing, vec!["broken-boot", "idt-apic-unrouted", "wcet-trip"]);
+    }
+
+    #[test]
+    fn every_ci_fixture_value_exists_in_the_table() {
+        // The drift guard. CI was the only place the full fixture set could be
+        // read; if a step names a fixture this table does not, the table has
+        // stopped being the source of truth it claims to be.
+        let workflow = fs::read_to_string(repo_root().join(".github/workflows/ci.yml"))
+            .expect("CI workflow must be readable");
+        let mut checked = 0;
+        for (index, _) in workflow.match_indices("--fixture=") {
+            let rest = &workflow[index + "--fixture=".len()..];
+            let name: String =
+                rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+            // `--fixture=` is overloaded across two subcommands with two
+            // separate namespaces, so a CI value may legitimately resolve in
+            // either. Both are printed by `list-fixtures`.
+            assert!(
+                qemu_fixture(Some(&name)).is_some() || measurable_fixture(&name).is_some(),
+                "CI runs `--fixture={name}` but neither fixture table has such an entry"
+            );
+            checked += 1;
+        }
+        assert!(checked > 0, "the scan must actually find CI fixture invocations");
+    }
+
+    #[test]
+    fn usage_names_every_subcommand() {
+        let text = usage();
+        for entry in SUBCOMMANDS {
+            assert!(text.contains(entry.name), "usage omits `{}`", entry.name);
+        }
+    }
 }

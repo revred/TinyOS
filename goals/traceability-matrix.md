@@ -45,6 +45,7 @@ Decomposed 2026-07-27 in [`EPIC-P1.md`](epics/EPIC-P1.md): 6 Features, now 11 St
 | G-RT-3, G-DX-7 | `EPIC-P1` | `FEAT-P1-01` | `STORY-P1-01-01` | `TEST-P1-01-01-A` | `REPORT-2026-07-27-02` | Verified (Tier 0 + Host; assurance `baseline-debt`) |
 | G-RT-3, G-DX-7 | `EPIC-P1` | `FEAT-P1-01` | `STORY-P1-01-02` | `TEST-P1-01-02-A` | `REPORT-2026-07-27-04` | Verified (Tier 0 + Host; assurance `baseline-debt`) |
 | G-RT-3, G-DX-7 | `EPIC-P1` | `FEAT-P1-01` | `STORY-P1-01-03` | `TEST-P1-01-03-A` | `REPORT-2026-07-27-03` | Verified (Host; assurance `baseline-debt`) |
+| G-RT-3, G-DX-7 | `EPIC-P1` | `FEAT-P1-01` | `STORY-P1-01-04` | `TEST-P1-01-04-A` | `REPORT-2026-07-28-06` | Verified (Tier 0 + Host; assurance `baseline-debt`) |
 | G-SEC-2, G-SEC-14 | `EPIC-P1` | `FEAT-P1-02` | `STORY-P1-02-01` | `TEST-P1-02-01-A` | `REPORT-2026-07-27-05` | Verified (Tier 0 + Host; assurance `baseline-debt`) |
 | G-SEC-2, G-SEC-14 | `EPIC-P1` | `FEAT-P1-02` | `STORY-P1-02-02` | `TEST-P1-02-02-A` | `REPORT-2026-07-27-06` | Verified (Tier 0 + Host; assurance `baseline-debt`) |
 | G-SEC-2 | `EPIC-P1` | `FEAT-P1-03` | `STORY-P1-03-01` | `TEST-P1-03-01-A` | `REPORT-2026-07-27-08` | Verified (Tier 0 + Host; assurance `baseline-debt`) |

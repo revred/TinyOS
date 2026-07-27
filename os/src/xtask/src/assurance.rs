@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const CONTAINMENT_HEADER: &str =
     "id\tname\tpurpose\tdefault_authority\tinput_rule\tfailure_rule\trequired_evidence";
@@ -22,6 +22,8 @@ const LANDING_ZONE_HEADER: &str =
     "id\tname\toutcome\troadmap_horizon\tgoals\tperformance_domains\tapplications\tsecurity_controls\tcontainment_classes\tclaim_gate";
 const FEATURE_CONTRACT_HEADER: &str =
     "feature_id\timplementation_classes\tsubject_classes\tauthority_posture\thostile_inputs\tboundary_tests\tprotection_domain_contracts\tcode_admission_gates\trequired_boundary_evidence";
+const LOOSE_END_HEADER: &str =
+    "le_id\tsummary\torigin\towner_path\townership\tstate\traised_in\tclosed_in";
 const CONTRACT_HEADER: &str =
     "story_id\tfeature_id\tperformance_domains\tsecurity_controls\tcontainment_classes\tstate\trationale";
 const CONTAINMENT_FIELD_COUNT: usize = 7;
@@ -34,6 +36,12 @@ const APPLICATION_PLATFORM_FIELD_COUNT: usize = 12;
 const LANDING_ZONE_FIELD_COUNT: usize = 10;
 const FEATURE_CONTRACT_FIELD_COUNT: usize = 9;
 const CONTRACT_FIELD_COUNT: usize = 7;
+const LOOSE_END_FIELD_COUNT: usize = 8;
+/// Placeholder for a field that has no value yet.
+///
+/// The TSV convention in this directory is that every field is non-empty, so an
+/// open loose end records `-` rather than an empty `closed_in`.
+const LOOSE_END_UNSET: &str = "-";
 const CONTAINMENT_CLASS_COUNT: usize = 5;
 const BOUNDARY_TEST_COUNT: usize = 20;
 const SECURITY_CONTROL_COUNT: usize = 20;
@@ -77,6 +85,12 @@ pub struct AssuranceSummary {
     pub test_count: usize,
     /// Number of Report documents connected to a mapped Story or Test.
     pub report_count: usize,
+    /// Number of loose ends in the register, closed and open together.
+    pub loose_end_count: usize,
+    /// Number of loose ends still open — the project's live defect count.
+    pub open_loose_end_count: usize,
+    /// Number of Epic/Feature/Story documents with a parseable `Status:` header.
+    pub status_header_count: usize,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -136,6 +150,12 @@ impl ApplicationPlatformIndex {
 #[derive(Debug, PartialEq, Eq)]
 struct LandingZoneIndex {
     ids: BTreeSet<String>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct LooseEndIndex {
+    ids: BTreeSet<String>,
+    open_count: usize,
 }
 
 impl LandingZoneIndex {
@@ -278,6 +298,14 @@ pub fn check_assurance_spine(repo_root: &Path) -> Result<AssuranceSummary, Strin
     let report_files = markdown_ids(&report_dir, "REPORT-")?;
     validate_report_coverage(&report_dir, &report_files, &test_files, &contracts.stories)?;
 
+    let loose_end_path = repo_root.join("goals").join("assurance").join("loose-ends.tsv");
+    let loose_end_contents = fs::read_to_string(&loose_end_path)
+        .map_err(|error| format!("failed to read {}: {error}", loose_end_path.display()))?;
+    let loose_ends = validate_loose_ends(&loose_end_contents)?;
+    validate_loose_end_references(repo_root, &loose_ends.ids)?;
+
+    let statuses = validate_status_headers(repo_root)?;
+
     Ok(AssuranceSummary {
         feature_count: feature_contracts.features.len(),
         story_count: contracts.stories.len(),
@@ -294,6 +322,9 @@ pub fn check_assurance_spine(repo_root: &Path) -> Result<AssuranceSummary, Strin
         selected_performance_contracts: contracts.selected_performance_contracts,
         test_count: test_files.len(),
         report_count: report_files.len(),
+        loose_end_count: loose_ends.ids.len(),
+        open_loose_end_count: loose_ends.open_count,
+        status_header_count: statuses.len(),
     })
 }
 
@@ -1057,6 +1088,283 @@ fn validate_landing_zones(
         ));
     }
     Ok(LandingZoneIndex { ids })
+}
+
+/// Validates the loose-ends register: the project's machine-readable defect list.
+///
+/// The register exists because `LE-*` ids were previously carried only in session
+/// handover prose, which the session convention forbids editing once a newer dated
+/// folder exists — so the canonical list fragmented across handovers and could not
+/// be queried. Ids must be contiguous from `LE-01`, because a gap is the signature
+/// of exactly that fragmentation.
+fn validate_loose_ends(contents: &str) -> Result<LooseEndIndex, String> {
+    const OWNERSHIP: [&str; 3] = ["owned", "unowned", "deferred-with-trigger"];
+    const STATES: [&str; 2] = ["open", "closed"];
+
+    let mut lines = contents.lines();
+    let header = lines
+        .next()
+        .ok_or_else(|| "loose-ends register is empty".to_string())?
+        .trim_end_matches('\r');
+    if header != LOOSE_END_HEADER {
+        return Err(format!("unexpected loose-ends header; expected exactly `{LOOSE_END_HEADER}`"));
+    }
+
+    let mut ids = BTreeSet::new();
+    let mut open_count = 0;
+    for (zero_based_index, raw_line) in lines.enumerate() {
+        let line_number = zero_based_index + 2;
+        let fields =
+            non_empty_tsv_fields(raw_line, line_number, LOOSE_END_FIELD_COUNT, "loose-ends")?;
+
+        let id = fields[0];
+        let Some(number) = id.strip_prefix("LE-").filter(|suffix| is_two_digits(suffix)) else {
+            return Err(format!(
+                "loose-ends line {line_number}: `{id}` is not a valid id (expected `LE-NN`)"
+            ));
+        };
+        if !ids.insert(id.to_string()) {
+            return Err(format!("loose-ends line {line_number}: duplicate id `{id}`"));
+        }
+        if number.parse::<usize>().unwrap_or(0) != ids.len() {
+            return Err(format!(
+                "loose-ends line {line_number}: `{id}` is out of order or leaves a gap; ids must \
+                 run contiguously from `LE-01`"
+            ));
+        }
+
+        let ownership = fields[4];
+        if !OWNERSHIP.contains(&ownership) {
+            return Err(format!(
+                "loose-ends line {line_number}: unknown ownership `{ownership}` (expected one of {})",
+                OWNERSHIP.join(", ")
+            ));
+        }
+
+        let state = fields[5];
+        if !STATES.contains(&state) {
+            return Err(format!(
+                "loose-ends line {line_number}: unknown state `{state}` (expected one of {})",
+                STATES.join(", ")
+            ));
+        }
+
+        // A closed loose end must say where it closed, and an open one must not
+        // claim to have closed anywhere. Without this the register can report a
+        // defect as resolved with no evidence behind the claim.
+        let closed_in = fields[7];
+        match (state, closed_in == LOOSE_END_UNSET) {
+            ("closed", true) => {
+                return Err(format!(
+                    "loose-ends line {line_number}: `{id}` is closed but records no `closed_in`"
+                ));
+            }
+            ("open", false) => {
+                return Err(format!(
+                    "loose-ends line {line_number}: `{id}` is open but records `closed_in` \
+                     `{closed_in}`"
+                ));
+            }
+            _ => {}
+        }
+        if state == "open" {
+            open_count += 1;
+        }
+    }
+
+    if ids.is_empty() {
+        return Err("loose-ends register has no entries".to_string());
+    }
+    Ok(LooseEndIndex { ids, open_count })
+}
+
+/// Fails if any `LE-*` token in the live documents has no row in the register.
+///
+/// Only `goals/` and `docs/` are scanned. `session/` is deliberately excluded: those
+/// dated folders are an immutable historical record that the session convention says
+/// is never edited, so a token frozen in an old handover must not gate the register.
+fn validate_loose_end_references(
+    repo_root: &Path,
+    ids: &BTreeSet<String>,
+) -> Result<usize, String> {
+    let mut markdown = Vec::new();
+    for directory in ["goals", "docs"] {
+        collect_markdown(&repo_root.join(directory), &mut markdown)?;
+    }
+
+    let mut reference_count = 0;
+    for path in markdown {
+        let contents = fs::read_to_string(&path)
+            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+        for (zero_based_index, line) in contents.lines().enumerate() {
+            for token in loose_end_tokens(line) {
+                reference_count += 1;
+                if !ids.contains(&token) {
+                    return Err(format!(
+                        "{}:{}: `{token}` has no row in goals/assurance/loose-ends.tsv",
+                        path.display(),
+                        zero_based_index + 1
+                    ));
+                }
+            }
+        }
+    }
+    Ok(reference_count)
+}
+
+/// Extracts every `LE-NN` token from one line.
+fn loose_end_tokens(line: &str) -> Vec<String> {
+    let bytes = line.as_bytes();
+    let mut tokens = Vec::new();
+    for (index, _) in line.match_indices("LE-") {
+        // `SAMPLE-01` and similar must not match: require a non-alphanumeric before
+        // the `L`, so only a standalone token counts.
+        if index > 0 {
+            let previous = bytes[index - 1];
+            if previous.is_ascii_alphanumeric() || previous == b'-' || previous == b'_' {
+                continue;
+            }
+        }
+        let digits = &line[index + 3..];
+        if digits.len() >= 2 && digits.as_bytes()[..2].iter().all(u8::is_ascii_digit) {
+            tokens.push(format!("LE-{}", &digits[..2]));
+        }
+    }
+    tokens
+}
+
+fn collect_markdown(directory: &Path, output: &mut Vec<PathBuf>) -> Result<(), String> {
+    let entries = fs::read_dir(directory)
+        .map_err(|error| format!("failed to read {}: {error}", directory.display()))?;
+    for entry in entries {
+        let entry = entry
+            .map_err(|error| format!("failed to enumerate {}: {error}", directory.display()))?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_markdown(&path, output)?;
+        } else if path.extension().and_then(|extension| extension.to_str()) == Some("md") {
+            output.push(path);
+        }
+    }
+    Ok(())
+}
+
+/// The controlled vocabulary a `Status:` header may open with.
+///
+/// Ordered longest-first so that `Functionally Verified` is never truncated to
+/// `Verified` by a prefix match.
+const STATUS_STATES: [&str; 6] = [
+    "Functionally Verified",
+    "Functionally complete",
+    "In progress",
+    "Specified",
+    "Complete",
+    "Verified",
+];
+
+/// One artifact's machine-readable state, extracted from its `Status:` header.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactStatus {
+    /// `EPIC-P1`, `FEAT-P1-04`, `STORY-P1-04-03`.
+    pub id: String,
+    /// One of [`STATUS_STATES`].
+    pub state: String,
+    /// Everything after the state — dates, tiers, Reports, caveats.
+    pub detail: String,
+}
+
+/// Extracts the state from a `Status:` header line.
+///
+/// The header stays human-readable prose; only its opening is constrained. The
+/// state runs from `**` to the first terminator, so
+/// `Status: **Verified** (locally; CI run pending)` and
+/// `Status: **Specified, not yet started. Gated on `LE-09`.**` both parse.
+fn parse_status_line(line: &str) -> Result<(String, String), String> {
+    let body = line
+        .strip_prefix("Status:")
+        .ok_or_else(|| "status line must start with `Status:`".to_string())?
+        .trim_start();
+    let body = body
+        .strip_prefix("**")
+        .ok_or_else(|| "status line must open with a bold state, `Status: **...`".to_string())?;
+
+    for state in STATUS_STATES {
+        let Some(rest) = body.strip_prefix(state) else {
+            continue;
+        };
+        // A state must be followed by a terminator, never by more word
+        // characters — otherwise `Complete` would match `Completely rewritten`.
+        let terminated = rest.is_empty()
+            || rest.starts_with("**")
+            || rest.starts_with(" —")
+            || rest.starts_with(',')
+            || rest.starts_with(" (")
+            || rest.starts_with('.');
+        if terminated {
+            // The remainder is prose meant for a reader, so strip the bold
+            // markers and the separator that joined it to the state.
+            let detail = rest
+                .trim()
+                .trim_start_matches("**")
+                .trim()
+                .trim_start_matches(['—', ','])
+                .trim()
+                .trim_end_matches("**")
+                .trim()
+                .to_string();
+            return Ok((state.to_string(), detail));
+        }
+    }
+
+    Err(format!(
+        "status must open with one of {}; found `{}`",
+        STATUS_STATES.join(", "),
+        body.chars().take(40).collect::<String>()
+    ))
+}
+
+/// Reads and validates the `Status:` header of every Epic, Feature and Story.
+///
+/// The headers were previously free prose in fourteen distinct shapes, so the
+/// dashboard had to be hand-maintained against seventy documents and drifted.
+/// Constraining only the opening keeps the prose while making the state
+/// queryable.
+fn validate_status_headers(repo_root: &Path) -> Result<Vec<ArtifactStatus>, String> {
+    let mut statuses = Vec::new();
+    for (directory, prefix) in [("epics", "EPIC-"), ("features", "FEAT-"), ("stories", "STORY-")] {
+        let path = repo_root.join("goals").join(directory);
+        let mut paths = Vec::new();
+        collect_markdown(&path, &mut paths)?;
+        paths.sort();
+        for file in paths {
+            let Some(stem) = file.file_stem().and_then(|stem| stem.to_str()) else {
+                continue;
+            };
+            // `backlog.md` carries a status line but is a table of undecomposed
+            // rows rather than an artifact with an id, so it is not constrained.
+            if !stem.starts_with(prefix) {
+                continue;
+            }
+            let contents = fs::read_to_string(&file)
+                .map_err(|error| format!("failed to read {}: {error}", file.display()))?;
+            let line = contents
+                .lines()
+                .find(|line| line.starts_with("Status:"))
+                .ok_or_else(|| format!("{stem}: no `Status:` header"))?;
+            let (state, detail) =
+                parse_status_line(line).map_err(|error| format!("{stem}: {error}"))?;
+            statuses.push(ArtifactStatus { id: stem.to_string(), state, detail });
+        }
+    }
+    if statuses.is_empty() {
+        return Err("no Epic, Feature or Story documents found".to_string());
+    }
+    Ok(statuses)
+}
+
+/// Reads every artifact status for `list-status`.
+pub fn artifact_statuses(repo_root: &Path) -> Result<Vec<ArtifactStatus>, String> {
+    validate_status_headers(repo_root)
 }
 
 fn validate_numbered_context_id(
@@ -2015,7 +2323,7 @@ mod tests {
         let summary =
             check_assurance_spine(&repo_root).expect("committed assurance spine must be valid");
         assert_eq!(summary.feature_count, 22);
-        assert_eq!(summary.story_count, 48);
+        assert_eq!(summary.story_count, 49);
         assert_eq!(summary.containment_class_count, 5);
         assert_eq!(summary.boundary_test_count, 20);
         assert_eq!(summary.security_control_count, 20);
@@ -2024,9 +2332,163 @@ mod tests {
         assert_eq!(summary.class_communication_pair_count, 25);
         assert_eq!(summary.application_platform_count, 19);
         assert_eq!(summary.landing_zone_count, 9);
-        assert_eq!(summary.test_count, 35);
-        assert_eq!(summary.report_count, 42);
+        assert_eq!(summary.test_count, 36);
+        assert_eq!(summary.report_count, 43);
         assert!(summary.selected_performance_contracts >= 625);
         assert!(summary.selected_application_performance_contracts >= 625);
+        assert_eq!(summary.loose_end_count, 24);
+        assert_eq!(summary.open_loose_end_count, 14);
+    }
+
+    fn loose_end_fixture() -> String {
+        let mut fixture = String::from(LOOSE_END_HEADER);
+        fixture.push('\n');
+        fixture.push_str("LE-01\tsummary\torigin\tpath\towned\tclosed\traised\tclosed-here\n");
+        fixture.push_str("LE-02\tsummary\torigin\tpath\tunowned\topen\traised\t-\n");
+        fixture
+    }
+
+    #[test]
+    fn loose_end_fixture_is_accepted() {
+        let index = validate_loose_ends(&loose_end_fixture()).expect("fixture must validate");
+        assert_eq!(index.ids.len(), 2);
+        assert_eq!(index.open_count, 1);
+    }
+
+    #[test]
+    fn loose_end_gap_is_rejected() {
+        // The failure mode the register exists to prevent: an id carried in prose
+        // that never made it into the machine-readable list.
+        let fixture = loose_end_fixture().replace("LE-02\tsummary", "LE-03\tsummary");
+        let error = validate_loose_ends(&fixture).expect_err("a gap must be rejected");
+        assert!(error.contains("contiguously"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn loose_end_closed_without_evidence_is_rejected() {
+        let fixture = loose_end_fixture().replace(
+            "LE-01\tsummary\torigin\tpath\towned\tclosed\traised\tclosed-here",
+            "LE-01\tsummary\torigin\tpath\towned\tclosed\traised\t-",
+        );
+        let error =
+            validate_loose_ends(&fixture).expect_err("a closed row needs a closing handover");
+        assert!(error.contains("records no `closed_in`"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn loose_end_open_claiming_closure_is_rejected() {
+        let fixture = loose_end_fixture()
+            .replace("unowned\topen\traised\t-", "unowned\topen\traised\tclosed-here");
+        let error = validate_loose_ends(&fixture).expect_err("an open row cannot record closure");
+        assert!(error.contains("is open but records"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn loose_end_unknown_vocabulary_is_rejected() {
+        let ownership = loose_end_fixture().replace("\towned\t", "\tmaybe\t");
+        assert!(validate_loose_ends(&ownership).is_err(), "unknown ownership must be rejected");
+
+        let state = loose_end_fixture().replace("\tclosed\t", "\tfixed\t");
+        assert!(validate_loose_ends(&state).is_err(), "unknown state must be rejected");
+    }
+
+    #[test]
+    fn loose_end_tokens_are_extracted_without_false_positives() {
+        assert_eq!(loose_end_tokens("closes LE-20 and LE-22."), vec!["LE-20", "LE-22"]);
+        assert_eq!(loose_end_tokens("`LE-19(b)` is open"), vec!["LE-19"]);
+        assert!(loose_end_tokens("SAMPLE-01 and TITLE-02").is_empty());
+        assert!(loose_end_tokens("LE-1 is too short").is_empty());
+    }
+
+    #[test]
+    fn status_lines_in_every_committed_shape_parse() {
+        // One case per shape found across the committed Epic/Feature/Story set.
+        let cases = [
+            ("Status: **Verified**", "Verified"),
+            ("Status: **Verified** (locally; CI run pending)", "Verified"),
+            ("Status: **Verified — 4/4 Stories Verified**", "Verified"),
+            ("Status: **Complete — 3/3 Stories Verified**", "Complete"),
+            ("Status: **Specified, not yet started**", "Specified"),
+            ("Status: **Specified — no Story started**", "Specified"),
+            ("Status: **In progress — acceptance criteria hardened**", "In progress"),
+            (
+                "Status: **Functionally Verified (Tier 0 + Host), 2026-07-27**",
+                "Functionally Verified",
+            ),
+            ("Status: **Functionally complete (2026-07-27) — all 25**", "Functionally complete"),
+            ("Status: **Verified (Tier 0 + Host) 2026-07-28**", "Verified"),
+        ];
+        for (line, expected) in cases {
+            let (state, _) = parse_status_line(line).unwrap_or_else(|error| {
+                panic!("`{line}` must parse: {error}");
+            });
+            assert_eq!(state, expected, "wrong state for `{line}`");
+        }
+    }
+
+    #[test]
+    fn a_status_outside_the_vocabulary_is_rejected() {
+        let error = parse_status_line("Status: **Nearly done — trust me**")
+            .expect_err("an invented state must be rejected");
+        assert!(error.contains("must open with one of"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn a_state_word_must_be_terminated() {
+        // `Complete` must not match `Completely`, or the vocabulary would admit
+        // any word that happens to start with a valid state.
+        assert!(parse_status_line("Status: **Completely rewritten**").is_err());
+        assert!(parse_status_line("Status: **Verifiable soon**").is_err());
+    }
+
+    #[test]
+    fn an_unbolded_status_is_rejected() {
+        assert!(parse_status_line("Status: Verified").is_err());
+        assert!(parse_status_line("State: **Verified**").is_err());
+    }
+
+    #[test]
+    fn functionally_verified_is_not_truncated_to_verified() {
+        let (state, _) = parse_status_line("Status: **Functionally Verified (Host), 2026-07-27**")
+            .expect("must parse");
+        assert_eq!(state, "Functionally Verified");
+    }
+
+    #[test]
+    fn every_committed_artifact_has_a_parseable_status() {
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .expect("xtask manifest lives at os/src/xtask")
+            .to_path_buf();
+        let statuses =
+            validate_status_headers(&repo_root).expect("every committed Status: must parse");
+        assert!(statuses.iter().any(|status| status.id.starts_with("EPIC-")));
+        assert!(statuses.iter().any(|status| status.id.starts_with("FEAT-")));
+        assert!(statuses.iter().any(|status| status.id.starts_with("STORY-")));
+        for status in &statuses {
+            assert!(
+                STATUS_STATES.contains(&status.state.as_str()),
+                "`{}` has out-of-vocabulary state `{}`",
+                status.id,
+                status.state
+            );
+        }
+    }
+
+    #[test]
+    fn committed_loose_end_references_all_resolve() {
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .expect("xtask manifest lives at os/src/xtask")
+            .to_path_buf();
+        let contents =
+            fs::read_to_string(repo_root.join("goals").join("assurance").join("loose-ends.tsv"))
+                .expect("committed register must be readable");
+        let index = validate_loose_ends(&contents).expect("committed register must be valid");
+        let references = validate_loose_end_references(&repo_root, &index.ids)
+            .expect("every committed LE-* token must resolve");
+        assert!(references > 0, "the scan must actually find tokens");
     }
 }
