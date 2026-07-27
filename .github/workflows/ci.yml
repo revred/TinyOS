@@ -288,14 +288,28 @@ jobs:
             exit 1
           fi
 
-      # STORY-P1-01-02's gate. Unlike the two steps above, this one *does*
-      # assert about the numbers — but only the stable statistics (min, p50),
-      # only over the median of three release-profile runs, and only against a
-      # tolerance derived from measured Tier 0 noise (60% + a 24-cycle floor;
-      # see os/src/xtask/src/gate.rs for the derivation and for what that
-      # loose a tolerance can and cannot catch). A missing or malformed
-      # baseline fails this step rather than skipping it. Exit 1 is a
-      # regression, exit 2 a harness error; either fails the build, exactly as
-      # a functional test failure does (README Phase 1).
-      - name: TEST-P1-01-02-A — timing-regression gate (D04/D05/D07 vs committed baselines)
+      # STORY-P1-01-02's gate, re-based onto same-run ratios by
+      # STORY-P1-01-04. Unlike the two steps above, this one *does* assert
+      # about the numbers — but only the stable statistics (min, p50), only
+      # over the median of three release-profile runs, and only on each
+      # metric's ratio to a fixed reference workload measured in the same run.
+      #
+      # The ratio is the point. This step was red on main for five sessions
+      # while gating absolute cycle counts: between two runs of identical
+      # binaries (one commit changed a single markdown file) every metric
+      # moved together by 1.8-2.2x and the tightest one reported REGRESSED
+      # about code that had not changed. The runner's speed cancels out of a
+      # same-run ratio; a real regression does not. See
+      # os/src/xtask/src/gate.rs for the derivation, the four-quadrant
+      # demonstration, and what a 2x-or-worse sensitivity can and cannot
+      # catch.
+      #
+      # If this step ever fails, read the reference metric's own cycle count
+      # in the output first — it is the direct measure of how fast this
+      # runner was, and it is printed before any verdict for that reason.
+      #
+      # A missing or malformed baseline fails this step rather than skipping
+      # it. Exit 1 is a regression, exit 2 a harness error; either fails the
+      # build, exactly as a functional test failure does (README Phase 1).
+      - name: TEST-P1-01-04-A — timing-regression gate (same-run ratios vs committed baselines)
         run: cargo run -p xtask -- check-timing-regression --runs=3

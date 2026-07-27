@@ -1,6 +1,6 @@
 # FEAT-P1-01 — Timing Measurement Harness & CI Timing-Regression Gate
 
-Status: **All three Stories functionally Verified 2026-07-27 (assurance state `baseline-debt` throughout — Tier 0 only, no hardware-tier evidence)**
+Status: **Functionally complete — all three Stories functionally Verified 2026-07-27 (assurance state `baseline-debt` throughout — Tier 0 only, no hardware-tier evidence)**
 Epic: [`EPIC-P1`](../epics/EPIC-P1.md)
 Introduced in: [`session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md`](../../session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md)
 
@@ -25,6 +25,7 @@ QEMU cycle counts calibrate the harness and the regression *mechanism*; they are
 | [`STORY-P1-01-01`](../stories/STORY-P1-01-01.md) | Reusable cycle-calibrated measurement harness (kernel side + xtask parser) | Verified (Tier 0 + Host; assurance `baseline-debt`) |
 | [`STORY-P1-01-02`](../stories/STORY-P1-01-02.md) | Committed baselines + `check-timing-regression` CI gate, proven able to fail | Verified (Tier 0 + Host; assurance `baseline-debt`) |
 | [`STORY-P1-01-03`](../stories/STORY-P1-01-03.md) | AArch64 `CNTVCT_EL0`/`CNTFRQ_EL0` cycle source and timebase — the harness's arch seam, checked with a second implementor before any board exists | Verified (Host; assurance `baseline-debt`) |
+| [`STORY-P1-01-04`](../stories/STORY-P1-01-04.md) | Gate on same-run ratios to a fixed reference workload, so the verdict is about the code rather than about how fast the runner was (`LE-16`/`LE-18`) | Verified (Tier 0 + Host; assurance `baseline-debt`) |
 
 ## Containment contract
 
