@@ -48,6 +48,31 @@ Two smaller notes. `wcet::record_tick` takes `&mut Scheduler`, and calling it fr
 - **Only `HEAD` is verified.** The tree had never been committed incrementally, and fourteen files carry changes from more than one body of work, so commits 1 and 2 do not pass `check-assurance-spine` standalone — the expected counts and the contract rows landed in different commits. If you need per-commit green, squash; do not try to "fix" the intermediate commits.
 - **Three files are uncommitted, deliberately**, because they are `STORY-P1-04-02`'s opening move rather than part of any commit above: `goals/stories/STORY-P1-04-02.md` (finalized criteria), `goals/tests/TEST-P1-04-02-A.md` (new), and `os/src/xtask/src/assurance.rs` (expected Test count 33 → 34). Commit them with your first implementation commit, or on their own — but do not lose them, and note that the spine gate already expects the higher count.
 
+## Two CI facts you will otherwise rediscover the hard way
+
+**The timing gate is flaky on the GitHub runner, and there is now evidence rather than suspicion.** `D05/dispatch_select_highest_priority_ready` sits almost exactly on its own tolerance boundary under CI conditions. Three consecutive runs, same baseline and same limit throughout:
+
+| Run | Commit | observed | limit | Verdict |
+|---|---|---|---|---|
+| `30257003163` | `91c95c1` (before any of this work) | 123 | 121 | REGRESSED |
+| `30273423631` | `c72a1b6` (the merge) | 123 | 121 | REGRESSED |
+| `30274004446` | `f58dd8d` | **90** | 121 | ok |
+
+The baseline is 76 and the tolerance is `max(60%, 24 cycles)`, so the limit is 121 and the metric lands within a few cycles of it depending on how loaded the runner is. **This is `LE-16` meeting `LE-18`**: a gate that can only detect ~1.6x-or-worse regressions, evaluated against a baseline recorded on different hardware, will flip on a metric whose true value *is* about 1.6x.
+
+So: if this step fails, read the `observed` value before believing it. If it is near 121 the run is noise; if it is materially higher, it is real. **Do not "fix" this by widening the tolerance or re-recording the baseline** — that is precisely the move Handover 05 recorded as a mistake, and it would permanently weaken the one gate this project has against timing regressions in exchange for suppressing a symptom. `LE-18` is unowned and needs a Story that decides what these baselines are *of*; that Story is the fix.
+
+**A Windows development machine cannot reproduce CI's lint job.** CI runs `cargo clippy --workspace --all-targets`. On Windows that command fails outright — every `no_std` binary needs `hal_x86_64::{boot,interrupts,qemu_exit,serial}`, all gated `not(target_os = "windows")`. The command used throughout this session, `--workspace --lib --tests`, never lints a binary at all, and that is how a `deref_addrof` break reached `main`. What does work locally:
+
+```
+cargo clippy -p <kernel|exec|os> --bins \
+  --target targets/x86_64-tinyos.json -Zjson-target-spec \
+  -Zbuild-std=core,compiler_builtins \
+  -Zbuild-std-features=compiler-builtins-mem -- -D warnings
+```
+
+Run that before pushing. It is the mirror image of `LE-12` — that one says CI never lints target-only fixture code; this says a Windows dev box never lints the binaries CI does.
+
 ## Standing constraints — do not relax these
 
 - **TDD.** Test document when a Story starts, never pre-written for a Story that has not begun; Red before Green where the seam allows it, and where it does not (a Tier 0 fixture debugged against real hardware behaviour), say so plainly in the Test document's process note, as the last four have.
