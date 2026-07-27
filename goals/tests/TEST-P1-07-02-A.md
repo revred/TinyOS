@@ -98,10 +98,10 @@ precedent `TEST-P1-07-01-A` and `TEST-P1-01-04-A` clause 4 set.
 | 7 — what this test does not establish | **Unchanged, and still true.** No nested-fault survival, no `EL0`, no timing, `LE-09` open. | — |
 
 `hal-arm64` went from **64 host tests to 115**, and the workspace suite from
-**498 passing to 549**. The crate is 2,391 non-test lines, counting each file up
-to its `#[cfg(test)]` boundary — well inside the 20,000-line ceiling, and stated
-with its method because Handover 24's own figure was produced by a different one
-and the two are not comparable.
+**498 passing to 549**. `crate-size-check` reports `hal-arm64` at **2,216 lines** against the
+20,000-line ceiling — the pre-commit hook's own figure, quoted rather than a
+hand count, because this repository has an authoritative measurement and a
+second one only invites the two to disagree.
 
 ### Clause 6's spoor emission does not live where this document said it would
 
