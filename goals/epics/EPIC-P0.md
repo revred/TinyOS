@@ -1,6 +1,6 @@
 # EPIC-P0 — Kernel Skeleton
 
-Status: **Functionally complete (2026-07-27) — all 25 Stories Verified at minimum Tier 0; assurance contracts remain `baseline-debt`, which is `EPIC-P1`'s explicit charge**
+Status: **Functionally complete (2026-07-27) — all 27 Stories Verified at minimum Tier 0 (25 at decomposition, plus `STORY-P0-01-04` and `STORY-P0-01-05`, both added 2026-07-28 to hold the assurance harness to its own discipline); assurance contracts remain `baseline-debt`, which is `EPIC-P1`'s explicit charge**
 Roadmap phase: [Phase 0 — Kernel skeleton](../../README.md#roadmap)
 Introduced in: [`session/hand-2026-07-26/04-seedmvp-agentmd-goals-vv-model-handover.md`](../../session/hand-2026-07-26/04-seedmvp-agentmd-goals-vv-model-handover.md)
 

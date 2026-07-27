@@ -38,6 +38,22 @@ Destinations:19 applications / 9 landing zones ──┼────────
 - `baseline-debt` — the Story was functionally Verified before this spine existed, or lacks the required performance/security evidence. It is not release-assured.
 - `verified` — dated raw evidence and Reports close every applicable mapped release gate.
 
+### Between "none" and "all": the guardrail evidence register
+
+A Story's state is all-or-nothing by design, and that is right for a *release* decision: `verified` must mean every applicable gate, or it means nothing. But it left the spine unable to say anything in between, so a Story with 20 of its 23 release gates closed was indistinguishable from one with none, and a gate blocked on absent hardware was indistinguishable from a gate blocked on nobody having looked.
+
+[`guardrail-evidence.tsv`](guardrail-evidence.tsv) records which `PERF-Dnn-Gnn` gates carry dated evidence, at the granularity the gates are already defined at. Added by [`STORY-P0-01-05`](../stories/STORY-P0-01-05.md), closing `LE-32`.
+
+Three properties make it legal under the no-waiver rule below, and they are not negotiable:
+
+- **It is a count of evidence, never a score.** No rollup, no percentage, no pass rate.
+- **A gate absent from it is `unevidenced`, never `passed`.** The register can only ever say that something *was* measured, not that a threshold held.
+- **No Story's assurance state is derived from it.** `baseline-debt` does not become `verified` because rows accumulated. That conversion still requires every applicable gate, by hand, with Reports.
+
+The rule that "no mapped release gate may be failed, missing, waived silently, or hidden by an aggregate score" forbids concealing a failed gate behind a summary. It does not forbid recording which gates have evidence — and the spine was weaker for lacking that, because real work was invisible until an all-or-nothing threshold flipped.
+
+The register's own integrity check is the one that matters: **a Story may only file evidence in a domain its own contract selects.** Evidence filed against a gate nobody was ever obliged to close is a more convincing way to be wrong than having no register at all.
+
 All 23 currently functional-Verified Phase-0 Stories are `baseline-debt`; the two planned Stories are `specified`. This avoids rewriting history or pretending that functional tests measured latency tails, CPU cycles, memory allocations, active cross-process isolation, signing, or hostile-load safety.
 
 ## What CI enforces
@@ -61,6 +77,8 @@ All 23 currently functional-Verified Phase-0 Stories are `baseline-debt`; the tw
 - a Test whose performance, security, containment, boundary-test, or assurance-state metadata differs from its Story and Feature contracts;
 - a Report that references no mapped Story or Test;
 - malformed, duplicate, or unknown `Dnn` and `SEC-nn` references;
+- a guardrail-evidence row whose id is malformed, whose domain disagrees with its own id, whose Story has no contract row, whose Story does not select the domain it claims evidence in, or that duplicates an existing `(guardrail, story)` pair;
+- **a shipped crate that could allocate** — every crate inside the image must declare `no_std` and must not declare `#[global_allocator]`, `extern crate alloc`, or `use alloc::` outside `#[cfg(test)]`. This is the evidence behind every `PERF-Dnn-G11` row: the guardrail asks for zero heap allocations per steady-state work unit, and this system has no heap at all, which is stronger and compiler-enforced. The gate exists so that adding an allocator withdraws the evidence loudly instead of invalidating it silently;
 - an unknown assurance state;
 - an incomplete security control catalogue;
 - a broken or incomplete 625-cell performance catalogue.

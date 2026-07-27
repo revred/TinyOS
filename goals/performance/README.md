@@ -112,6 +112,10 @@ The TSV is the canonical machine-readable expansion. Its `status` is initially `
 
 A performance failure never gets hidden by a functional pass. Conversely, an unavailable future subsystem is **not failed and not passed**; it remains specified until its implementing Story is ready.
 
+Which cells actually carry dated evidence is recorded in [`../assurance/guardrail-evidence.tsv`](../assurance/guardrail-evidence.tsv) and machine-checked by `check-assurance-spine`. It is a record of evidence, never a score: a cell absent from it is *unevidenced*, which is what it is, and never *passed*.
+
+**Not every guardrail waits on hardware, and the `Cadence` column above says which.** `G09` and `G11` run *every PR*; most of the rest are HIL. The first cells recorded were `G11` across ten domains ([`REPORT-2026-07-28-08`](../reports/REPORT-2026-07-28-08.md)), and they are not measurements: `G11` asks for zero heap allocations per steady-state work unit, and this system has **no heap at all** — every shipped crate is `#![no_std]` with no `#[global_allocator]`, which Rust enforces at compile time. That is stronger than the guardrail's own wording asks for, and independent of which CPU runs it. Ten domains, not the seventeen currently selected by Stories: **a guardrail cannot be closed for a subsystem that does not exist**, so anything whose `readiness` is `design`, `specified`, `stand-in-only` or `unbuilt` was excluded by name.
+
 ## Integrity and spine gates
 
 From `os/`:
