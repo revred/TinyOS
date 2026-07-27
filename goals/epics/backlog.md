@@ -1,8 +1,10 @@
 # Epic Backlog — Numbered Roadmap and Destination Horizons
 
-Status: **`EPIC-P1` decomposed (2026-07-27); the rest planned, not yet decomposed**
+Status: **`EPIC-P1` decomposed (2026-07-27) and `EPIC-P9` decomposed (2026-07-28); the rest planned, not yet decomposed**
 
 The numbered Epics preserve the MVP delivery path. Destination-horizon Epics record where the platform must eventually land so today's ABI, IPC, scheduling, memory, graphics, network, runtime, and security decisions do not steer into a dead end. Per the [goals dashboard](../index.html#jit-decomposition), decomposition happens only when prerequisites and ownership are ready — `EPIC-P1` met that bar when `EPIC-P0` reached functionally complete (all 25 Stories Verified) and was promoted to [`EPIC-P1.md`](EPIC-P1.md); the remaining rows stay here.
+
+**`EPIC-P9` is not a phase and its number is not a position.** It is a *capability* Epic (memory confidentiality against a dump) that runs alongside the sequence rather than inside it. The assurance spine requires every Feature and Story id to carry a `Pn` token, `P0`–`P8` are reserved above, and `P9` was the first free number — nothing in it waits for Phase 8. It was decomposed early, against the usual just-in-time rule, precisely *because* almost all of it is blocked: writing the dependency chain down is what makes the one workable Feature (`FEAT-P9-01`) separable from the seven that are gated on hardware.
 
 | Epic | Roadmap phase | Goals to verify | Hardware | Depends on |
 |---|---|---|---|---|
@@ -16,6 +18,7 @@ The numbered Epics preserve the MVP delivery path. Destination-horizon Epics rec
 | `EPIC-P6B` | Phase 6b — Heterogeneous compute | G-AI-6, G-HW-6; G-SEC-2, -9, -12 | Jetson Orin Nano Super | `EPIC-P6` |
 | `EPIC-P7` | Phase 7 — Edge bring-up | G-HW-1 – G-HW-5; G-SEC-9 | Jetson Orin Nano Super | `EPIC-P0`, `EPIC-P6B` |
 | `EPIC-P8` | Phase 8 — Fleet mode | G-RC-4, G-AI-7; G-SEC-6, -8, -10 – -12 | Multiple units of both MVP board types | `EPIC-P4`, `EPIC-P5` |
+| [`EPIC-P9`](EPIC-P9.md) — **decomposed** | *None — capability Epic, runs alongside the phase sequence* | G-SEC-2, -8 (partial), -13 – -15 | **TPM 2.0 + memory-encryption engine — gated on `LE-09`**, except `FEAT-P9-01` which needs none | `EPIC-P1` (`FEAT-P1-03`) |
 
 ## Destination horizons
 
