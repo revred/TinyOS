@@ -1,74 +1,85 @@
-//! `STORY-P0-03-01`'s Tier 0 `PERF-D07` measurement fixture: drives
-//! [`kernel::mem::Pool`] through the same operation shapes the host
+//! `STORY-P0-03-01`'s Tier 0 `PERF-D07` measurement fixture, **refactored onto
+//! the shared measurement harness by `STORY-P1-01-01`** (loose end `LE-06`).
+//!
+//! Drives [`kernel::mem::Pool`] through the same operation shapes the host
 //! diagnostic harness in `mem.rs`'s `#[cfg(test)]` module measures
 //! (`perf_pool_u64x64_*`), compiled for the real `x86_64-tinyos` target and
-//! run under QEMU, so every cycle count this fixture reports comes from
-//! `RDTSC` executing inside the actual target binary — not a host userspace
-//! process sharing a Windows dev machine with a browser and an IDE.
+//! run under QEMU, so every cycle count comes from a real cycle-source read
+//! executing inside the actual target binary — not a host userspace process
+//! sharing a Windows dev machine with a browser and an IDE.
 //!
-//! Numbers leave the VM over [`hal_x86_64::serial`] (COM1), since
-//! `hal_x86_64::qemu_exit`'s isa-debug-exit port only carries a single
-//! pass/fail bit — `xtask qemu-x86_64 --fixture=pool-bench` still reports
-//! pass/fail the normal way (this fixture's own self-consistency checks
-//! below decide it), but reading the actual percentile/cycle numbers
-//! requires invoking QEMU directly with `-serial file:PATH` against this
-//! fixture's built ELF (see this story's own Report for the exact
-//! invocation used).
+//! **What the refactor changed, and why it matters.** This fixture used to own
+//! private copies of everything measurement-shaped: its own `rdtsc()`, its own
+//! `calibrate_rdtsc_overhead`, its own `percentile`, its own prose-formatted
+//! `report_percentiles`, and its own bare `[u64; N]` buffer indexed by the
+//! caller. All five are gone, replaced by [`kernel::measure`]:
 //!
-//! Caveat this fixture's own numbers do **not** erase: QEMU's `q35`/TCG
-//! `RDTSC` model is software emulation of the timestamp counter, not a
-//! passthrough read of real silicon — so while this *is* real target-compiled
-//! code (not a host-native binary) executing a real `RDTSC` instruction, the
-//! cycle-count magnitudes it reports are QEMU's own TSC emulation, not proof
-//! of real-hardware wall-clock cost. That gap is exactly what the
-//! separately-tracked HIL tier (unavailable in this environment) exists to
-//! close; this fixture is Tier 0 evidence, not a HIL substitute.
+//! - the cycle source is now [`hal::time::CycleSource`] behind
+//!   `hal_x86_64::tsc::Tsc`, so this fixture no longer names `RDTSC` at all
+//!   and an ARM64 build of it needs no edits (`LE-09`);
+//! - sampling goes through [`Samples`], which counts refused samples instead
+//!   of trusting the caller's index arithmetic;
+//! - percentiles come from the one shared, host-unit-tested implementation
+//!   rather than a second copy that could drift from it;
+//! - output is the versioned `TINYOS-MEAS/1` envelope that
+//!   `cargo run -p xtask -- measure` parses and fails closed on, replacing
+//!   prose lines that only a human could read — which is what made this
+//!   fixture's numbers reachable *only* by invoking QEMU by hand with
+//!   `-serial file:PATH`.
 //!
-//! Each measurement phase below is its own `#[inline(never)]` function
-//! rather than an inline block of `run`, and deliberately not written to
-//! avoid it: this workspace's unoptimized dev-profile build does not reuse
-//! stack slots across lexically-separate blocks within one function body
-//! (`boot.rs`'s own doc comment on `boot_stack_top` documents the identical
-//! trap for a different call chain), so a single monolithic `run` stacking
-//! every phase's own pools/buffers/handles as same-function locals silently
-//! accumulates one giant activation record — this fixture hit exactly that
-//! wall during bring-up (a real triple fault/QEMU-shutdown after the
-//! occupancy-pattern phase, `RSP` having walked off the 1MiB boot stack)
-//! before being split into per-phase functions, each of whose frame is
-//! reclaimed on return before the next phase's frame is built. `#[inline(never)]`
-//! keeps the compiler from undoing that split back into one frame.
+//! The fixture's own remaining code is exactly what it should be: pool
+//! workloads and their self-consistency checks.
+//!
+//! Each measurement phase below is its own `#[inline(never)]` function rather
+//! than an inline block of `run`, and deliberately not written to avoid it:
+//! this workspace's unoptimized dev-profile build does not reuse stack slots
+//! across lexically-separate blocks within one function body (`boot.rs`'s own
+//! doc comment on `boot_stack_top` documents the identical trap for a
+//! different call chain), so a single monolithic `run` stacking every phase's
+//! own pools/buffers/handles as same-function locals silently accumulates one
+//! giant activation record — this fixture hit exactly that wall during
+//! bring-up (a real triple fault/QEMU-shutdown after the occupancy-pattern
+//! phase, `RSP` having walked off the 1MiB boot stack) before being split into
+//! per-phase functions, each of whose frame is reclaimed on return before the
+//! next phase's frame is built. `#[inline(never)]` keeps the compiler from
+//! undoing that split back into one frame.
+//!
+//! Caveat this fixture's own numbers do **not** erase: QEMU's `q35`/TCG cycle
+//! counter is software emulation of the timestamp counter, not a passthrough
+//! read of real silicon — so while this *is* real target-compiled code (not a
+//! host-native binary), the cycle-count magnitudes it reports are QEMU's own
+//! emulation, not proof of real-hardware wall-clock cost. That gap is exactly
+//! what the separately-tracked hardware tier (`LE-09`, Raspberry Pi 5) exists
+//! to close; this fixture is Tier 0 evidence, not a hardware substitute.
 //!
 //! Only reachable when the `fixture-pool-bench` feature is enabled — never
 //! part of a real boot image.
 
 use core::fmt::Write;
+use hal::time::{CycleSource, Timebase};
 use hal_x86_64::serial::SerialPort;
+use hal_x86_64::tsc::{self, Tsc};
+use kernel::measure::{Calibration, Environment, Metric, Report, Samples, Stopwatch, Summary};
 use kernel::mem::{Pool, PoolError, PoolHandle};
 
-/// Shared scratch buffer every phase below sorts its samples into, reused
-/// sequentially (one phase finishes with it, prints, then the next phase
-/// overwrites it) rather than each phase declaring its own array — keeps
-/// this fixture's static footprint to one allocation instead of one per
-/// phase. Lives in `.bss`, not on the boot stack, for the same
-/// stack-pressure reason this module's own doc comment explains for the
-/// per-phase function split.
-static mut SAMPLE_BUFFER: [u64; MAX_SAMPLES] = [0; MAX_SAMPLES];
-
-/// Upper bound on any single phase's sample count below — sized to the
-/// largest phase ([`TAIL_SAMPLES`]).
+/// Upper bound on any single phase's sample count below — sized to the largest
+/// phase ([`TAIL_SAMPLES`]). Lives in `.bss`, not on the boot stack, for the
+/// stack-pressure reason this module's own doc comment explains, and is reused
+/// sequentially by every phase ([`Samples::clear`] between them) rather than
+/// one buffer per phase.
 const MAX_SAMPLES: usize = 50_000;
 
 /// Primary alloc/free round-trip sample count (mirrors the host harness's
-/// `perf_pool_u64x64_alloc_free_round_trip_host_diagnostic`, scaled down
-/// from 100,000 — QEMU/TCG executes this loop in well under a second either
-/// way, but a smaller count keeps this fixture's own runtime comfortably
-/// inside `xtask`'s 15-second boot-timeout budget alongside every other
-/// phase run in the same boot).
+/// `perf_pool_u64x64_alloc_free_round_trip_host_diagnostic`, scaled down from
+/// 100,000 — QEMU/TCG executes this loop in well under a second either way,
+/// but a smaller count keeps this fixture's own runtime comfortably inside
+/// `xtask`'s 15-second boot-timeout budget alongside every other phase run in
+/// the same boot).
 const PRIMARY_SAMPLES: usize = 10_000;
 const PRIMARY_WARMUP: usize = 500;
 
-/// Tail-focused sample count (mirrors the host harness's million-op tail
-/// test, scaled down for the same reason as [`PRIMARY_SAMPLES`]).
+/// Tail-focused sample count (mirrors the host harness's million-op tail test,
+/// scaled down for the same reason as [`PRIMARY_SAMPLES`]).
 const TAIL_SAMPLES: usize = 50_000;
 const TAIL_WARMUP: usize = 500;
 
@@ -82,240 +93,234 @@ const OCCUPANCY_TRIALS: usize = 2_000;
 const DRAIN_CYCLES: usize = 200;
 const DRAIN_N: usize = 16;
 
-/// Reads the x86_64 timestamp counter.
-fn rdtsc() -> u64 {
-    // SAFETY: `RDTSC` is unconditionally available on every x86_64 CPU
-    // (including QEMU's `q35` TCG emulation); reading it has no memory or
-    // control-flow side effect this fixture needs to account for.
-    unsafe { core::arch::x86_64::_rdtsc() }
+/// Percentile-reporting phases in this fixture — the fixed capacity of the
+/// collected-summary array in [`run`].
+const METRICS: usize = 9;
+
+static mut SAMPLE_BUFFER: Samples<MAX_SAMPLES> = Samples::new();
+
+/// One measured phase, held until every phase has run so the envelope is
+/// emitted in one piece (a `Report` borrows its sink for its whole lifetime,
+/// and this fixture also prints non-percentile self-check lines).
+struct Measured {
+    name: &'static str,
+    warmup: usize,
+    summary: Summary,
 }
 
-/// Calibrates `RDTSC`'s own call overhead as the minimum back-to-back-read
-/// delta — identical method to the host harness's `calibrate_rdtsc_overhead`
-/// (measurement protocol #3).
-fn calibrate_rdtsc_overhead() -> u64 {
-    const SAMPLES: usize = 2_000;
-    let mut min = u64::MAX;
-    for _ in 0..SAMPLES {
-        let a = rdtsc();
-        let b = rdtsc();
-        min = min.min(b.saturating_sub(a));
+/// Summarizes the current phase's samples into `collected` and clears the
+/// buffer for the next phase. A phase that recorded nothing collects nothing
+/// and fails the run: silence is not a fast pass.
+fn collect(
+    collected: &mut [Option<Measured>; METRICS],
+    slot: usize,
+    name: &'static str,
+    warmup: usize,
+    samples: &mut Samples<MAX_SAMPLES>,
+) -> bool {
+    let summarized = samples.summarize();
+    samples.clear();
+    match summarized {
+        Some(summary) => {
+            collected[slot] = Some(Measured { name, warmup, summary });
+            true
+        }
+        None => false,
     }
-    min
-}
-
-/// Nearest-rank percentile over an already-sorted slice, `num`/`den`
-/// (e.g. `50, 100` for p50, `999, 1000` for p99.9) rather than a `f64`
-/// fraction — this crate builds `#![no_std]` with no `libm`, and integer
-/// nearest-rank arithmetic needs no floating point at all.
-fn percentile(sorted: &[u64], num: usize, den: usize) -> u64 {
-    let rank = (sorted.len() - 1) * num / den;
-    sorted[rank]
-}
-
-/// Writes one `label`/percentile-summary line, matching the host harness's
-/// own print shape (prefixed `T0` here to distinguish this tier's evidence
-/// from `mem.rs`'s `Host`-tier diagnostic numbers).
-fn report_percentiles(serial: &mut SerialPort, label: &str, sorted: &[u64]) {
-    let p50 = percentile(sorted, 50, 100);
-    let p99 = percentile(sorted, 99, 100);
-    let p999 = percentile(sorted, 999, 1000);
-    let max = *sorted.last().unwrap();
-    let _ = writeln!(
-        serial,
-        "T0-PERF-D07 {} n={} cycles: p50={} p99={} p99.9={} max={}",
-        label,
-        sorted.len(),
-        p50,
-        p99,
-        p999,
-        max
-    );
 }
 
 /// Runs one alloc/free-round-trip-shaped phase (used by both
 /// [`PRIMARY_SAMPLES`] and [`TAIL_SAMPLES`] phases below): `warmup` unmeasured
-/// iterations, then `samples` measured ones, writing each measured cycle
-/// delta into `buf[..samples]` and returning that prefix sorted ascending.
-fn run_alloc_free_phase(
+/// iterations, then `samples` measured ones, recorded into `buffer`.
+fn run_alloc_free_phase<S: CycleSource>(
     pool: &mut Pool<u64, 64>,
-    rdtsc_overhead: u64,
+    source: &S,
+    calibration: &Calibration,
     warmup: usize,
     samples: usize,
-    buf: &mut [u64],
+    buffer: &mut Samples<MAX_SAMPLES>,
 ) -> bool {
     let mut ok = true;
-    for i in 0..(warmup + samples) {
-        let value = i as u64;
-        let c0 = rdtsc();
+    for index in 0..(warmup + samples) {
+        let value = index as u64;
+        let watch = Stopwatch::start(source);
         let handle = match pool.alloc(value) {
-            Ok(h) => h,
+            Ok(handle) => handle,
             Err(_) => {
                 ok = false;
                 continue;
             }
         };
         let freed = pool.free(handle);
-        let c1 = rdtsc();
+        let cycles = watch.stop(calibration);
         if freed != Ok(value) {
             ok = false;
         }
-        if i >= warmup {
-            buf[i - warmup] = c1.saturating_sub(c0).saturating_sub(rdtsc_overhead);
+        if index >= warmup {
+            buffer.record(cycles);
         }
     }
-    buf[..samples].sort_unstable();
     ok
 }
 
 // Phase 1 (PERF-D07-G01/G02/G03/G05/G06/G07/G13/G18): primary alloc/free
 // round trip.
 #[inline(never)]
-fn phase_primary_alloc_free(serial: &mut SerialPort, rdtsc_overhead: u64, buf: &mut [u64]) -> bool {
+fn phase_primary_alloc_free<S: CycleSource>(
+    source: &S,
+    calibration: &Calibration,
+    buffer: &mut Samples<MAX_SAMPLES>,
+) -> bool {
     let mut pool: Pool<u64, 64> = Pool::new();
-    let ok = run_alloc_free_phase(&mut pool, rdtsc_overhead, PRIMARY_WARMUP, PRIMARY_SAMPLES, buf);
-    report_percentiles(serial, "pool_u64x64_alloc_free[G01..G07,G13,G18]", &buf[..PRIMARY_SAMPLES]);
-    ok
+    run_alloc_free_phase(&mut pool, source, calibration, PRIMARY_WARMUP, PRIMARY_SAMPLES, buffer)
 }
 
 // Phase 2 (PERF-D07-G03 tail).
 #[inline(never)]
-fn phase_tail(serial: &mut SerialPort, rdtsc_overhead: u64, buf: &mut [u64]) -> bool {
+fn phase_tail<S: CycleSource>(
+    source: &S,
+    calibration: &Calibration,
+    buffer: &mut Samples<MAX_SAMPLES>,
+) -> bool {
     let mut pool: Pool<u64, 64> = Pool::new();
-    let ok = run_alloc_free_phase(&mut pool, rdtsc_overhead, TAIL_WARMUP, TAIL_SAMPLES, buf);
-    report_percentiles(serial, "pool_u64x64_tail[G03]", &buf[..TAIL_SAMPLES]);
+    run_alloc_free_phase(&mut pool, source, calibration, TAIL_WARMUP, TAIL_SAMPLES, buffer)
+}
+
+/// Occupancy-pattern phases 3a-3c: `prefill` slots permanently occupied, then
+/// the measured `alloc` lands at slot `prefill` — isolating the linear-scan
+/// cost of the first-free-slot search at three different occupancy depths.
+fn run_occupancy_phase<S: CycleSource>(
+    source: &S,
+    calibration: &Calibration,
+    prefill: usize,
+    buffer: &mut Samples<MAX_SAMPLES>,
+) -> bool {
+    let mut pool: Pool<u64, 64> = Pool::new();
+    for index in 0..prefill {
+        if pool.alloc(index as u64).is_err() {
+            return false;
+        }
+    }
+    let mut ok = true;
+    for index in 0..OCCUPANCY_TRIALS {
+        let watch = Stopwatch::start(source);
+        let handle = pool.alloc(index as u64);
+        let cycles = watch.stop(calibration);
+        match handle {
+            Ok(handle) => {
+                if pool.free(handle).is_err() {
+                    ok = false;
+                }
+            }
+            Err(_) => ok = false,
+        }
+        buffer.record(cycles);
+    }
     ok
 }
 
-// Phase 3a (PERF-D07-G04/G12/G14): best-case (slot 0 immediately free).
+// Phase 3a (PERF-D07-G04/G12/G14): best case — slot 0 immediately free.
 #[inline(never)]
-fn phase_occupancy_best(serial: &mut SerialPort, rdtsc_overhead: u64, buf: &mut [u64]) {
-    let mut pool: Pool<u64, 64> = Pool::new();
-    for i in 0..OCCUPANCY_TRIALS {
-        let c0 = rdtsc();
-        let h = pool.alloc(i as u64).unwrap();
-        let c1 = rdtsc();
-        buf[i] = c1.saturating_sub(c0).saturating_sub(rdtsc_overhead);
-        pool.free(h).unwrap();
-    }
-    buf[..OCCUPANCY_TRIALS].sort_unstable();
-    report_percentiles(
-        serial,
-        "pool_u64x64_occupancy[best_slot0][G04,G12,G14]",
-        &buf[..OCCUPANCY_TRIALS],
-    );
+fn phase_occupancy_best<S: CycleSource>(
+    source: &S,
+    calibration: &Calibration,
+    buffer: &mut Samples<MAX_SAMPLES>,
+) -> bool {
+    run_occupancy_phase(source, calibration, 0, buffer)
 }
 
 // Phase 3b: slots 0..31 permanently occupied, alloc lands at slot 32.
 #[inline(never)]
-fn phase_occupancy_middle(serial: &mut SerialPort, rdtsc_overhead: u64, buf: &mut [u64]) {
-    let mut pool: Pool<u64, 64> = Pool::new();
-    for i in 0..31 {
-        pool.alloc(i as u64).unwrap();
-    }
-    for i in 0..OCCUPANCY_TRIALS {
-        let c0 = rdtsc();
-        let h = pool.alloc(i as u64).unwrap();
-        let c1 = rdtsc();
-        buf[i] = c1.saturating_sub(c0).saturating_sub(rdtsc_overhead);
-        pool.free(h).unwrap();
-    }
-    buf[..OCCUPANCY_TRIALS].sort_unstable();
-    report_percentiles(
-        serial,
-        "pool_u64x64_occupancy[middle_slot32][G04,G12,G14]",
-        &buf[..OCCUPANCY_TRIALS],
-    );
+fn phase_occupancy_middle<S: CycleSource>(
+    source: &S,
+    calibration: &Calibration,
+    buffer: &mut Samples<MAX_SAMPLES>,
+) -> bool {
+    run_occupancy_phase(source, calibration, 31, buffer)
 }
 
 // Phase 3c: slots 0..62 permanently occupied — the full 64-slot linear-scan
 // cost.
 #[inline(never)]
-fn phase_occupancy_last(serial: &mut SerialPort, rdtsc_overhead: u64, buf: &mut [u64]) {
-    let mut pool: Pool<u64, 64> = Pool::new();
-    for i in 0..63 {
-        pool.alloc(i as u64).unwrap();
-    }
-    for i in 0..OCCUPANCY_TRIALS {
-        let c0 = rdtsc();
-        let h = pool.alloc(i as u64).unwrap();
-        let c1 = rdtsc();
-        buf[i] = c1.saturating_sub(c0).saturating_sub(rdtsc_overhead);
-        pool.free(h).unwrap();
-    }
-    buf[..OCCUPANCY_TRIALS].sort_unstable();
-    report_percentiles(
-        serial,
-        "pool_u64x64_occupancy[last_slot63][G04,G12,G14]",
-        &buf[..OCCUPANCY_TRIALS],
-    );
+fn phase_occupancy_last<S: CycleSource>(
+    source: &S,
+    calibration: &Calibration,
+    buffer: &mut Samples<MAX_SAMPLES>,
+) -> bool {
+    run_occupancy_phase(source, calibration, 63, buffer)
 }
 
 // Phase 3d: free-path timing, O(1) regardless of index.
 #[inline(never)]
-fn phase_occupancy_free(serial: &mut SerialPort, rdtsc_overhead: u64, buf: &mut [u64]) {
+fn phase_occupancy_free<S: CycleSource>(
+    source: &S,
+    calibration: &Calibration,
+    buffer: &mut Samples<MAX_SAMPLES>,
+) -> bool {
     let mut pool: Pool<u64, 64> = Pool::new();
-    for i in 0..OCCUPANCY_TRIALS {
-        let h = pool.alloc(i as u64).unwrap();
-        let c0 = rdtsc();
-        pool.free(h).unwrap();
-        let c1 = rdtsc();
-        buf[i] = c1.saturating_sub(c0).saturating_sub(rdtsc_overhead);
+    let mut ok = true;
+    for index in 0..OCCUPANCY_TRIALS {
+        let Ok(handle) = pool.alloc(index as u64) else {
+            return false;
+        };
+        let watch = Stopwatch::start(source);
+        let freed = pool.free(handle);
+        let cycles = watch.stop(calibration);
+        if freed.is_err() {
+            ok = false;
+        }
+        buffer.record(cycles);
     }
-    buf[..OCCUPANCY_TRIALS].sort_unstable();
-    report_percentiles(
-        serial,
-        "pool_u64x64_occupancy[free_o1][G04,G12,G14]",
-        &buf[..OCCUPANCY_TRIALS],
-    );
+    ok
 }
 
 // Phase 3e: exhaustion-then-recovery, one round trip per trial.
 #[inline(never)]
-fn phase_occupancy_deny_then_recover(
-    serial: &mut SerialPort,
-    rdtsc_overhead: u64,
-    buf: &mut [u64],
+fn phase_occupancy_deny_then_recover<S: CycleSource>(
+    source: &S,
+    calibration: &Calibration,
+    buffer: &mut Samples<MAX_SAMPLES>,
 ) -> bool {
     let mut pool: Pool<u64, 64> = Pool::new();
     let mut handles: [Option<PoolHandle>; 64] = [None; 64];
-    for (i, slot) in handles.iter_mut().enumerate() {
-        *slot = Some(pool.alloc(i as u64).unwrap());
+    for (index, slot) in handles.iter_mut().enumerate() {
+        let Ok(handle) = pool.alloc(index as u64) else {
+            return false;
+        };
+        *slot = Some(handle);
     }
     let mut top = 64usize;
-    let mut denial_ok = true;
-    for i in 0..OCCUPANCY_TRIALS {
-        let c0 = rdtsc();
+    let mut ok = true;
+    for _ in 0..OCCUPANCY_TRIALS {
+        let watch = Stopwatch::start(source);
         let denied = pool.alloc(0);
         top -= 1;
-        let h = handles[top].take().unwrap();
-        pool.free(h).unwrap();
+        let Some(handle) = handles[top].take() else {
+            return false;
+        };
+        let freed = pool.free(handle);
         let recovered = pool.alloc(999);
-        let c1 = rdtsc();
-        if denied != Err(PoolError::Exhausted) {
-            denial_ok = false;
+        let cycles = watch.stop(calibration);
+        if denied != Err(PoolError::Exhausted) || freed.is_err() {
+            ok = false;
         }
-        let recovered = recovered.unwrap();
-        buf[i] = c1.saturating_sub(c0).saturating_sub(rdtsc_overhead);
+        let Ok(recovered) = recovered else {
+            return false;
+        };
+        buffer.record(cycles);
         handles[top] = Some(recovered);
         top += 1;
     }
-    buf[..OCCUPANCY_TRIALS].sort_unstable();
-    report_percentiles(
-        serial,
-        "pool_u64x64_occupancy[deny_then_recover][G04,G12,G14]",
-        &buf[..OCCUPANCY_TRIALS],
-    );
-    denial_ok
+    ok
 }
 
-/// State snapshot (occupied bitmap + values) of a `Pool<u64, 4>`, used by
-/// both Phase 4 denial-path cases below to prove a denied call produces zero
-/// observable state change. No test-only back door into `mem.rs`'s
-/// production API exists (nor should one be added just for this fixture) —
+/// State snapshot (occupied bitmap + values) of a `Pool<u64, 4>`, used by both
+/// Phase 4 denial-path cases below to prove a denied call produces zero
+/// observable state change. No test-only back door into `mem.rs`'s production
+/// API exists (nor should one be added just for this fixture) —
 /// `iter_occupied` is the only public, read-only way to observe every slot's
-/// occupied/value state at once, keyed by `PoolHandle::index()` (also
-/// public, read-only), so this snapshot is built from that.
+/// occupied/value state at once, keyed by `PoolHandle::index()` (also public,
+/// read-only), so this snapshot is built from that.
 fn snapshot4(pool: &Pool<u64, 4>) -> ([bool; 4], [u64; 4]) {
     let mut occupied = [false; 4];
     let mut values = [0u64; 4];
@@ -349,70 +354,75 @@ fn snapshots4_equal(a: &([bool; 4], [u64; 4]), b: &([bool; 4], [u64; 4])) -> boo
 // Phase 4a (PERF-D07-G20): exhausted-denial latency plus byte-for-byte
 // state-change verification.
 #[inline(never)]
-fn phase_denial_exhausted(serial: &mut SerialPort, rdtsc_overhead: u64, buf: &mut [u64]) -> bool {
+fn phase_denial_exhausted<S: CycleSource>(
+    serial: &mut SerialPort,
+    source: &S,
+    calibration: &Calibration,
+    buffer: &mut Samples<MAX_SAMPLES>,
+) -> bool {
     let mut pool: Pool<u64, 4> = Pool::new();
-    for i in 0..4 {
-        pool.alloc(i as u64).unwrap();
+    for index in 0..4 {
+        if pool.alloc(index as u64).is_err() {
+            return false;
+        }
     }
     let before = snapshot4(&pool);
     let mut state_changed = false;
-    for i in 0..OCCUPANCY_TRIALS {
-        let c0 = rdtsc();
-        let r = pool.alloc(0xDEAD);
-        let c1 = rdtsc();
-        if r != Err(PoolError::Exhausted) {
+    for _ in 0..OCCUPANCY_TRIALS {
+        let watch = Stopwatch::start(source);
+        let denied = pool.alloc(0xDEAD);
+        let cycles = watch.stop(calibration);
+        if denied != Err(PoolError::Exhausted) {
             state_changed = true;
         }
-        buf[i] = c1.saturating_sub(c0).saturating_sub(rdtsc_overhead);
+        buffer.record(cycles);
     }
     let after = snapshot4(&pool);
     if !snapshots4_equal(&before, &after) {
         state_changed = true;
     }
-    buf[..OCCUPANCY_TRIALS].sort_unstable();
-    report_percentiles(serial, "pool_denial[exhausted][G20]", &buf[..OCCUPANCY_TRIALS]);
-    let _ =
-        writeln!(serial, "T0-PERF-D07 pool_denial[exhausted][G20] state_changed={}", state_changed);
+    let _ = writeln!(serial, "pool-bench denial[exhausted][G20] state_changed={state_changed}");
     !state_changed
 }
 
 // Phase 4b (PERF-D07-G20): `InvalidHandle`-denial (double-free of an
 // already-freed handle) latency plus the same state-change verification.
 #[inline(never)]
-fn phase_denial_invalid_handle(
+fn phase_denial_invalid_handle<S: CycleSource>(
     serial: &mut SerialPort,
-    rdtsc_overhead: u64,
-    buf: &mut [u64],
+    source: &S,
+    calibration: &Calibration,
+    buffer: &mut Samples<MAX_SAMPLES>,
 ) -> bool {
     let mut pool: Pool<u64, 4> = Pool::new();
-    let h = pool.alloc(1).unwrap();
-    pool.free(h).unwrap();
+    let Ok(handle) = pool.alloc(1) else {
+        return false;
+    };
+    if pool.free(handle).is_err() {
+        return false;
+    }
     let before = snapshot4(&pool);
     let mut state_changed = false;
-    for i in 0..OCCUPANCY_TRIALS {
-        let c0 = rdtsc();
-        let r = pool.free(h);
-        let c1 = rdtsc();
-        if r != Err(PoolError::InvalidHandle) {
+    for _ in 0..OCCUPANCY_TRIALS {
+        let watch = Stopwatch::start(source);
+        let denied = pool.free(handle);
+        let cycles = watch.stop(calibration);
+        if denied != Err(PoolError::InvalidHandle) {
             state_changed = true;
         }
-        buf[i] = c1.saturating_sub(c0).saturating_sub(rdtsc_overhead);
+        buffer.record(cycles);
     }
     let after = snapshot4(&pool);
     if !snapshots4_equal(&before, &after) {
         state_changed = true;
     }
-    buf[..OCCUPANCY_TRIALS].sort_unstable();
-    report_percentiles(serial, "pool_denial[invalid_handle][G20]", &buf[..OCCUPANCY_TRIALS]);
-    let _ = writeln!(
-        serial,
-        "T0-PERF-D07 pool_denial[invalid_handle][G20] state_changed={}",
-        state_changed
-    );
+    let _ =
+        writeln!(serial, "pool-bench denial[invalid_handle][G20] state_changed={state_changed}");
     !state_changed
 }
 
 // Phase 5 (PERF-D07-G21): fill-to-exhaustion/drain cycles, drop accounting.
+// Not a percentile phase — its evidence is an equality, not a latency.
 #[inline(never)]
 fn phase_drain_cycles(serial: &mut SerialPort) -> bool {
     use core::cell::Cell;
@@ -431,19 +441,24 @@ fn phase_drain_cycles(serial: &mut SerialPort) -> bool {
         let mut pool: Pool<DropCounter<'_>, DRAIN_N> = Pool::new();
         let mut handles: [Option<PoolHandle>; DRAIN_N] = [None; DRAIN_N];
         for slot in handles.iter_mut() {
-            *slot = Some(pool.alloc(DropCounter(&drop_count)).unwrap());
+            match pool.alloc(DropCounter(&drop_count)) {
+                Ok(handle) => *slot = Some(handle),
+                Err(_) => return false,
+            }
             alloc_count.set(alloc_count.get() + 1);
         }
         // A denied `alloc` still drops the by-value argument it was handed
-        // (never stored) — expected, not a leak; see the identical
-        // accounting note in `mem.rs`'s host harness.
+        // (never stored) — expected, not a leak; see the identical accounting
+        // note in `mem.rs`'s host harness.
         if pool.alloc(DropCounter(&drop_count)) != Err(PoolError::Exhausted) {
             cycle_ok = false;
         }
         alloc_count.set(alloc_count.get() + 1);
         for slot in handles.iter_mut() {
-            if let Some(h) = slot.take() {
-                pool.free(h).unwrap();
+            if let Some(handle) = slot.take() {
+                if pool.free(handle).is_err() {
+                    cycle_ok = false;
+                }
             }
         }
         if drop_count.get() != alloc_count.get() {
@@ -453,7 +468,7 @@ fn phase_drain_cycles(serial: &mut SerialPort) -> bool {
     cycle_ok &= alloc_count.get() == drop_count.get();
     let _ = writeln!(
         serial,
-        "T0-PERF-D07 pool_exhaustion_drain_cycles[G21] cycles={} n_per_cycle={} total_allocs={} \
+        "pool-bench exhaustion_drain_cycles[G21] cycles={} n_per_cycle={} total_allocs={} \
          total_drops={} ok={}",
         DRAIN_CYCLES,
         DRAIN_N,
@@ -464,15 +479,14 @@ fn phase_drain_cycles(serial: &mut SerialPort) -> bool {
     cycle_ok
 }
 
-// Phase 6 (PERF-D07-G10): static-pool footprint.
+// Phase 6 (PERF-D07-G10): static-pool footprint. Also not a percentile phase.
 #[inline(never)]
 fn phase_size_of(serial: &mut SerialPort) -> bool {
     let bytes = core::mem::size_of::<Pool<u64, 64>>();
     let fits = bytes <= 8 * 1024;
     let _ = writeln!(
         serial,
-        "T0-PERF-D07 size_of::<Pool<u64,64>>()[G10] = {} bytes fits_8kib_budget={}",
-        bytes, fits
+        "pool-bench size_of::<Pool<u64,64>>()[G10] = {bytes} bytes fits_8kib_budget={fits}"
     );
     fits
 }
@@ -480,39 +494,90 @@ fn phase_size_of(serial: &mut SerialPort) -> bool {
 /// Runs every measurement phase and reports whether every phase's own
 /// self-consistency check held (the pass/fail bit `xtask` reads back via
 /// isa-debug-exit) — the printed numbers themselves are diagnostic evidence,
-/// not a threshold this function enforces (measurement protocol #7,
-/// identical framing to the host harness).
+/// not a threshold this function enforces (measurement protocol #7, identical
+/// framing to the host harness).
 pub fn run() -> bool {
-    // SAFETY: this fixture is the only code running (single-CPU boot path,
-    // no other UART user), and `init` is called exactly once, before any
-    // other `SerialPort` method — `init`'s own documented contract.
+    // SAFETY: this fixture is the only code running (single-CPU boot path, no
+    // other UART user), and `init` is called exactly once, before any other
+    // `SerialPort` method — `init`'s own documented contract.
     let mut serial = unsafe { SerialPort::init() };
-    let _ = writeln!(serial, "T0-PERF-D07 fixture-pool-bench starting");
+    let _ = writeln!(serial, "pool-bench starting");
 
-    let rdtsc_overhead = calibrate_rdtsc_overhead();
-    let _ = writeln!(serial, "T0-PERF-D07 rdtsc_overhead_cycles={}", rdtsc_overhead);
+    let source = Tsc;
+    // SAFETY: nothing else in this fixture uses PIT channel 2 or port 0x61,
+    // and this fixture never enables interrupts — `calibrate_cycles_per_us`'s
+    // documented contract.
+    let timebase = unsafe { tsc::calibrate_cycles_per_us() };
+    let calibration = Calibration::measure(&source, 2_000);
 
-    // SAFETY: this fixture is single-threaded and non-reentrant (no
-    // interrupts armed, no recursion into `run`), and every phase function
-    // below runs to completion (borrowing this slice for its own duration
-    // only) before the next one starts — no two phases ever hold an
-    // overlapping borrow of `SAMPLE_BUFFER`, and this is the only function
-    // in the binary that ever touches it.
-    let buf: &mut [u64; MAX_SAMPLES] = unsafe { &mut *core::ptr::addr_of_mut!(SAMPLE_BUFFER) };
+    // SAFETY: this fixture is single-threaded and non-reentrant (no interrupts
+    // armed, no recursion into `run`), and every phase function below runs to
+    // completion (borrowing this buffer for its own duration only) before the
+    // next one starts — no two phases ever hold an overlapping borrow, and
+    // this is the only function in the binary that ever touches it.
+    let buffer: &mut Samples<MAX_SAMPLES> = unsafe { &mut *core::ptr::addr_of_mut!(SAMPLE_BUFFER) };
 
-    let mut overall_ok = true;
-    overall_ok &= phase_primary_alloc_free(&mut serial, rdtsc_overhead, buf);
-    overall_ok &= phase_tail(&mut serial, rdtsc_overhead, buf);
-    phase_occupancy_best(&mut serial, rdtsc_overhead, buf);
-    phase_occupancy_middle(&mut serial, rdtsc_overhead, buf);
-    phase_occupancy_last(&mut serial, rdtsc_overhead, buf);
-    phase_occupancy_free(&mut serial, rdtsc_overhead, buf);
-    overall_ok &= phase_occupancy_deny_then_recover(&mut serial, rdtsc_overhead, buf);
-    overall_ok &= phase_denial_exhausted(&mut serial, rdtsc_overhead, buf);
-    overall_ok &= phase_denial_invalid_handle(&mut serial, rdtsc_overhead, buf);
-    overall_ok &= phase_drain_cycles(&mut serial);
-    overall_ok &= phase_size_of(&mut serial);
+    let mut ok = true;
+    let mut collected: [Option<Measured>; METRICS] =
+        [None, None, None, None, None, None, None, None, None];
 
-    let _ = writeln!(serial, "T0-PERF-D07 fixture-pool-bench overall_ok={}", overall_ok);
-    overall_ok
+    ok &= phase_primary_alloc_free(&source, &calibration, buffer);
+    ok &= collect(&mut collected, 0, "pool_u64x64_alloc_free", PRIMARY_WARMUP, buffer);
+
+    ok &= phase_tail(&source, &calibration, buffer);
+    ok &= collect(&mut collected, 1, "pool_u64x64_tail", TAIL_WARMUP, buffer);
+
+    ok &= phase_occupancy_best(&source, &calibration, buffer);
+    ok &= collect(&mut collected, 2, "pool_u64x64_occupancy_best_slot0", 0, buffer);
+
+    ok &= phase_occupancy_middle(&source, &calibration, buffer);
+    ok &= collect(&mut collected, 3, "pool_u64x64_occupancy_middle_slot32", 0, buffer);
+
+    ok &= phase_occupancy_last(&source, &calibration, buffer);
+    ok &= collect(&mut collected, 4, "pool_u64x64_occupancy_last_slot63", 0, buffer);
+
+    ok &= phase_occupancy_free(&source, &calibration, buffer);
+    ok &= collect(&mut collected, 5, "pool_u64x64_free_o1", 0, buffer);
+
+    ok &= phase_occupancy_deny_then_recover(&source, &calibration, buffer);
+    ok &= collect(&mut collected, 6, "pool_u64x64_deny_then_recover", 0, buffer);
+
+    ok &= phase_denial_exhausted(&mut serial, &source, &calibration, buffer);
+    ok &= collect(&mut collected, 7, "pool_u64x4_denial_exhausted", 0, buffer);
+
+    ok &= phase_denial_invalid_handle(&mut serial, &source, &calibration, buffer);
+    ok &= collect(&mut collected, 8, "pool_u64x4_denial_invalid_handle", 0, buffer);
+
+    ok &= phase_drain_cycles(&mut serial);
+    ok &= phase_size_of(&mut serial);
+
+    let environment = Environment {
+        tier: "T0",
+        arch: "x86_64",
+        cycle_source: Tsc::NAME,
+        overhead_cycles: calibration.overhead_cycles(),
+        cycles_per_us: timebase.cycles_per_us(),
+    };
+    let Ok(mut report) = Report::begin(&mut serial, &environment) else {
+        return false;
+    };
+    for measured in collected.iter().flatten() {
+        if report
+            .metric(&Metric {
+                domain: "D07",
+                name: measured.name,
+                warmup: measured.warmup,
+                summary: measured.summary,
+            })
+            .is_err()
+        {
+            return false;
+        }
+    }
+    let Ok(metrics) = report.end() else {
+        return false;
+    };
+
+    let _ = writeln!(serial, "pool-bench metrics={metrics} overall_ok={ok}");
+    ok && metrics == METRICS
 }

@@ -15,6 +15,8 @@ mod context_switch_fixture;
 mod fixture_idt_apic_timer;
 #[cfg(feature = "fixture-idt-apic-unrouted")]
 mod fixture_idt_apic_unrouted;
+#[cfg(feature = "fixture-measure")]
+mod fixture_measure;
 #[cfg(feature = "fixture-pci-enumeration")]
 mod fixture_pci_enumeration;
 #[cfg(feature = "fixture-pool-bench")]
@@ -43,7 +45,8 @@ use hal_x86_64::qemu_exit::{exit_qemu, QemuExitCode};
         feature = "fixture-idt-apic-timer",
         feature = "fixture-idt-apic-unrouted",
         feature = "fixture-pci-enumeration",
-        feature = "fixture-pool-bench"
+        feature = "fixture-pool-bench",
+        feature = "fixture-measure"
     ),
     allow(unused_imports)
 )]
@@ -66,7 +69,8 @@ use kernel::capacities::MAX_CPUS;
     feature = "fixture-idt-apic-timer",
     feature = "fixture-idt-apic-unrouted",
     feature = "fixture-pci-enumeration",
-    feature = "fixture-pool-bench"
+    feature = "fixture-pool-bench",
+    feature = "fixture-measure"
 )))]
 const BOOT_TIMER_INITIAL_COUNT: u32 = 1_000_000;
 
@@ -91,7 +95,8 @@ extern "C" fn kernel_main(
             feature = "fixture-idt-apic-timer",
             feature = "fixture-idt-apic-unrouted",
             feature = "fixture-pci-enumeration",
-            feature = "fixture-pool-bench"
+            feature = "fixture-pool-bench",
+            feature = "fixture-measure"
         ),
         allow(unused_variables)
     )]
@@ -144,13 +149,23 @@ extern "C" fn kernel_main(
         }
     }
 
+    #[cfg(feature = "fixture-measure")]
+    {
+        if fixture_measure::run() {
+            exit_qemu(QemuExitCode::Success)
+        } else {
+            exit_qemu(QemuExitCode::Failure)
+        }
+    }
+
     #[cfg(not(any(
         feature = "fixture-broken-boot",
         feature = "fixture-context-switch",
         feature = "fixture-idt-apic-timer",
         feature = "fixture-idt-apic-unrouted",
         feature = "fixture-pci-enumeration",
-        feature = "fixture-pool-bench"
+        feature = "fixture-pool-bench",
+        feature = "fixture-measure"
     )))]
     {
         // SAFETY: `start_info_paddr` is the physical address the PVH

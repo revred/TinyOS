@@ -15,6 +15,7 @@ pub mod context;
 pub mod dispatch;
 pub mod ipc;
 pub mod lock;
+pub mod measure;
 pub mod mem;
 pub mod sched;
 pub mod spoor;

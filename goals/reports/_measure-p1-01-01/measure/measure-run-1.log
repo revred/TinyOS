@@ -1,0 +1,14 @@
+fixture-measure cycle_source_conformance ok span=1572610
+fixture-measure phase 1/5 done (D07 alloc/free)
+fixture-measure phase 2/5 done (D07 denial)
+fixture-measure phase 3/5 done (D04 context switch)
+fixture-measure phase 4/5 done (D05 selection)
+fixture-measure phase 5/5 done (D05 dispatch round)
+TINYOS-MEAS/1 BEGIN tier=T0 arch=x86_64 cycle_source=rdtsc overhead_cycles=208 cycles_per_us=2307
+TINYOS-MEAS/1 METRIC domain=D07 metric=pool_u64x64_alloc_free_round_trip n=1000 dropped=0 warmup=100 min=3440 p50=3618 p99=14368 p99_9=31034 max=67316 unit=cycles
+TINYOS-MEAS/1 METRIC domain=D07 metric=pool_u64x4_alloc_denied_exhausted n=1000 dropped=0 warmup=100 min=3410 p50=3658 p99=6214 p99_9=9246 max=13120 unit=cycles
+TINYOS-MEAS/1 METRIC domain=D04 metric=context_switch_yield_roundtrip_2switches n=1000 dropped=0 warmup=100 min=474 p50=640 p99=778 p99_9=1316 max=1380 unit=cycles
+TINYOS-MEAS/1 METRIC domain=D05 metric=dispatch_select_highest_priority_ready n=1000 dropped=0 warmup=100 min=22570 p50=28922 p99=88012 p99_9=173120 max=234312 unit=cycles
+TINYOS-MEAS/1 METRIC domain=D05 metric=dispatch_run_once_cooperative_round n=1000 dropped=0 warmup=100 min=28932 p50=34888 p99=113612 p99_9=139542 max=358188 unit=cycles
+TINYOS-MEAS/1 END metrics=5
+fixture-measure metrics=5 overall_ok=true

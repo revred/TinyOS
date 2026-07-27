@@ -2024,8 +2024,8 @@ mod tests {
         assert_eq!(summary.class_communication_pair_count, 25);
         assert_eq!(summary.application_platform_count, 19);
         assert_eq!(summary.landing_zone_count, 9);
-        assert_eq!(summary.test_count, 24);
-        assert_eq!(summary.report_count, 30);
+        assert_eq!(summary.test_count, 25);
+        assert_eq!(summary.report_count, 31);
         assert!(summary.selected_performance_contracts >= 625);
         assert!(summary.selected_application_performance_contracts >= 625);
     }

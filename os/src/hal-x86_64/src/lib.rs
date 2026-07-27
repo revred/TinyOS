@@ -25,6 +25,13 @@
 //! consistency, though it has no ELF-specific content of its own. `serial`
 //! (`STORY-P0-03-01`'s `fixture-pool-bench` numeric-evidence UART driver) is
 //! gated identically, for the same reason.
+//!
+//! `tsc` (`STORY-P1-01-01`'s [`hal::time::CycleSource`] backend and its
+//! PIT-calibrated timebase) is deliberately **not** gated: its `asm!` is
+//! plain port I/O and `RDTSC` with no ELF-specific content, so it assembles
+//! under a COFF host assembler too — which matters because its PIT arithmetic
+//! carries host unit tests that must be runnable on a Windows dev machine, not
+//! only on the Linux CI runner.
 
 #![cfg_attr(not(test), no_std)]
 #![deny(missing_docs)]
@@ -41,3 +48,4 @@ pub mod pci;
 pub mod qemu_exit;
 #[cfg(not(target_os = "windows"))]
 pub mod serial;
+pub mod tsc;

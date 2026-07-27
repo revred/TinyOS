@@ -16,4 +16,5 @@
 #![deny(missing_docs)]
 
 pub mod device;
+pub mod time;
 pub mod topology;

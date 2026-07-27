@@ -50,6 +50,13 @@ fixture-pci-enumeration = []
 # `xtask qemu-x86_64 --fixture=pool-bench`, never enabled in a real boot
 # image.
 fixture-pool-bench = []
+# Drives the three performance domains `FEAT-P1-01` names as its first
+# measured targets (context switch D04, ready-queue dispatch D05, pool
+# allocation D07) through `kernel::measure`, reporting the versioned
+# `TINYOS-MEAS/1` envelope over COM1 — used only by
+# `xtask measure` / `xtask qemu-x86_64 --fixture=measure` and
+# `TEST-P1-01-01-A`, never enabled in a real boot image.
+fixture-measure = []
 
 [[bin]]
 name = "kernel"

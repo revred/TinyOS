@@ -73,3 +73,18 @@ jobs:
             echo "expected xtask exit code 1 (KernelBootFailed) for the broken-boot fixture, got $code"
             exit 1
           fi
+
+      # STORY-P1-01-01: the measurement harness runs in CI from the day it
+      # lands, not once a gate needs it. LE-07 (CI unobserved for 30
+      # handovers) is the standing lesson here — an unrun fixture is an
+      # unverified fixture, and this one has already caught two on-target
+      # bugs that host tests could not (see REPORT-2026-07-27-02). `--runs=1`
+      # keeps the job cheap: this step proves the fixture boots, measures,
+      # and emits a stream xtask can parse, and deliberately asserts nothing
+      # about the numbers themselves — Tier 0 run-to-run p99 variance is
+      # 39-61%, so thresholding here would be noise. Timing *thresholds*
+      # arrive with STORY-P1-01-02's check-timing-regression gate.
+      - name: TEST-P1-01-01-A — measurement harness produces a parseable stream (D04/D05/D07)
+        run: cargo run -p xtask -- measure --runs=1
+      - name: TEST-P1-01-01-A — pool-bench reports through the same harness
+        run: cargo run -p xtask -- measure --runs=1 --fixture=pool-bench

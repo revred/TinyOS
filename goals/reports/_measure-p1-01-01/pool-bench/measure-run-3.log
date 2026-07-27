@@ -1,0 +1,17 @@
+pool-bench starting
+pool-bench denial[exhausted][G20] state_changed=false
+pool-bench denial[invalid_handle][G20] state_changed=false
+pool-bench exhaustion_drain_cycles[G21] cycles=200 n_per_cycle=16 total_allocs=3400 total_drops=3400 ok=true
+pool-bench size_of::<Pool<u64,64>>()[G10] = 1024 bytes fits_8kib_budget=true
+TINYOS-MEAS/1 BEGIN tier=T0 arch=x86_64 cycle_source=rdtsc overhead_cycles=206 cycles_per_us=2303
+TINYOS-MEAS/1 METRIC domain=D07 metric=pool_u64x64_alloc_free n=10000 dropped=0 warmup=500 min=3422 p50=4326 p99=14254 p99_9=39182 max=189058 unit=cycles
+TINYOS-MEAS/1 METRIC domain=D07 metric=pool_u64x64_tail n=50000 dropped=0 warmup=500 min=3390 p50=4464 p99=17532 p99_9=40586 max=256750 unit=cycles
+TINYOS-MEAS/1 METRIC domain=D07 metric=pool_u64x64_occupancy_best_slot0 n=2000 dropped=0 warmup=0 min=1808 p50=2420 p99=8310 p99_9=8646 max=98182 unit=cycles
+TINYOS-MEAS/1 METRIC domain=D07 metric=pool_u64x64_occupancy_middle_slot32 n=2000 dropped=0 warmup=0 min=13852 p50=16834 p99=56138 p99_9=85182 max=105032 unit=cycles
+TINYOS-MEAS/1 METRIC domain=D07 metric=pool_u64x64_occupancy_last_slot63 n=2000 dropped=0 warmup=0 min=26074 p50=31440 p99=103570 p99_9=104394 max=210264 unit=cycles
+TINYOS-MEAS/1 METRIC domain=D07 metric=pool_u64x64_free_o1 n=2000 dropped=0 warmup=0 min=1578 p50=2064 p99=7054 p99_9=8470 max=93080 unit=cycles
+TINYOS-MEAS/1 METRIC domain=D07 metric=pool_u64x64_deny_then_recover n=2000 dropped=0 warmup=0 min=54530 p50=65652 p99=214802 p99_9=251234 max=790332 unit=cycles
+TINYOS-MEAS/1 METRIC domain=D07 metric=pool_u64x4_denial_exhausted n=2000 dropped=0 warmup=0 min=4160 p50=4440 p99=15290 p99_9=38654 max=127728 unit=cycles
+TINYOS-MEAS/1 METRIC domain=D07 metric=pool_u64x4_denial_invalid_handle n=2000 dropped=0 warmup=0 min=862 p50=974 p99=4034 p99_9=4410 max=172016 unit=cycles
+TINYOS-MEAS/1 END metrics=9
+pool-bench metrics=9 overall_ok=true

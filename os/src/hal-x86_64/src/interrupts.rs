@@ -328,11 +328,22 @@ unsafe fn lapic_write(offset: u32, value: u32) {
 /// fired — remap-then-mask is the standard, required sequence to retire it
 /// safely, not an optional cleanup step.
 ///
+/// Public because a Tier 0 *measurement* fixture needs exactly this step and
+/// nothing else from this module (`STORY-P1-01-01`): its measured code
+/// switches into task contexts whose initial `rflags` has `IF` set (see
+/// `kernel::context::Context::new`), so a legacy IRQ0 arriving mid-measurement
+/// would either perturb the sample or — on a fixture boot path with no IDT
+/// loaded at all — fault. Calling [`init`] instead would quiesce the PIC but
+/// also arm the local-APIC timer, injecting ticks into the very region being
+/// measured; a measurement fixture needs the quiescing without the ticking.
+///
 /// # Safety
 /// Must run before [`init`] enables interrupts (`sti`) — remapping while
 /// interrupts are live could let a stale in-flight PIC interrupt land at
-/// whichever vector the remap sequence has reached at that instant.
-unsafe fn remap_and_mask_pic() {
+/// whichever vector the remap sequence has reached at that instant. A caller
+/// that never enables interrupts at all (a measurement fixture) satisfies this
+/// trivially.
+pub unsafe fn remap_and_mask_pic() {
     // SAFETY: this is the documented 8259 initialization sequence (ICW1
     // through ICW4) applied to both the master and slave controller, per
     // this function's own doc comment.

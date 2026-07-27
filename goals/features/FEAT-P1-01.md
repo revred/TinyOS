@@ -1,6 +1,6 @@
 # FEAT-P1-01 — Timing Measurement Harness & CI Timing-Regression Gate
 
-Status: **Specified — no Story started**
+Status: **In Progress — `STORY-P1-01-01` functionally Verified (Tier 0 + Host) 2026-07-27; `STORY-P1-01-02` (baselines + gate) not started**
 Epic: [`EPIC-P1`](../epics/EPIC-P1.md)
 Introduced in: [`session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md`](../../session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md)
 
@@ -22,7 +22,7 @@ QEMU cycle counts calibrate the harness and the regression *mechanism*; they are
 
 | Story | Summary | Status |
 |---|---|---|
-| [`STORY-P1-01-01`](../stories/STORY-P1-01-01.md) | Reusable cycle-calibrated measurement harness (kernel side + xtask parser) | Specified |
+| [`STORY-P1-01-01`](../stories/STORY-P1-01-01.md) | Reusable cycle-calibrated measurement harness (kernel side + xtask parser) | Verified (Tier 0 + Host; assurance `baseline-debt`) |
 | [`STORY-P1-01-02`](../stories/STORY-P1-01-02.md) | Committed baselines + `check-timing-regression` CI gate, proven able to fail | Specified |
 
 ## Containment contract
@@ -30,6 +30,10 @@ QEMU cycle counts calibrate the harness and the regression *mechanism*; they are
 Canonical row: [`assurance/feature-contracts.tsv`](../assurance/feature-contracts.tsv) · implementation **C0/C1** · subject **C1/C2** · boundary tests **BND-15, -16, -17**.
 
 The harness measures; it grants nothing. Measurement fixtures run with the same authority as the code they time (never more), sample buffers are fixed-capacity, serial reporting is bounded, and baseline files are data the gate parses defensively — a malformed baseline fails the gate closed, it does not skip the check. Timing instrumentation must never perturb the RT paths it measures beyond its own documented, calibrated overhead.
+
+## What the harness Story established that this Feature's second Story must account for
+
+`REPORT-2026-07-27-02`'s three-run Tier 0 evidence puts the run-to-run p99 coefficient of variation at **39%–61%** for small operations (pool alloc/free, context switch) and 1%–2% for the larger dispatch metrics. A gate thresholding p99 or max on a single Tier 0 run would therefore fail green code and pass real regressions. `STORY-P1-01-02` gates on the stable statistics (`min`/`p50`), over medians of repeated runs, with Tier 0 tolerances derived from that measured noise rather than from the catalogue's hardware budgets — and says so in its own output, so a reported-but-ungated tail is never mistaken for a passing one. Two further inputs it needs: measurement currently runs **dev-profile** binaries (`LE-13`), and hardware-tier evidence does not exist at all (`LE-09`).
 
 ## Exit criteria
 

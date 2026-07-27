@@ -11,6 +11,7 @@
 mod assurance;
 mod governance;
 mod performance_catalogue;
+mod timing;
 mod txe;
 
 use std::env;
@@ -36,7 +37,7 @@ fn main() -> ExitCode {
     let mut args = env::args().skip(1);
     let Some(command) = args.next() else {
         eprintln!(
-            "usage: cargo run -p xtask -- <qemu-x86_64|check-assurance-spine|check-crate-sizes|check-image-size|check-performance-catalogue|governance-fixture-test|pack-txe> [options]"
+            "usage: cargo run -p xtask -- <qemu-x86_64|measure|check-assurance-spine|check-crate-sizes|check-image-size|check-performance-catalogue|governance-fixture-test|pack-txe> [options]"
         );
         return ExitCode::from(XtaskExit::HarnessError as u8);
     };
@@ -64,12 +65,13 @@ fn main() -> ExitCode {
                 }
                 Some("pci-enumeration") => ("kernel", "kernel", Some("fixture-pci-enumeration")),
                 Some("pool-bench") => ("kernel", "kernel", Some("fixture-pool-bench")),
+                Some("measure") => ("kernel", "kernel", Some("fixture-measure")),
                 Some(other) => {
                     eprintln!("xtask: unknown --fixture value '{other}'");
                     return ExitCode::from(XtaskExit::HarnessError as u8);
                 }
             };
-            match qemu_x86_64(package, binary, feature) {
+            match qemu_x86_64(package, binary, feature, None) {
                 Ok(code) => ExitCode::from(code as u8),
                 Err(message) => {
                     eprintln!("xtask: {message}");
@@ -177,6 +179,36 @@ fn main() -> ExitCode {
                 }
             }
         }
+        "measure" => {
+            let rest: Vec<String> = args.collect();
+            let runs = rest
+                .iter()
+                .find_map(|a| a.strip_prefix("--runs=").map(str::to_string))
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(3);
+            let keep = rest.iter().find_map(|a| a.strip_prefix("--out=").map(PathBuf::from));
+            let fixture = rest
+                .iter()
+                .find_map(|a| a.strip_prefix("--fixture=").map(str::to_string))
+                .unwrap_or_else(|| "measure".to_string());
+            let feature = match fixture.as_str() {
+                "measure" => "fixture-measure",
+                "pool-bench" => "fixture-pool-bench",
+                other => {
+                    eprintln!(
+                        "xtask: --fixture={other} reports no measurement envelope; measurable fixtures are `measure` and `pool-bench`"
+                    );
+                    return ExitCode::from(XtaskExit::HarnessError as u8);
+                }
+            };
+            match measure(feature, runs, keep.as_deref()) {
+                Ok(code) => ExitCode::from(code as u8),
+                Err(message) => {
+                    eprintln!("xtask: {message}");
+                    ExitCode::from(XtaskExit::HarnessError as u8)
+                }
+            }
+        }
         "governance-fixture-test" => {
             let work_dir = env::temp_dir().join("tinyos-governance-fixtures");
             match governance::run_fixture_smoke_test(&work_dir) {
@@ -206,6 +238,7 @@ fn qemu_x86_64(
     package: &str,
     binary: &str,
     fixture_feature: Option<&str>,
+    serial_capture: Option<&Path>,
 ) -> Result<XtaskExit, String> {
     let os_root = os_root()?;
     let target_spec = os_root.join("targets").join("x86_64-tinyos.json");
@@ -242,6 +275,15 @@ fn qemu_x86_64(
     }
 
     let qemu_binary = find_qemu()?;
+    // A measurement fixture's evidence leaves the guest over COM1, so it needs
+    // `-serial file:PATH`; every other fixture reports a single pass/fail bit
+    // through isa-debug-exit and gets `-serial none`, unchanged — capturing
+    // unconditionally would make every boot fixture write a host file it never
+    // uses.
+    let serial_argument = match serial_capture {
+        Some(path) => format!("file:{}", path.display()),
+        None => "none".to_string(),
+    };
     let mut child = Command::new(qemu_binary)
         .arg("-kernel")
         .arg(&kernel_elf)
@@ -252,7 +294,7 @@ fn qemu_x86_64(
         .arg("-display")
         .arg("none")
         .arg("-serial")
-        .arg("none")
+        .arg(&serial_argument)
         .arg("-monitor")
         .arg("none")
         .arg("-device")
@@ -290,6 +332,121 @@ fn qemu_x86_64(
             "QEMU exited with unexpected code {other} (neither the success nor failure isa-debug-exit code) — harness or QEMU configuration problem, not a kernel-boot result"
         )),
         None => Err("QEMU process terminated by signal, not a normal exit".to_string()),
+    }
+}
+
+/// Runs the Tier 0 measurement fixture `runs` times, parsing each run's
+/// captured COM1 stream into structured percentile records and reporting
+/// per-metric run-to-run variance — `STORY-P1-01-01`'s acceptance criteria 2
+/// and 3.
+///
+/// Exit-code discipline, matching `qemu-x86_64`'s own: the fixture's own
+/// self-consistency failure is [`XtaskExit::KernelBootFailed`] (1), while a
+/// stream this harness cannot trust — malformed, truncated, unparseable, or
+/// disagreeing between runs — is a [`XtaskExit::HarnessError`] (2). It is
+/// never a pass, and never a quietly smaller set of samples: that fail-closed
+/// rule is `FEAT-P1-01`'s containment contract (`BND-15`/`BND-16`/`BND-17`).
+///
+/// `keep_dir`, when given, retains each run's raw capture there, so a Report
+/// can cite the actual bytes the numbers were parsed from rather than a
+/// summary of them.
+fn measure(feature: &str, runs: usize, keep_dir: Option<&Path>) -> Result<XtaskExit, String> {
+    if runs == 0 {
+        return Err("measure needs at least one run (--runs=N, default 3)".to_string());
+    }
+    let capture_dir = match keep_dir {
+        Some(dir) => {
+            std::fs::create_dir_all(dir)
+                .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+            dir.to_path_buf()
+        }
+        None => env::temp_dir().join("tinyos-measure"),
+    };
+    if keep_dir.is_none() {
+        std::fs::create_dir_all(&capture_dir)
+            .map_err(|e| format!("could not create {}: {e}", capture_dir.display()))?;
+    }
+
+    let mut envelopes = Vec::with_capacity(runs);
+    let mut fixture_failed = false;
+    for run in 1..=runs {
+        let capture = capture_dir.join(format!("measure-run-{run}.log"));
+        // Remove any previous capture first: parsing a stale file from an
+        // earlier run would be exactly the silent-wrong-evidence failure this
+        // command exists to prevent.
+        let _ = std::fs::remove_file(&capture);
+        let outcome = qemu_x86_64("kernel", "kernel", Some(feature), Some(capture.as_path()))?;
+        let text = std::fs::read_to_string(&capture).map_err(|e| {
+            format!("run {run} produced no readable serial capture at {}: {e}", capture.display())
+        })?;
+        let envelope = timing::parse_stream(&text)
+            .map_err(|error| format!("run {run} ({}): {error}", capture.display()))?;
+        match outcome {
+            XtaskExit::KernelBootSucceeded => {}
+            XtaskExit::KernelBootFailed => {
+                eprintln!(
+                    "xtask measure: run {run}'s fixture reported a self-consistency failure (see {})",
+                    capture.display()
+                );
+                fixture_failed = true;
+            }
+            XtaskExit::HarnessError => {
+                return Err(format!("run {run} could not be executed"));
+            }
+        }
+        println!(
+            "measure run {run}/{runs}: tier={} arch={} cycle_source={} overhead_cycles={} cycles_per_us={} metrics={}",
+            envelope.tier,
+            envelope.arch,
+            envelope.cycle_source,
+            envelope.overhead_cycles,
+            envelope
+                .cycles_per_us
+                .map(|factor| factor.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            envelope.metrics.len()
+        );
+        for record in &envelope.metrics {
+            println!(
+                "  {:<8} {:<44} n={:<6} dropped={} p50={} p99={} p99.9={} max={} ({})",
+                record.domain,
+                record.metric,
+                record.n,
+                record.dropped,
+                record.p50,
+                record.p99,
+                record.p99_9,
+                record.max,
+                record.unit
+            );
+        }
+        envelopes.push(envelope);
+    }
+
+    if envelopes.len() >= 2 {
+        let comparisons = timing::compare_runs(&envelopes).map_err(|error| format!("{error}"))?;
+        println!("\nrun-to-run variance across {} runs:", envelopes.len());
+        for comparison in comparisons {
+            println!(
+                "  {:<52} p99s={:?} p99_cv={:.2}% maxes={:?}",
+                comparison.key, comparison.p99s, comparison.p99_cv_percent, comparison.maxes
+            );
+        }
+    } else {
+        println!(
+            "\nrun-to-run variance: not computed — a single run cannot establish it (use --runs=3 or more)"
+        );
+    }
+    println!(
+        "\nTier 0 (QEMU/TCG) evidence only: these cycle counts calibrate the harness and the \
+         regression mechanism, and are not hardware WCET evidence. Hardware-tier timing debt \
+         stays open until measured on the Raspberry Pi 5 (loose end LE-09)."
+    );
+
+    if fixture_failed {
+        Ok(XtaskExit::KernelBootFailed)
+    } else {
+        Ok(XtaskExit::KernelBootSucceeded)
     }
 }
 

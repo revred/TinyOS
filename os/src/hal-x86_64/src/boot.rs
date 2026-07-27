@@ -157,6 +157,49 @@ _start:
         mov %ax, %fs
         mov %ax, %gs
         mov $boot_stack_top, %rsp
+
+        // Enable SSE before calling any Rust code (`STORY-P1-01-01`).
+        //
+        // Not an optimization — a correctness requirement, and the *only*
+        // reason this exists is that `STORY-P1-01-01`'s Tier 0 measurement
+        // fixture triple-faulted without it. SSE2 is architecturally
+        // guaranteed on every x86_64 CPU, so LLVM freely emits `movups`/
+        // `movaps` for ordinary 16-byte struct copies in perfectly
+        // float-free code — `kernel::sched::Scheduler::highest_priority_ready`
+        // compiles to exactly that. But an SSE instruction executed while
+        // `CR4.OSFXSR` is clear raises `#UD`, and with no IDT installed on a
+        // fixture boot path that escalates `#UD` -> `#GP` -> `#DF` -> triple
+        // fault -> silent QEMU shutdown. That was observed directly (QEMU
+        // `-d int,cpu_reset`: `v=06` at the `movups` in
+        // `highest_priority_ready`, then `v=0d`, then `v=08`), which means
+        // that scheduler function could not execute on the real target
+        // binary at all before this change, despite passing its host tests.
+        //
+        // The alternative fix — adding `-sse,-mmx,+soft-float` to
+        // `targets/x86_64-tinyos.json`, as the upstream
+        // `x86_64-unknown-none` target does — was rejected: it makes the
+        // compiler avoid the vector unit everywhere, which is the wrong
+        // trade for a kernel whose own standards put maximum throughput at
+        // priority 4 and which expects to host local inference workloads.
+        // Enabling the unit the hardware guarantees is the honest fix; see
+        // `docs/adr/0003-enable-sse-in-the-boot-path.md`.
+        //
+        // CR0: clear EM (bit 2) so SSE/x87 instructions are not trapped as
+        // emulated, set MP (bit 1) so `FWAIT`/`WAIT` honors TS as the SDM
+        // specifies for a machine with a real FPU.
+        mov %cr0, %rax
+        and $0xFFFFFFFFFFFFFFFB, %rax
+        or $0x2, %rax
+        mov %rax, %cr0
+        // CR4: set OSFXSR (bit 9) — the OS declares it supports `FXSAVE`/
+        // `FXRSTOR`-style state management, which is what actually permits
+        // SSE instructions — and OSXMMEXCPT (bit 10) so an unmasked SIMD
+        // floating-point error raises `#XF` (vector 19) rather than the
+        // ambiguous `#UD` this code path exists to eliminate.
+        mov %cr4, %rax
+        or $0x600, %rax
+        mov %rax, %cr4
+
         mov %ebx, %edi
         call kernel_main
     .hang:

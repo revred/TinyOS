@@ -104,7 +104,7 @@
 
 <h1>TinyOS — Handovers for 27 July 2026</h1>
 <p class="muted">This page indexes every handover produced on this date, in order. Per the <a href="../README.md">session naming convention</a>, all handovers from a single calendar date live in this one folder. Previous session: <a href="../hand-2026-07-26/index.html">26 July 2026</a> (closed at Handover 37; its Handovers 35–37 were written on the 27th mid-transition and stay filed where every existing cross-reference points).</p>
-<span class="status">EPIC-P0 functionally complete · EPIC-P1 decomposed, mandate active · assurance evidence in progress (most PERF-D07 guardrails still open)</span>
+<span class="status">EPIC-P0 functionally complete · EPIC-P1 started: FEAT-P1-01 harness Story Verified (Tier 0 + Host) · LE-09 decision pending with the user</span>
 
 <h2>Read this first</h2>
 <ol class="entries">
@@ -120,19 +120,28 @@
     <span class="num">01</span><a href="01-story-p0-03-01-assurance-evidence.md">STORY-P0-03-01 PERF-D07 assurance-evidence session — honest correction of an inflated coverage claim</a>
     <p>Built real Host-tier diagnostics (<code>os/src/kernel/src/mem.rs</code>) and a real Tier-0 QEMU fixture (new <code>os/src/kernel/src/fixture_pool_bench.rs</code>, new <code>os/src/hal-x86_64/src/serial.rs</code> COM1 driver, <code>xtask qemu-x86_64 --fixture=pool-bench</code>) plus a SEC/BND boundary-evidence mapping for the <code>Pool&lt;T,N&gt;</code> allocator's <code>PERF-D07</code> release guardrails. An independent adversarial verification pass found no fabricated numbers, but found the working sub-reports had tagged data with guardrail IDs without ever checking it against <code>goals/performance/catalogue.tsv</code>'s actual numeric thresholds. Corrected count: of the 23 non-Claim guardrails, only <code>G11</code> is genuinely closed, <code>G08</code>/<code>G19</code> are correctly <code>N/A-debt</code>, 5 were not attempted, and 14 have real evidence gathered but do not close (T0 cycle counts run 5–140x over several budgets; several latency guardrails have no documented TSC-frequency conversion to their stated microsecond units). <code>G22</code> (72-hour soak) was not run this session — a pre-existing recurring cron check (session-scoped, best-effort, not a durable CI substitute) is the only thing tracking it. <code>STORY-P0-03-01</code>'s <code>story-contracts.tsv</code> row is confirmed unchanged at <code>baseline-debt</code>. New <code>REPORT-2026-07-27-01</code>.</p>
   </li>
+  <li class="entry">
+    <span class="num">02</span><a href="02-story-p1-01-01-measurement-harness.md">STORY-P1-01-01 — the measurement harness, and two bugs only measuring on target could find</a>
+    <p>Delivered <code>EPIC-P1</code>'s measurement harness under strict TDD (Test document first, 48 failing tests recorded, then Green; workspace now 197 tests): arch-neutral <code>hal::time::CycleSource</code>/<code>Timebase</code> with a shared Liskov conformance suite, <code>kernel::measure</code> (fixed-capacity non-allocating buffers, explicit drop accounting, integer nearest-rank percentiles, versioned <code>TINYOS-MEAS/1</code> envelope), the x86_64 <code>Tsc</code> backend plus a PIT-measured microsecond timebase (2302–2307 cycles/µs — closing <code>REPORT-2026-07-27-01</code>'s first next step), a fail-closed <code>xtask</code> parser with one test per malformed-stream shape, the new <code>xtask measure</code> command, and a Tier 0 fixture covering D04/D05/D07. <code>pool-bench</code> is refactored onto the harness, closing <code>LE-06</code>. Two real bugs found by running host-verified code on target for the first time: <code>Scheduler::highest_priority_ready</code> triple-faulted on <code>#UD</code> because LLVM emits SSE and <code>CR4.OSFXSR</code> was never set (fixed in <code>boot.rs</code>, <a href="../../docs/adr/0003-enable-sse-in-the-boot-path.md">ADR 0003</a>), and a fixture switching into a task enables interrupts against an absent IDT (<code>LE-11</code>). Key negative result: Tier 0 run-to-run p99 CV is 39–61% on small operations, so the next Story's gate must not threshold tails. New <code>REPORT-2026-07-27-02</code>; four new loose ends (<code>LE-11</code>–<code>LE-14</code>).</p>
+  </li>
+  <li class="entry">
+    <span class="num">03</span><a href="03-le-09-arm64-pi5-slice-proposal.md">LE-09 proposal — minimal ARM64 / Raspberry Pi 5 bring-up slice (decision needed)</a>
+    <p>The one-page scoping mandate item 3 asked for: the five pieces of a minimal slice (boot + target spec, PL011 UART, <code>CNTVCT_EL0</code>/<code>CNTFRQ_EL0</code> cycle source and timebase, UART-borne pass/fail in place of <code>isa-debug-exit</code>, host-side run path), what stays out of scope (MMU, GIC, device tree, multi-core, networking), and two sequencing options — parallel with <code>FEAT-P1-01</code> versus after <code>FEAT-P1-02</code> — each with its real arguments. Recommends option B with a carve-out (write the ARM64 cycle source/timebase now, since it needs no board and is the only thing that actually tests the harness's arch-neutrality claim). <strong>Awaiting the user's decision.</strong></p>
+  </li>
 </ol>
 
 <h2>Quick document reference</h2>
 <table>
 <thead><tr><th>Area</th><th>Document</th></tr></thead>
 <tbody>
-<tr><td>Current Epic</td><td><a href="../../goals/epics/EPIC-P1.md"><code>goals/epics/EPIC-P1.md</code></a> — 6 Features, 10 Stories, all specified</td></tr>
-<tr><td>Loose-ends register (canonical)</td><td><a href="../hand-2026-07-26/37-epic-p1-mandate-hardware-direction-and-loose-ends.md">Handover 37 §Loose-ends</a> — <code>LE-01</code>…<code>LE-10</code></td></tr>
+<tr><td>Current Epic</td><td><a href="../../goals/epics/EPIC-P1.md"><code>goals/epics/EPIC-P1.md</code></a> — 6 Features, 10 Stories; 1 Verified (Tier 0 + Host), 9 specified</td></tr>
+<tr><td>Loose-ends register (canonical)</td><td><a href="02-story-p1-01-01-measurement-harness.md#loose-ends-register-canonical-as-of-this-handover">Handover 02 §Loose-ends</a> — <code>LE-01</code>…<code>LE-14</code> (<code>LE-06</code>/<code>LE-07</code> closed)</td></tr>
 <tr><td>Founding intent &amp; master specification</td><td><code>SeedMVP.md</code></td></tr>
 <tr><td>Current design (living document)</td><td><code>README.md</code></td></tr>
 <tr><td>Coding standard</td><td><code>agent/CODING_STANDARDS.md</code></td></tr>
 <tr><td>Assurance &amp; security</td><td><code>SECURITY_CHARTER.md</code>, <code>goals/assurance/</code>, <code>goals/performance/</code>, <code>goals/security/</code>, <code>docs/security-spine.md</code></td></tr>
-<tr><td>This date's Report</td><td><code>goals/reports/REPORT-2026-07-27-01.md</code></td></tr>
+<tr><td>This date's Reports</td><td><code>goals/reports/REPORT-2026-07-27-01.md</code>, <code>goals/reports/REPORT-2026-07-27-02.md</code> (+ raw captures under <code>goals/reports/_measure-p1-01-01/</code>)</td></tr>
+<tr><td>Measurement harness</td><td><code>os/src/hal/src/time.rs</code>, <code>os/src/kernel/src/measure.rs</code>, <code>os/src/xtask/src/timing.rs</code>; run it with <code>cargo run -p xtask -- measure --runs=3</code></td></tr>
 <tr><td>Previous date's index</td><td><code>session/hand-2026-07-26/index.html</code></td></tr>
 </tbody>
 </table>
