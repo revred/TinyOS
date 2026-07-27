@@ -10,7 +10,8 @@
 //!
 //! Only capacities with a real, concrete production or Tier-0-fixture
 //! consumer are declared here today: [`MAX_CPUS`] (boot-time ACPI topology
-//! discovery, `STORY-P0-04-01`) and [`EXEC_FRAME_POOL_CAPACITY`] (the
+//! discovery, `STORY-P0-04-01`), [`MAX_PCI_DEVICES`] (boot-time PCI bus
+//! enumeration, `STORY-P0-04-03`), and [`EXEC_FRAME_POOL_CAPACITY`] (the
 //! page-table frame pool `exec`'s Tier 0 fixtures build an `AddressSpace`
 //! against — previously a `FRAMES` constant duplicated in two separate
 //! files, `os/src/exec/src/fixture_main.rs` and
@@ -22,6 +23,7 @@
 //! standards argue against. Add one alongside whichever Story first wires
 //! a production consumer in, not before.
 
+use hal::device::DeviceDescriptor;
 use hal::topology::CpuDescriptor;
 use hal_x86_64::paging::PageTable;
 
@@ -31,6 +33,14 @@ use hal_x86_64::paging::PageTable;
 /// this fails closed rather than overflowing fixed storage (see
 /// `hal::topology::Topology::push`).
 pub const MAX_CPUS: usize = 64;
+
+/// Capacity bound for boot-time PCI bus enumeration (`STORY-P0-04-03`) —
+/// bus 0 can present at most 256 functions (32 devices × 8 functions), but
+/// QEMU's `q35` default machine model and Phase 0 target hardware present
+/// well under this bound on bus 0; a bus presenting more functions than
+/// this fails closed rather than overflowing fixed storage (see
+/// `hal::device::DeviceTable::push`).
+pub const MAX_PCI_DEVICES: usize = 64;
 
 /// Capacity bound for `exec::address_space::AddressSpace`'s `Pool`-backed
 /// page-table frame allocator, as used by `exec`'s own Tier 0 fixtures.
@@ -45,9 +55,10 @@ pub const EXEC_FRAME_POOL_CAPACITY: usize = 16;
 /// per `README.md`'s Target Hardware & Test Matrix.
 pub const STATIC_MEMORY_BUDGET_BYTES: usize = 8 * 1024 * 1024;
 
-/// The total static bytes [`MAX_CPUS`] and [`EXEC_FRAME_POOL_CAPACITY`]'s
-/// backing storage commits to, given each element type's real size —
-/// the quantity [`STATIC_MEMORY_BUDGET_BYTES`] bounds.
+/// The total static bytes [`MAX_CPUS`], [`MAX_PCI_DEVICES`], and
+/// [`EXEC_FRAME_POOL_CAPACITY`]'s backing storage commits to, given each
+/// element type's real size — the quantity [`STATIC_MEMORY_BUDGET_BYTES`]
+/// bounds.
 ///
 /// An approximation, not the exact `Topology<N>`/`Pool<T, N>` byte layout
 /// (it ignores `Option`/`MaybeUninit` tag/padding overhead, both crates'
@@ -56,6 +67,7 @@ pub const STATIC_MEMORY_BUDGET_BYTES: usize = 8 * 1024 * 1024;
 /// a claim of byte-exact accounting.
 pub const fn committed_bytes() -> usize {
     MAX_CPUS * core::mem::size_of::<CpuDescriptor>()
+        + MAX_PCI_DEVICES * core::mem::size_of::<DeviceDescriptor>()
         + EXEC_FRAME_POOL_CAPACITY * core::mem::size_of::<PageTable>()
 }
 

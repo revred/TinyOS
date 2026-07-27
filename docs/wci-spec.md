@@ -1,12 +1,14 @@
 # Wireless Command Interface (WCI) — Draft Spec
 
-Status: **draft / not yet scheduled on Roadmap** (candidate for a Phase 3.5 or Phase 5 extension, alongside CAN/USB/Ethernet connectivity and the ACI)
+Status: **draft / not yet scheduled on Roadmap** (candidate for a Phase 3.5 or Phase 5 extension, alongside CAN/USB/Ethernet connectivity and the ACI); governed by [`SECURITY_CHARTER.md`](../SECURITY_CHARTER.md)
 
 ## Purpose
 
 WCI is the specified channel between a remote caller and a TinyOS instance reachable over a WiFi node it exposes — the reference deployment is a **co-bot**: a collaborative robot arm or mobile platform whose only control surface is the network. Unlike the Host Bridge Protocol (HBP), which connects a co-resident host OS over a trusted local transport, WCI's transport is a wireless network that must be treated as hostile by default.
 
 WCI exists so a remote operator, host application, or fleet controller can issue commands to a co-bot only after proving identity and being granted a capability scope — and so that no state on the network side, benign or malicious, can ever suppress the co-bot's physical safety systems.
+
+Mutual authentication establishes a remote principal; it does not make remote bytes code and does not grant process-memory, executable-mapping, deploy-activation, driver-load, trust-root, or recovery-policy authority.
 
 ## Threat model
 
@@ -37,6 +39,14 @@ WCI exists so a remote operator, host application, or fleet controller can issue
   - automatically released on session timeout, disconnect, or explicit yield,
   - never assumed — a session with an expired or unheld lease has its command frames rejected by the ACI policy engine before they reach the motion core.
 - A second session requesting authority while a lease is held is denied or queued per configured policy (first-come, priority-preempt, or supervisor-override — policy is deployment-specific, not protocol-specific).
+
+## Remote-code exclusion
+
+- WCI accepts only enumerated, fixed-schema commands and bounded data objects. It has no generic shell, eval, script, native-code, process-write, debugger, raw-syscall, or arbitrary-tool endpoint.
+- Downloads, model output, configuration blobs, and deploy payloads remain immutable non-executable C4 objects with origin and session provenance.
+- A `deployer`-scoped session may stage an object only through the separate deploy protocol. It cannot activate it; every `RCG-01..RCG-14` gate and fresh-domain rule still applies.
+- Certificate enrollment does not confer signer or boot-root authority. Trust-root enrollment, signer-authority expansion, rollback reset, and recovery-policy change require local physical/recovery ceremony and have no standing WCI operation.
+- Compromise of the WCI service remains a C2 compromise: its Protection Domain owns only bounded network/session endpoints and cannot access C0/C1 memory, another process, unrelated storage, devices, or executable mapping.
 
 ## Wire format (draft)
 

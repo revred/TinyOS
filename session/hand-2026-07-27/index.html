@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TinyOS Handovers — 27 July 2026</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #5a5a5a;
+    --border: #d8d8d8;
+    --code-bg: #f2f2f2;
+    --accent: #0b5fff;
+    --tag-bg: #eef2ff;
+    --card-bg: #fafafa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --fg: #e8e8e8;
+      --muted: #a0a0a0;
+      --border: #333740;
+      --code-bg: #1e2126;
+      --accent: #6fa8ff;
+      --tag-bg: #1c2333;
+      --card-bg: #191c21;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.6;
+  }
+  h1 { font-size: 1.7rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.25rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+  .status {
+    display: inline-block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--tag-bg);
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    margin-bottom: 1.5rem;
+  }
+  code {
+    background: var(--code-bg);
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.92rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.6rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th { color: var(--muted); font-weight: 600; }
+  ul, ol { padding-left: 1.3rem; }
+  li { margin-bottom: 0.4rem; }
+  a { color: var(--accent); }
+  .muted { color: var(--muted); }
+  .entries { list-style: none; padding-left: 0; }
+  .entry {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 0.9rem;
+  }
+  .entry .num {
+    display: inline-block;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin-right: 0.4rem;
+  }
+  .entry a { font-weight: 600; font-size: 1.02rem; text-decoration: none; }
+  .entry a:hover { text-decoration: underline; }
+  .entry p { margin: 0.4rem 0 0; color: var(--muted); font-size: 0.92rem; }
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+
+<h1>TinyOS — Handovers for 27 July 2026</h1>
+<p class="muted">This page indexes every handover produced on this date, in order. Per the <a href="../README.md">session naming convention</a>, all handovers from a single calendar date live in this one folder. Previous session: <a href="../hand-2026-07-26/index.html">26 July 2026</a> (closed at Handover 37; its Handovers 35–37 were written on the 27th mid-transition and stay filed where every existing cross-reference points).</p>
+<span class="status">EPIC-P0 functionally complete · EPIC-P1 decomposed, mandate active · assurance evidence in progress (most PERF-D07 guardrails still open)</span>
+
+<h2>Read this first</h2>
+<ol class="entries">
+  <li class="entry">
+    <span class="num">00</span><a href="00-cover-note-epic-p1-session-start.md">Cover note — EPIC-P1 session start</a>
+    <p>Where the project stands: <code>EPIC-P0</code> functionally complete (dashboard's stale <code>IN PROGRESS</code> badge corrected today) with three named gaps between "functionally complete" and <em>done</em> — an observed CI run (<code>LE-07</code>), assurance-debt conversion (<code>EPIC-P1</code>'s charge), and Pi 5 hardware evidence (<code>LE-09</code>). This date's mandate, from <a href="../hand-2026-07-26/37-epic-p1-mandate-hardware-direction-and-loose-ends.md">Handover 37</a>: CI probe first, then <code>STORY-P1-01-01</code> (measurement harness, strict TDD, arch-neutral cycle-source API, subsuming <code>pool-bench</code>), then the ARM64/Pi 5 sequencing proposal for the user to decide. The loose-ends register <code>LE-01</code>–<code>LE-10</code> is carried forward in every handover in this folder.</p>
+  </li>
+</ol>
+
+<h2>Handovers, in order</h2>
+<ol class="entries">
+  <li class="entry">
+    <span class="num">01</span><a href="01-story-p0-03-01-assurance-evidence.md">STORY-P0-03-01 PERF-D07 assurance-evidence session — honest correction of an inflated coverage claim</a>
+    <p>Built real Host-tier diagnostics (<code>os/src/kernel/src/mem.rs</code>) and a real Tier-0 QEMU fixture (new <code>os/src/kernel/src/fixture_pool_bench.rs</code>, new <code>os/src/hal-x86_64/src/serial.rs</code> COM1 driver, <code>xtask qemu-x86_64 --fixture=pool-bench</code>) plus a SEC/BND boundary-evidence mapping for the <code>Pool&lt;T,N&gt;</code> allocator's <code>PERF-D07</code> release guardrails. An independent adversarial verification pass found no fabricated numbers, but found the working sub-reports had tagged data with guardrail IDs without ever checking it against <code>goals/performance/catalogue.tsv</code>'s actual numeric thresholds. Corrected count: of the 23 non-Claim guardrails, only <code>G11</code> is genuinely closed, <code>G08</code>/<code>G19</code> are correctly <code>N/A-debt</code>, 5 were not attempted, and 14 have real evidence gathered but do not close (T0 cycle counts run 5–140x over several budgets; several latency guardrails have no documented TSC-frequency conversion to their stated microsecond units). <code>G22</code> (72-hour soak) was not run this session — a pre-existing recurring cron check (session-scoped, best-effort, not a durable CI substitute) is the only thing tracking it. <code>STORY-P0-03-01</code>'s <code>story-contracts.tsv</code> row is confirmed unchanged at <code>baseline-debt</code>. New <code>REPORT-2026-07-27-01</code>.</p>
+  </li>
+</ol>
+
+<h2>Quick document reference</h2>
+<table>
+<thead><tr><th>Area</th><th>Document</th></tr></thead>
+<tbody>
+<tr><td>Current Epic</td><td><a href="../../goals/epics/EPIC-P1.md"><code>goals/epics/EPIC-P1.md</code></a> — 6 Features, 10 Stories, all specified</td></tr>
+<tr><td>Loose-ends register (canonical)</td><td><a href="../hand-2026-07-26/37-epic-p1-mandate-hardware-direction-and-loose-ends.md">Handover 37 §Loose-ends</a> — <code>LE-01</code>…<code>LE-10</code></td></tr>
+<tr><td>Founding intent &amp; master specification</td><td><code>SeedMVP.md</code></td></tr>
+<tr><td>Current design (living document)</td><td><code>README.md</code></td></tr>
+<tr><td>Coding standard</td><td><code>agent/CODING_STANDARDS.md</code></td></tr>
+<tr><td>Assurance &amp; security</td><td><code>SECURITY_CHARTER.md</code>, <code>goals/assurance/</code>, <code>goals/performance/</code>, <code>goals/security/</code>, <code>docs/security-spine.md</code></td></tr>
+<tr><td>This date's Report</td><td><code>goals/reports/REPORT-2026-07-27-01.md</code></td></tr>
+<tr><td>Previous date's index</td><td><code>session/hand-2026-07-26/index.html</code></td></tr>
+</tbody>
+</table>
+
+<footer>
+  TinyOS session index · <a href="../README.md">session/README.md</a> for the naming convention · <a href="../../README.md">repository root README</a>
+</footer>
+
+</body>
+</html>

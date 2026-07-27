@@ -3,6 +3,14 @@
 Status: **Implemented and passing**
 Story: [`STORY-P0-05-02`](../stories/STORY-P0-05-02.md)
 Tier: Tier 0 (QEMU x86_64), per [Target Hardware & Test Matrix](../../README.md#target-hardware--test-matrix) — real CPU page-table construction is not something a host unit test can fully substitute for.
+Assurance contract: [`goals/assurance/story-contracts.tsv`](../assurance/story-contracts.tsv)
+Performance domains: `D08`, `D09`
+Security controls: `SEC-03`, `SEC-04`, `SEC-18`, `SEC-19`
+Containment classes: `C1`, `C3`
+Boundary tests: `BND-03`, `BND-04`, `BND-05`, `BND-09`, `BND-10`, `BND-11`, `BND-12`, `BND-19`, `BND-20`
+Protection Domain contracts: `PD-01`, `PD-02`, `PD-03`, `PD-04`, `PD-05`, `PD-06`, `PD-08`, `PD-11`, `PD-12`, `PD-13`, `PD-14`
+Code admission gates: `RCG-01`, `RCG-02`, `RCG-03`, `RCG-04`, `RCG-05`, `RCG-06`, `RCG-07`, `RCG-08`, `RCG-09`, `RCG-10`, `RCG-11`, `RCG-12`, `RCG-13`, `RCG-14`
+Assurance state: `baseline-debt`
 
 ## Specification
 

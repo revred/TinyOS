@@ -1,0 +1,26 @@
+source	target	decision	path	authority_transfer	failure_rule	boundary_tests
+C0	C0	deny	No runtime communication boundary or callable boot service	none	Reject runtime re-entry and preserve immutable root state	BND-02,BND-20
+C0	C1	handoff	One-shot authenticated measured boot-state transfer	boot-state-only	Reject before control transfer and enter known-good recovery	BND-01,BND-02
+C0	C2	deny	No direct or runtime path	none	Reject and expose no endpoint handle mapping or callable entry	BND-02,BND-20
+C0	C3	deny	No direct or runtime path	none	Reject and expose no endpoint handle mapping or callable entry	BND-02,BND-20
+C0	C4	deny	No direct or runtime path	none	Reject and expose no endpoint handle mapping or callable entry	BND-02,BND-20
+C1	C0	deny	No runtime return or command path into C0	none	Reject re-entry and retain current C1 authority unchanged	BND-02,BND-20
+C1	C1	internal	Fixed-format kernel object and architecture operations only	none	Fail closed without invoking a complex hostile parser	BND-03,BND-17
+C1	C2	mediated	Kernel-created lifecycle fault IPC and device-grant operations	rights-reduced	Reject undeclared endpoint class or grant and create no partial authority	BND-06,BND-08,BND-14
+C1	C3	mediated	Kernel-created lifecycle fault IPC and application-grant operations	rights-reduced	Reject undeclared endpoint class or grant and create no partial authority	BND-09,BND-10,BND-14
+C1	C4	mediated	Fixed-format lifecycle fault and one-shot inspection endpoints	one-shot-only	Reject persistent broad or delegable authority and leave C4 disposable	BND-11,BND-12,BND-14
+C2	C0	deny	No direct or mediated runtime path	none	Reject without exposing C0 state or timing-dependent success	BND-02,BND-20
+C2	C1	mediated	Fixed-format syscall fault and capability-checked IPC only	none	Contain malformed or unauthorised requests in the C2 domain	BND-03,BND-08,BND-14
+C2	C2	mediated	Typed bounded endpoint mediated by C1	rights-reduced	Reject wrong-direction replay forged or non-delegable authority with queues unchanged	BND-14,BND-15,BND-17
+C2	C3	mediated	Typed bounded broker endpoint mediated by C1	rights-reduced	Reject authority broader than the schema and sender delegation rights	BND-10,BND-14,BND-15
+C2	C4	mediated	One-shot bounded parser input and result endpoint mediated by C1	one-shot-only	Reject persistent storage device network secret or process authority	BND-11,BND-12,BND-14
+C3	C0	deny	No direct or mediated runtime path	none	Reject without exposing C0 state or timing-dependent success	BND-02,BND-20
+C3	C1	mediated	Fixed-format syscall fault and capability-checked IPC only	none	Contain malformed or unauthorised requests in the C3 domain	BND-04,BND-09,BND-14
+C3	C2	mediated	Typed bounded service endpoint mediated by C1	rights-reduced	Charge work to the caller and reject non-delegable or excessive authority	BND-10,BND-14,BND-15
+C3	C3	mediated	Typed bounded application endpoint mediated by C1	rights-reduced	Reject endpoint confusion replay queue flood and undeclared handle transfer	BND-04,BND-14,BND-15
+C3	C4	mediated	One-shot disposable worker input and result endpoint mediated by C1	one-shot-only	Reject persistent promotion shared ambient state or broad capability transfer	BND-11,BND-12,BND-14
+C4	C0	deny	No direct or mediated runtime path	none	Reject without exposing C0 state or a callable entry	BND-02,BND-20
+C4	C1	mediated	Fixed-format capability-checked syscall fault or IPC only	none	Contain malformed class-confused or unauthorised requests in C4	BND-03,BND-14,BND-20
+C4	C2	mediated	One-shot capability-checked broker request and result endpoint mediated by C1	none	Reject handle smuggling persistence and requests outside the one-shot schema	BND-11,BND-14,BND-19
+C4	C3	mediated	One-shot capability-checked result channel mediated by C1	none	Reject direct calls promotion authority transfer and retained state	BND-12,BND-13,BND-14
+C4	C4	mediated	Explicit one-shot data-only endpoint mediated by C1	none	Reject authority transfer persistent coordination and budget escape	BND-14,BND-15,BND-19

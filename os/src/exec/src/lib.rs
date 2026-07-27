@@ -15,4 +15,5 @@
 
 pub mod address_space;
 pub mod pe;
+pub mod shared_memory;
 pub mod win32_shim;

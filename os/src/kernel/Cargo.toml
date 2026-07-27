@@ -25,6 +25,31 @@ fixture-broken-boot = []
 # `xtask qemu-x86_64 --fixture=context-switch` and `TEST-P0-02-02-A`, never
 # enabled in a real boot image.
 fixture-context-switch = []
+# Brings up the IDT/local-APIC timer and measures the bounded interval
+# between real ticks — used only by
+# `xtask qemu-x86_64 --fixture=idt-apic-timer` and `TEST-P0-04-02-A`, never
+# enabled in a real boot image.
+fixture-idt-apic-timer = []
+# Brings up the same IDT and deliberately triggers a vector this kernel
+# never routes, proving the fail-closed default handler is actually reached
+# — used only by `xtask qemu-x86_64 --fixture=idt-apic-unrouted` and
+# `TEST-P0-04-02-A`. This fixture's *correct* result is a QEMU
+# isa-debug-exit **Failure** code, mirroring `fixture-broken-boot`'s own
+# established precedent (see `main.rs`'s doc comment on this feature).
+fixture-idt-apic-unrouted = []
+# Replaces the normal boot path with a read-only PCI bus-0 enumeration walk
+# judged against QEMU q35's known device exposure — used only by
+# `xtask qemu-x86_64 --fixture=pci-enumeration` and `TEST-P0-04-03-A`, never
+# enabled in a real boot image.
+fixture-pci-enumeration = []
+# Drives `kernel::mem::Pool` through the same operation shapes the
+# `STORY-P0-03-01`/`PERF-D07` host diagnostic harness (`mem.rs`'s
+# `#[cfg(test)]` module) measures, compiled for the real `x86_64-tinyos`
+# target and run under QEMU, reporting cycle-count evidence over the COM1
+# UART (`hal_x86_64::serial`) — used only by
+# `xtask qemu-x86_64 --fixture=pool-bench`, never enabled in a real boot
+# image.
+fixture-pool-bench = []
 
 [[bin]]
 name = "kernel"

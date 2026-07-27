@@ -5,8 +5,10 @@
 //! page tables. `boot`/`qemu_exit` (moved here from `kernel` by
 //! `STORY-P0-05-02`) are the shared PVH boot-entry glue and QEMU exit-code
 //! reporting every `no_std`/`no_main` binary in this workspace boots
-//! through. Bus enumeration and APIC bring-up land in the rest of
-//! `FEAT-P0-04`.
+//! through. `idt`/`interrupts` (`STORY-P0-04-02`) are the IDT/local-APIC
+//! bring-up; `pci` (`STORY-P0-04-03`) is the read-only configuration-space
+//! bus enumeration recording into [`hal::device::DeviceTable`] —
+//! completing `FEAT-P0-04`'s x86_64 HAL backend.
 //!
 //! `#![no_std]` is suppressed under `cfg(test)` so `cargo test` links the
 //! host's `std` test harness, matching `kernel`'s `lib.rs` split. `boot` and
@@ -20,7 +22,9 @@
 //! code before `STORY-P0-05-02` moved it here, was never buildable via a
 //! bare host `cargo build`/`clippy` on a Windows dev machine either.
 //! `qemu_exit`'s `out`-instruction `asm!` is gated the same way for
-//! consistency, though it has no ELF-specific content of its own.
+//! consistency, though it has no ELF-specific content of its own. `serial`
+//! (`STORY-P0-03-01`'s `fixture-pool-bench` numeric-evidence UART driver) is
+//! gated identically, for the same reason.
 
 #![cfg_attr(not(test), no_std)]
 #![deny(missing_docs)]
@@ -28,6 +32,12 @@
 pub mod acpi;
 #[cfg(not(target_os = "windows"))]
 pub mod boot;
+pub mod idt;
+#[cfg(not(target_os = "windows"))]
+pub mod interrupts;
 pub mod paging;
+pub mod pci;
 #[cfg(not(target_os = "windows"))]
 pub mod qemu_exit;
+#[cfg(not(target_os = "windows"))]
+pub mod serial;

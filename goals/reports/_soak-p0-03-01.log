@@ -1,0 +1,2 @@
+SOAK START: 2026-07-27T00:00:05Z
+2026-07-27T00:01:16Z PASS mem::tests 14/14; QEMU regression sweep 12/12 fixtures correct (default=0,broken-boot=1,context-switch=0,address-space=0,win32-shim=0,blue-sharc=0,blue-sharc-broken=0,shared-memory=0,idt-apic-timer=0,idt-apic-unrouted=1,pci-enumeration=0,pool-bench=0); no anomaly; elapsed_hours=0.02

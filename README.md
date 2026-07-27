@@ -63,6 +63,25 @@ See [`CODING_STANDARDS.md`](agent/CODING_STANDARDS.md) for the full standard, in
 - Full command provenance: every state change is tagged with *who* asked (human shell, script, remote host, or agent), *what* was requested, *what* was actually executed, and *why* the policy engine allowed it.
 - On hardware with a GPU/VRAM and shared CPU/GPU memory, inference work is admission-controlled rather than scheduled on the RT path, and can be split across daisy-chained TinyOS nodes for larger models — see [Heterogeneous Compute & Distributed Inference](docs/inference-architecture.md).
 
+### 6. Sandbox-first security with measurable absence
+
+- [`SECURITY_CHARTER.md`](SECURITY_CHARTER.md) is the governing process-isolation and remote-code exclusion contract: 14 Protection Domain invariants, 14 mandatory code-admission gates, and a complete 25-pair C0–C4 communication matrix are checked by CI.
+- Boot stages, OS updates, TXE executables, future TON libraries, and drivers are signed, content-addressed, origin-labelled, revocation-aware, and anti-rollback checked before execution.
+- Every process gets a private active address space, W^X/NX mappings, guard pages, and an empty initial capability set. Cross-process memory exists only through rights-sized, revocable shared-memory grants.
+- Every remote packet, host frame, download, model output, file, and deploy payload begins as non-executable C4 data. No ingress, parser, debug, compatibility, or deploy path can create executable memory; only the complete `RCG-01..RCG-14` admission chain may produce a fresh C3 process.
+- Files and downloads retain origin, signer, entitlement, quarantine, and derivation labels across rename, copy, extraction, conversion, IPC, and storage. Untrusted bytes never become executable merely because they were downloaded or renamed.
+- Network endpoints, active-content parsers, cookies/tracking state, and drivers are opt-in. An unselected component must contribute zero linked bytes and zero live authority—not an idle attack surface.
+- The threat model includes ransomware, worms, browser/parser attacks, malicious peripherals, and a project-defined **Fable-class** frontier AI adversary capable of long-horizon adaptive exploit campaigns. Provider-side model safeguards are never trusted as the OS boundary.
+- See [`docs/security-spine.md`](docs/security-spine.md), [`goals/security/`](goals/security/), and the mandatory [`goals/assurance/`](goals/assurance/) Story contracts.
+
+### 7. Goals, performance, applications, and security steer together
+
+- [`goals/context/landing-zones.tsv`](goals/context/landing-zones.tsv) keeps each destination's goal IDs, selected portions of the 625-test performance catalogue, concrete application workloads, security controls, containment classes, roadmap horizon, and claim gate in one machine-checked row.
+- The concrete destination set includes the RT/Physical-AI core, Blue Atom and local-LLM pipelines, Wails, Tauri, .NET 10-or-later C#, Node, research-stage Bun, Dangerous Dave, DOOM, Quake II/III, a Chrome-class browser, TinySpot remote UX, TLE, WST, fleet/data-centre workloads, and a browser-hosted TinyOS laboratory.
+- “Native support” has explicit levels. Only the minimal execution/protection substrate is `core-native`; most programs are signed `native-txe` or `managed-aot` C3 applications; large runtimes and browsers are optional compartment systems; Linux compatibility is a guest/personality; the browser build is a lab.
+- C# is coherent with the Security Charter through .NET Native AOT, generated capability-safe bindings, hash-pinned native interop, and an OS Protection Domain. Runtime code emission, arbitrary assembly/native loading, unrestricted P/Invoke, debugger/process access, and cross-process writes remain absent.
+- See [`docs/whole-system-context.md`](docs/whole-system-context.md) for the complete flight plan and [`goals/context/application-platforms.tsv`](goals/context/application-platforms.tsv) for the canonical workload contracts.
+
 ---
 
 ## Deployment Modes
@@ -302,6 +321,8 @@ Each crate under `os/src/` is a member of a single Cargo workspace, per [`agent/
 - [ ] **Phase 7 — Edge bring-up**: Jetson Orin Nano (and successors) port with GPU/NPU-accelerated inference path.
 - [ ] **Phase 8 — Fleet mode**: multiple TinyOS nodes coordinating over CAN/Ethernet with a shared policy and audit plane, including distributed/daisy-chained inference across nodes.
 
+Beyond the numbered MVP path, six **destination horizons** prevent mid-flight architectural lockout without pretending the work is already scheduled: H1 application ABI/graphics/audio/games; H2 Wails/Tauri/.NET/JavaScript runtimes; H3 browser/TinySpot; H4 TLE/WST compatibility; H5 browser-hosted laboratory; H6 edge/data-centre application coordination. They are catalogued in [`goals/epics/backlog.md`](goals/epics/backlog.md) and remain undecomposed until their prerequisites are real.
+
 ---
 
 ## Non-Negotiables
@@ -317,14 +338,23 @@ These are the rules the project will not compromise on, even under schedule pres
 7. **Every feature is test-driven.** Tests are written before the implementation, security- and safety-relevant code gets adversarial tests, and a PR without corresponding tests doesn't merge. See [`CODING_STANDARDS.md`](agent/CODING_STANDARDS.md#test-driven-development-mandatory).
 8. **Performance is a first-class goal, pursued only after 1–3 above hold.** TinyOS aims to extract the maximum throughput and lowest latency the target hardware allows — on constrained edge devices and full-capability laptops alike — but never by weakening safety, security, or correctness guarantees.
 9. **A driver fault never faults the kernel.** Drivers run outside the RT trust boundary, capability-scoped and admission-controlled like any other caller; a crashing driver is contained and restarted, never a path to a kernel panic. See the [Universal Driver Model](docs/universal-driver-model.md).
+10. **Unsigned or origin-ambiguous code never executes.** Verified boot, signed content-addressed executable objects, revocation, quarantine, and anti-rollback checks happen before mapping or promotion.
+11. **Process memory is private; sharing is explicit and revocable.** No ambient process handle, shared address space, or pointer can authorize cross-process access.
+12. **Network, active content, tracking state, and drivers are absent unless opted in.** Absence is proven through link maps and zero registrations/grants/queues/listeners/parser surfaces.
+13. **Frontier AI output is hostile input.** Fable-class campaign tests exercise long-horizon adaptive chaining, retries, races, and parallel probing; capability and resource bounds remain in force.
+14. **Every Feature and Story is bound to performance, security, and containment before implementation.** The 625 performance tests, 20 security controls, five containment classes, and 20 cross-class boundary tests form the assurance spine; functional `Verified` never silently means assurance evidence exists.
+15. **Remote data has no route to executable memory.** Network, HBP, WCI, ACI, shell, model, file, debug, compatibility, and deploy inputs remain non-executable until every code-admission gate passes; inspection is destroyed and admitted code starts as a fresh empty-authority domain. No production fallback, JIT exception, in-place patch, remote process-memory write, or remote trust-root enrollment bypasses this rule.
+16. **One compromised process is not a system takeover.** Private active memory, unforgeable capabilities, charged CPU/resources, mediated IPC, device isolation, immutable system state, and revoke-before-reuse remain enforced even when one C2, C3, or C4 component is fully attacker-controlled. See the [`Security Charter`](SECURITY_CHARTER.md).
+17. **A runtime is never the OS security boundary.** CLR, Go, Node, Bun, V8, JavaScriptCore, WebAssembly, a webview, Chromium, Linux compatibility, and game engines all run inside Protection Domains with OS-enforced authority. Their own permissions are defence in depth.
+18. **Product ambition stays joined across four planes.** Every landing destination names its goals, performance domains, application workloads, and security/containment contracts together. A fast benchmark without its application and invariant, or an application promise without measurable performance and containment, cannot become a release claim.
 
 ---
 
 ## Status
 
-Early design phase. Architecture and roadmap above are the north star; implementation is starting from the kernel skeleton outward. Contributions, critique, and hardware to test on are all welcome once Phase 0 lands.
+Phase-0 implementation is in progress. Functional tests cover the current skeleton, but the assurance dashboard deliberately records performance/security baseline debt until raw timing, frugality, isolation, signing, adversarial, and HIL evidence exists.
 
-New here? If you're a coding agent, start with [`agent.md`](agent.md). If you're a human, start with [`SeedMVP.md`](SeedMVP.md) for the founding intent, then the latest dated handover under [`session/`](session/) — currently [`session/hand-2026-07-26/index.html`](session/hand-2026-07-26/index.html) — for a snapshot of what's decided, what's open, and what to work on next. For traceable, testable work items, see [`goals/`](goals/).
+New here? If you're a coding agent, start with [`agent.md`](agent.md). If you're a human, start with [`SeedMVP.md`](SeedMVP.md) for the founding intent, then the latest dated handover under [`session/`](session/) — currently [`session/hand-2026-07-27/index.html`](session/hand-2026-07-27/index.html) — for a snapshot of what's decided, what's open, and what to work on next. For traceable, testable work items, see [`goals/`](goals/).
 
 ## License
 

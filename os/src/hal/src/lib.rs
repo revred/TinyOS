@@ -2,8 +2,10 @@
 //!
 //! `topology` (`STORY-P0-04-01`) is the first real surface: the shared
 //! output type an ACPI backend (x86_64, `hal-x86_64`) and a future
-//! device-tree backend (ARM64, `EPIC-P7`) both produce. Bus enumeration and
-//! HAL trait definitions beyond that land in the rest of `FEAT-P0-04`.
+//! device-tree backend (ARM64, `EPIC-P7`) both produce. `device`
+//! (`STORY-P0-04-03`) is its bus-enumeration companion: the shared
+//! discovered-device table a PCI configuration-space walk records into.
+//! HAL trait definitions beyond those land in later Phases.
 //!
 //! `#![no_std]` is suppressed under `cfg(test)` so `cargo test` links the
 //! host's `std` test harness, matching `kernel`'s `lib.rs` split — the
@@ -13,4 +15,5 @@
 #![cfg_attr(not(test), no_std)]
 #![deny(missing_docs)]
 
+pub mod device;
 pub mod topology;

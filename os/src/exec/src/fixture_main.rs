@@ -32,6 +32,7 @@ const IMAGE_BASE: u64 = 0x1_4000_0000;
 struct AlignedPages([u8; 8192]);
 
 static IMAGE_BYTES: AlignedPages = AlignedPages([0xAA; 8192]);
+static mut STAGING: AlignedPages = AlignedPages([0; 8192]);
 static mut PML4: PageTable = PageTable::new();
 static mut FRAME_POOL: Pool<PageTable, FRAMES> = Pool::new();
 
@@ -77,6 +78,7 @@ fn run() -> bool {
             &sections,
             IMAGE_BASE,
             &IMAGE_BYTES.0,
+            &mut *&raw mut STAGING.0,
         ) {
             Ok(space) => space,
             Err(_) => return false,
@@ -118,6 +120,7 @@ fn run() -> bool {
                 &overlapping,
                 IMAGE_BASE,
                 &IMAGE_BYTES.0,
+                &mut *&raw mut STAGING.0,
             )
             .err(),
             Some(AddressSpaceError::SectionOverlap)
@@ -145,6 +148,7 @@ fn run() -> bool {
                 &colliding,
                 0,
                 &IMAGE_BYTES.0,
+                &mut *&raw mut STAGING.0,
             )
             .err(),
             Some(AddressSpaceError::KernelRegionCollision)
@@ -165,6 +169,7 @@ fn run() -> bool {
                 &sections,
                 IMAGE_BASE,
                 &IMAGE_BYTES.0,
+                &mut *&raw mut STAGING.0,
             )
             .is_ok()
         };

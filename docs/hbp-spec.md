@@ -1,12 +1,14 @@
 # Host Bridge Protocol (HBP) — Draft Spec
 
-Status: **draft / Phase 4 (not yet implemented)**
+Status: **draft / Phase 4 (not yet implemented); governed by [`SECURITY_CHARTER.md`](../SECURITY_CHARTER.md)**
 
 ## Purpose
 
 HBP is the specified channel between a full-bodied host OS (Windows or Linux) and a co-resident TinyOS instance on the same physical machine. The reference use case is a CNC controller: Windows hosts the operator UI (G-code sender, jog controls, DRO), TinyOS hosts the real-time motion core.
 
 HBP exists so the host OS can act as a caller into TinyOS without ever gaining a privileged path around the Agent Command Interface (ACI) policy engine, and without the real-time core ever depending on the host OS being alive or responsive.
+
+The host OS and bridge service are hostile peers from TinyOS's code-admission perspective. HBP frames are data and commands only: neither a trusted local topology nor transport authentication permits remote process-memory writes, executable mappings, driver loading, raw system calls, or payload dispatch.
 
 ## Deployment topologies
 
@@ -25,6 +27,7 @@ HBP defines two logically independent lanes multiplexed over one transport conne
 - Carries: motion commands, configuration changes, mode switches, agent-equivalent requests from host-side software.
 - Every command is evaluated by the ACI policy engine exactly as if it came from the local shell or an LLM agent. There is no bypass path for host-originated commands.
 - Each command frame requires an acknowledgment frame (accepted / denied / deferred) carrying the same provenance fields the ACI audit log uses elsewhere: caller identity, requested action, decision, reason.
+- No command schema carries “execute these bytes,” “patch this process,” “make this page executable,” “load this driver,” or “change this trust root.” Deployment, if selected, transfers an immutable quarantined object to the separate deploy admission flow; HBP never activates it.
 
 ### Telemetry lane (TinyOS → host)
 
@@ -37,6 +40,7 @@ HBP defines two logically independent lanes multiplexed over one transport conne
 - Fixed-size binary frames. No dynamic allocation on the TinyOS side during encode/decode — parsing must stay O(1) and allocation-free so it cannot threaten scheduler deadline guarantees.
 - Frame header: protocol version, lane id, sequence number, payload length, checksum.
 - Exact field layout, versioning/negotiation handshake, and payload schemas per command type are TBD — to be finalized alongside the Phase 4 host bridge service implementation.
+- Frame decoding runs in bounded C2/C4 processing and produces fixed internal messages. No variable-length or host-controlled parser enters C1.
 
 ## Failure semantics
 
@@ -53,7 +57,7 @@ A thin host bridge service (Windows and Linux variants, per Roadmap Phase 4) own
 - Frame layout and versioning/negotiation handshake.
 - Authentication/identity model for the host-side caller within the ACI capability registry (is "Windows host" one fixed capability principal, or does the bridge service pass through the identity of the host application?).
 - Exact heartbeat interval and hold-state re-entry conditions (does the operator have to explicitly re-arm after a host-silence hold, or does it auto-resume on reconnect?).
-- Loopback TCP/UDP dev-mode transport: security posture if ever exposed beyond localhost (should be explicitly disallowed).
+- Loopback TCP/UDP dev-mode transport is development-only, binds loopback exclusively, carries no real credentials or production authority, and is absent from production images. Exposure beyond loopback is prohibited rather than an open policy question.
 
 ## Status
 

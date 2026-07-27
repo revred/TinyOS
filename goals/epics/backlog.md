@@ -1,26 +1,42 @@
-# Epic Backlog — EPIC-P1 through EPIC-P8
+# Epic Backlog — Numbered Roadmap and Destination Horizons
 
-Status: **Planned, not yet decomposed**
+Status: **`EPIC-P1` decomposed (2026-07-27); the rest planned, not yet decomposed**
 
-These Epics exist so the full Roadmap has a placeholder in the V&V model, but none are decomposed into Features/Stories yet — per the [goals dashboard](../index.html#jit-decomposition), decomposition happens when work on an Epic is about to start. Each row below is a direct restatement of [`SeedMVP.md`](../../SeedMVP.md#10-roadmap-alignment) Section 10's Roadmap Alignment table — this file does not add new information, it gives each phase an Epic ID so it can be referenced from Stories/Tests once decomposition begins.
+The numbered Epics preserve the MVP delivery path. Destination-horizon Epics record where the platform must eventually land so today's ABI, IPC, scheduling, memory, graphics, network, runtime, and security decisions do not steer into a dead end. Per the [goals dashboard](../index.html#jit-decomposition), decomposition happens only when prerequisites and ownership are ready — `EPIC-P1` met that bar when `EPIC-P0` reached functionally complete (all 25 Stories Verified) and was promoted to [`EPIC-P1.md`](EPIC-P1.md); the remaining rows stay here.
 
 | Epic | Roadmap phase | Goals to verify | Hardware | Depends on |
 |---|---|---|---|---|
-| `EPIC-P1` | Phase 1 — Determinism proof | G-RT-1, G-RT-3, G-PA-1 | Both MVP boards | `EPIC-P0` |
-| `EPIC-P1_5` | Phase 1.5 — Deploy tooling | G-RC-6, G-DX-3 | Both MVP boards | `EPIC-P0` |
-| `EPIC-P2` | Phase 2 — Shell & UX | G-RT-5, G-RT-6 | Both MVP boards | `EPIC-P0` |
-| `EPIC-P3` | Phase 3 — Connectivity | G-HW-2, G-PA-4 | Both MVP boards + peripheral hardware | `EPIC-P0`, `EPIC-P2` |
-| `EPIC-P4` | Phase 4 — Host bridge | G-RC-1, G-RC-2 | x86_64 mini-PC | `EPIC-P0` |
-| `EPIC-P5` | Phase 5 — Agent Command Interface | G-AI-2 – G-AI-5, G-RC-2, G-RC-3 | Both MVP boards | `EPIC-P4` |
-| `EPIC-P6` | Phase 6 — LLM integration | G-AI-1, G-AI-2, G-AI-3 | Jetson Orin Nano Super | `EPIC-P5` |
-| `EPIC-P6B` | Phase 6b — Heterogeneous compute | G-AI-6, G-HW-6 | Jetson Orin Nano Super | `EPIC-P6` |
-| `EPIC-P7` | Phase 7 — Edge bring-up | G-HW-1 – G-HW-5 | Jetson Orin Nano Super | `EPIC-P0`, `EPIC-P6B` |
-| `EPIC-P8` | Phase 8 — Fleet mode | G-RC-4, G-AI-7 | Multiple units of both MVP board types | `EPIC-P4`, `EPIC-P5` |
+| [`EPIC-P1`](EPIC-P1.md) — **decomposed** | Phase 1 — Determinism proof | G-RT-1, G-RT-3, G-PA-1; G-SEC-2, -8, -12 – -15 | Both MVP boards (Tier 0 until purchased — named debt) | `EPIC-P0` |
+| `EPIC-P1_5` | Phase 1.5 — Deploy tooling | G-RC-6, G-DX-3; G-SEC-1, -8, -10 | Both MVP boards | `EPIC-P0` |
+| `EPIC-P2` | Phase 2 — Shell & UX | G-RT-5, G-RT-6; G-SEC-5, -7 | Both MVP boards | `EPIC-P0` |
+| `EPIC-P3` | Phase 3 — Connectivity | G-HW-2, G-PA-4; G-SEC-5 – -9, -12 | Both MVP boards + peripheral hardware | `EPIC-P0`, `EPIC-P2` |
+| `EPIC-P4` | Phase 4 — Host bridge | G-RC-1, G-RC-2; G-SEC-6, -10 | x86_64 mini-PC | `EPIC-P0` |
+| `EPIC-P5` | Phase 5 — Agent Command Interface | G-AI-2 – G-AI-5, G-RC-2, G-RC-3; G-SEC-1 – -13 | Both MVP boards | `EPIC-P4` |
+| `EPIC-P6` | Phase 6 — LLM integration | G-AI-1, G-AI-2, G-AI-3; G-SEC-4, -10 – -12 | Jetson Orin Nano Super | `EPIC-P5` |
+| `EPIC-P6B` | Phase 6b — Heterogeneous compute | G-AI-6, G-HW-6; G-SEC-2, -9, -12 | Jetson Orin Nano Super | `EPIC-P6` |
+| `EPIC-P7` | Phase 7 — Edge bring-up | G-HW-1 – G-HW-5; G-SEC-9 | Jetson Orin Nano Super | `EPIC-P0`, `EPIC-P6B` |
+| `EPIC-P8` | Phase 8 — Fleet mode | G-RC-4, G-AI-7; G-SEC-6, -8, -10 – -12 | Multiple units of both MVP board types | `EPIC-P4`, `EPIC-P5` |
+
+## Destination horizons
+
+Horizon IDs are not inserted into the numbered critical path and do not imply sequence, staffing, or current support. Their application/performance/security joins are canonical in [`../context/landing-zones.tsv`](../context/landing-zones.tsv).
+
+| Epic | Destination | Goals to verify | Proving applications | Depends on |
+|---|---|---|---|---|
+| `EPIC-H1` | Application ABI, graphics, audio, input and game proving path | G-APP-1, G-APP-5, G-APP-11 | Dangerous Dave, DOOM, Quake II, Quake III | `EPIC-P0`, `EPIC-P2`, `EPIC-P3`, `EPIC-P5` |
+| `EPIC-H2` | Wails, Tauri, .NET AOT, Node and research Bun runtime profiles | G-APP-2, G-APP-3, G-APP-4 | Wails, Tauri, .NET 10+, Node, Bun | `EPIC-H1`, `EPIC-P5` |
+| `EPIC-H3` | Chrome-class browser and TinySpot remote UX | G-APP-6, G-APP-9 | Chromium/Chrome-class browser, TinySpot | `EPIC-H1`, `EPIC-H2`, `EPIC-P3`, `EPIC-P4` |
+| `EPIC-H4` | TLE and WST compatibility/coexistence | G-APP-7, G-APP-8 | TinyOS Linux Environment, Windows TinyOS Tools | `EPIC-P4`, `EPIC-P5`, `EPIC-H1` |
+| `EPIC-H5` | Browser-hosted TinyOS laboratory | G-APP-10 | WebAssembly semantic build and browser emulator | `EPIC-P0`, `EPIC-P2` |
+| `EPIC-H6` | Edge and data-centre application coordination | G-APP-12, G-AI-7, G-RC-4 | Fleet inference and server-farm workloads | `EPIC-P6B`, `EPIC-P8` |
 
 **Notes from 2026-07-26's strategic objectives** (not yet decomposed, recorded here so they aren't lost before either Epic is picked up):
 
 - **`EPIC-P3` (Connectivity)** is where a real, network-facing TCP/IP stack belongs, once decomposed — layered above `G-HW-2`'s network-class-driver goal (a NIC class driver is the device-driver half; the protocol stack is a separate Feature above it). Explicitly **not** part of `EPIC-P0`'s `FEAT-P0-07` (local IPC), which is scoped to same-machine shared memory/message channels only — see `FEAT-P0-07.md`'s own scope-boundary note for why the two are kept apart.
 - **`EPIC-P1_5` (Deploy tooling)** is where the sibling `Sharc.Blue` project's `blue.atom`/`blue-sharc.exe` tooling fits as prior art for speeding up TinyOS's own development/deployment onto devices like a Raspberry Pi 5 — per a 2026-07-26 strategic objective. `Sharc.Blue` itself has no existing Raspberry Pi/ARM64 cross-compile or deployment pipeline to import wholesale (checked directly against that repo); what's reusable is the *pattern* (a small, fast, single-binary CLI/atom-catalog front end driving build/deploy actions), not a ready-made tool. Raspberry Pi 5 is already named in `README.md`'s Target Hardware & Test Matrix as a Tier 1 ARM64 portability board, deferred to "Phase 3 onward" — worth reconciling that existing placement against this objective's urgency when `EPIC-P1_5` is actually decomposed, rather than assuming they're already aligned.
+
+- **`EPIC-P5` (Agent Command Interface)** is where a TXE's real trust/isolation model belongs, once decomposed — per a 2026-07-26 direction from the user: every TXE (`STORY-P0-05-04`/`FEAT-P0-08`'s native, page-aligned executable container) should eventually be security-scanned and cryptographically stamped before it's trusted to run, and executed inside a native, per-TXE sandbox with an assigned access level — wipeable cleanly like a VM snapshot, but implemented with low-level, low-overhead resource access so it doesn't compromise the RT core's latency/determinism guarantees. The real boot path now installs an IDT and arms the local-APIC timer, but domain-aware `#PF`/`#GP` handling, active per-task CR3, teardown and the real `aci` capability/policy engine still do not exist. Recorded here so the vision isn't lost before `EPIC-P5` is decomposed, not implemented now. **Naming convention** (same 2026-07-26 direction): if a native executable container is `.txe`, a native shared-library container should be `.ton` — TinyOS has no dynamic-library loader at all today (`win32_shim.rs` only resolves imports against its own built-in call table, never loads an actual `.dll`/`.so`), so this is a name reserved for whenever that capability is actually built, not a format defined today.
+- **Security is not deferred to `EPIC-P5`.** The policy engine lands there, but every earlier Epic inherits the relevant controls in [`../security/controls.tsv`](../security/controls.tsv) through the mandatory assurance spine. `EPIC-P3` must have no default ports/listeners and must isolate network namespaces; `EPIC-P2` must quarantine downloads and sandbox active content; `EPIC-P7` must prove unselected drivers have zero linked/live surface; executable signing, active address spaces, IOMMU enforcement, immutable system/update recovery, origin/entitlement labels, and Fable-class campaign testing are release prerequisites in their owning phases. See [`../../docs/security-spine.md`](../../docs/security-spine.md).
 
 The **5-axis CNC flagship milestone** (G-PA-8) is not a single row here — per `SeedMVP.md` Section 10, it's a cross-cutting integration checkpoint spanning `EPIC-P0` through `EPIC-P3` (scheduler, shell/G-code front-end, and connectivity all have to land first). When `motion` (see `docs/mvp-delivery-strategy.md`) reaches the point of active development, it should get its own Feature under whichever Epic is current at that time, cross-referencing all of `EPIC-P0`–`EPIC-P3`, rather than being forced into a single Epic it doesn't cleanly belong to.
 

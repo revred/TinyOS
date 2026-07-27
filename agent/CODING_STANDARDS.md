@@ -23,6 +23,8 @@ TinyOS is written primarily in **Rust**. Rust is the default for every new crate
 
 Assembly and C footprint should trend toward zero as the HAL matures and as pure-Rust replacements (or safe wrappers) become available.
 
+This policy governs TinyOS itself, not the languages admitted C3 applications may use. Go/Wails, .NET C#, JavaScript/Node/Bun, game source ports, and compatibility guests are separately packaged application/runtime targets under [`goals/context/application-platforms.tsv`](../goals/context/application-platforms.tsv). Supporting a language does not move its runtime into C1, grant it `unsafe`, or exempt it from the Security Charter.
+
 ## `no_std` vs `std`
 
 - **Kernel, HAL, drivers, ACI, shell:** `#![no_std]`. No implicit heap; allocation, if any, goes through the kernel's own static/pool allocators, never the global allocator of a hosted OS.
@@ -83,11 +85,11 @@ This is where TinyOS's coding standard diverges hardest from general Rust practi
 
 ## Total OS image size ceiling (hard limit, no exceptions)
 
-**The built OS image — kernel, HAL, scheduler, memory allocator, ACI, shell, and every other non-driver component — fits within 8MB, excluding drivers.** Per `G-DX-8` in `SeedMVP.md` §3.6. Drivers are isolated, separately-loaded components per the [Universal Driver Model](../docs/universal-driver-model.md) and scale with the hardware catalog, not with the OS core, so they're excluded from this ceiling the same way tests are excluded from the crate-size ceiling below — but nothing non-driver gets a similar exemption.
+**The base OS image — verified boot handoff, kernel, HAL, scheduler, memory allocator, capability/ACI core, shell, configuration and mandatory recovery path — fits within 8MB.** Per `G-DX-8` in `SeedMVP.md` §3.6. Drivers and signed application/runtime bundles are separately loaded, separately measured profile components. A component required to boot, authorize, contain, audit, update or recover the system may not relabel itself as an “application” to escape this ceiling.
 
 - **Rationale.** This is a security property, not just a size preference: a small, auditable trusted computing base is what makes "low attack surface by design" (the standing design goal behind, among other things, `FEAT-P0-05`'s PE executable loader) a checkable fact instead of an assertion. A component that can't justify its footprint against this ceiling is a component whose necessity hasn't been proven yet.
 - **Measurement.** CI computes the built image's total size (mirroring the crate-size ceiling's `tokei`-based measurement approach) on every PR and fails the build if the non-driver image crosses 8MB.
-- **No size-based exception process**, matching the crate-size ceiling's own policy — the correct response to approaching the limit is to cut scope or move a component behind the driver boundary (if it genuinely fits that model), never to request a waiver.
+- **No size-based exception process**, matching the crate-size ceiling's own policy — the correct response to approaching the limit is to cut scope or move genuinely optional hardware/application behavior into a signed, removable bundle with its own performance and security contracts, never to request a waiver. A deployment report also records the total footprint of every selected bundle; excluding an application from the base-image ceiling does not make its memory, storage, startup or attack surface free.
 
 ## SOLID principles — Rust-adapted, never compromised
 
@@ -145,6 +147,61 @@ Every feature in TinyOS — kernel, driver, ACI capability, shell command, deplo
 - **Timing-sensitive code** additionally requires a benchmark/regression entry under `/tests/` per Roadmap Phase 1 — a functional pass with a timing regression is a CI failure, exactly like a functional test failure.
 - **Hardware-in-the-loop (HIL) and QEMU-based integration tests** live under `/tests/`, mirroring the [Target Hardware & Test Matrix](README.md#target-hardware--test-matrix) tiers — every driver targets at minimum a Tier 0 (QEMU/Renode) test before a Tier 1/2 hardware test is required.
 - CI enforces this at the process level: a PR that changes implementation without a corresponding test change is flagged for review rather than silently merged.
+
+## Assurance spine (mandatory)
+
+Performance, security, and containment are part of design and implementation, not suites attached afterward. Before a Feature is decomposed, it has exactly one row in [`goals/assurance/feature-contracts.tsv`](../goals/assurance/feature-contracts.tsv) declaring:
+
+- `implementation_classes` and `subject_classes` from canonical `C0..C4`;
+- an authority posture that does not derive privilege from class;
+- every hostile input the Feature accepts;
+- its selected `BND-*` adversarial tests and required boundary evidence.
+
+Before a Story enters `In Progress`, it has exactly one row in [`goals/assurance/story-contracts.tsv`](../goals/assurance/story-contracts.tsv):
+
+- `performance_domains` selects one or more of the 25 domains in [`goals/performance/catalogue.tsv`](../goals/performance/catalogue.tsv); each selected domain brings all 25 guardrails into scope;
+- `security_controls` selects the relevant release invariants from [`goals/security/controls.tsv`](../goals/security/controls.tsv);
+- `containment_classes` selects the applicable class boundaries and must stay within the parent Feature contract;
+- `state` distinguishes planned contracts, inherited `baseline-debt`, and evidence-backed assurance `verified`.
+
+Every Test document repeats the exact mapped performance domains, security controls, containment classes, Feature boundary tests, and assurance state. CI compares those fields with the catalogues so a changed design cannot leave a stale test specification behind.
+
+The workflow is Define Feature boundary → Define Story contract → Red → Green → Measure → Claim → Release. Functional Green may earn a Story its functional `Verified` status, but it does not imply that latency tails, WCET, cycles, allocations, memory footprint, isolation, hostile-load safety, signing, or adversarial controls passed. A dated Report with raw evidence closes those gates.
+
+`cargo run -p xtask -- check-assurance-spine` is a blocking CI gate. It rejects an unmapped Feature or Story, stale Test metadata, unknown performance/security/class/boundary IDs, an incomplete five-class/20-boundary-test/20-control catalogue, or a broken 625-cell performance catalogue. No `N/A` or waiver silently removes a release gate; an unavailable subsystem or hardware tier remains explicit release-blocking debt until the owning work exists.
+
+Containment class, capability authority, scheduling criticality, and provenance are separate fields. C1 parses no complex hostile format; C2 services and drivers are assumed compromisable; C3 launches empty and receives only the manifest/policy intersection; C4 is zero-authority and may become C3 only by destroy/verify/recreate. Code review rejects an implementation that collapses those distinctions even if its functional tests pass.
+
+For unselected features and drivers, absence is tested, not inferred: zero linked bytes, interrupts, DMA/MMIO grants, capabilities, queues, worker tasks, listeners, and reachable parser entry points.
+
+## Security charter (mandatory)
+
+[`SECURITY_CHARTER.md`](../SECURITY_CHARTER.md) governs every process boundary and every possible data-to-code transition. Its machine-readable catalogues are part of `check-assurance-spine`:
+
+- `PD-01..PD-14` define private memory, kernel-derived identity, empty authority, executable sealing, bounded IPC, explicit sharing, temporal/resource isolation, caller-funded broker work, device isolation, provenance, faults, teardown, and ambient-namespace exclusion.
+- `RCG-01..RCG-14` define the only permitted path from hostile bytes to a fresh executable domain.
+- `class-communication-matrix.tsv` defines all 25 ordered C0–C4 paths. No undocumented class transition or communication path exists.
+
+External bytes remain non-executable C4 data. Network, HBP, WCI, ACI, shell, model, file, debug, compatibility, and deploy code may stage or transform data but may not map, patch, register, jump to, or activate it. Only the admitted-object loader may request an immutable executable mapping, after every code-admission gate passes. Production profiles expose no general W→X/X→W transition, writable executable alias, JIT exception, remote process-memory write, in-place promotion, or remote trust-root enrollment.
+
+A change touching executable mapping, process launch, signature/provenance validation, domain identity, capabilities, IPC/shared memory, scheduling budgets, device grants, fault routing, or task teardown must name the applicable `PD-*`/`RCG-*`, `SEC-*`, and `BND-*` contracts in its Test and Report. The existing Story/Feature join supplies the `SEC-*`/`BND-*` linkage; the assurance checker rejects a charter catalogue that does not cover all canonical controls and boundary tests.
+
+“Iron clad,” “prevents takeover,” or equivalent wording is never accepted as evidence by itself. Until active runtime boundaries and dated adversarial Reports exist, the state remains `baseline-debt`.
+
+## Whole-system context (mandatory)
+
+[`docs/whole-system-context.md`](../docs/whole-system-context.md) and the machine-readable [`goals/context/`](../goals/context/) catalogues keep destination goals, performance domains, concrete applications, security controls, containment classes, roadmap horizons, and claim gates joined.
+
+Before adding or materially changing a runtime, framework, game, browser, remote UX path, compatibility surface, network role, inference pipeline, or fleet workload:
+
+- update its `APP-*` row or add the future row through the catalogue's controlled count/version change;
+- update the owning `LZ-*` row with the same goal/performance/security/class impact;
+- state whether support is `core-native`, `native-txe`, `managed-aot`, `isolated-runtime`, `compatibility-guest`, or `browser-hosted`;
+- ensure every selected performance domain brings all 25 guardrails into evidence scope;
+- prove unselected profiles contribute zero linked bytes and zero live registrations, tasks, queues, capabilities, listeners, IRQs, DMA/MMIO grants, parsers, or secrets;
+- keep runtime permissions, managed memory safety, framework ACLs and WebAssembly/browser sandboxing as defence in depth rather than substitutes for a TinyOS Protection Domain.
+
+Application performance is end-to-end and security-equivalent. A tokens-per-second, frame-time, IPC, network, startup, memory, or footprint result obtained by enabling ambient file/network/process access, in-place JIT, shared mutable address spaces, unbounded queues, missing provenance, disabled audit, or weaker fault behavior is invalid.
 
 ## Tooling
 

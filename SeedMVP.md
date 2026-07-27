@@ -23,6 +23,9 @@ Everything else in the repository — [`README.md`](README.md), [`agent/CODING_S
    - 3.4 Real-Time Platform Goals
    - 3.5 Universal Hardware Support Goals
    - 3.6 Developer Experience & Governance Goals
+   - 3.7 Process & Executable Compatibility Goals
+   - 3.8 Security & Adversarial Resilience Goals
+   - 3.9 Application, UX & Compatibility Goals
 4. Full Configuration & Setup Exploration
    - 4.1 Deployment Mode Matrix (expanded)
    - 4.2 Hardware Configuration Catalog
@@ -73,7 +76,7 @@ This document exists to make that bet legible: what exactly is being attempted (
 
 ## 3. Goal Taxonomy
 
-Six goal categories cover everything TinyOS is meant to achieve. Each is stated as a set of concrete, falsifiable goals — not aspirations — because a goal that can't be checked against isn't a goal, it's a mood.
+Nine goal categories cover everything TinyOS is meant to achieve. Each is stated as a set of concrete, falsifiable goals — not aspirations — because a goal that can't be checked against isn't a goal, it's a mood.
 
 ### 3.1 Physical AI Goals
 
@@ -100,6 +103,8 @@ Six goal categories cover everything TinyOS is meant to achieve. Each is stated 
 - **G-AI-6: Heterogeneous compute utilization.** Where GPU/VRAM/unified-memory hardware is present, inference workloads use it, admission-controlled per [`docs/inference-architecture.md`](docs/inference-architecture.md), without ever contending with CPU real-time guarantees.
 - **G-AI-7: Distributed inference across daisy-chained nodes.** For models too large for one device, TinyOS nodes can split inference work across a coordinator/worker chain, per the same document, reusing HBP/WCI-style transports rather than inventing a new unauthenticated compute protocol.
 - **G-AI-8: Inference degrades, it never hangs a control loop.** A stalled, failed, or resource-starved inference request returns an error through the ACI in bounded time; it is structurally incapable of blocking an RT task on any node in the system.
+- **G-AI-9: Quality-adjusted token velocity.** TinyOS measures time to first token, prefill and decode throughput, prompt-to-complete latency, output quality, energy, thermal state, memory bandwidth, and RT interference together. “Highest tokens per second” or “equivalent quality in one-tenth the time” is permitted only for a fixed model, weights, quantisation, context, sampler, quality floor, hardware, power state, security profile, and published raw evidence.
+- **G-AI-10: Blue Atom acceleration is attributable.** `blue.atom`/`blue-sharc.exe` context, caching, distribution, and tool-dispatch work may reduce end-to-end inference time, but it is not misrepresented as a model runtime. Reports separate context preparation, cache effects, TTFT, prefill, decode, quality, and tool latency so the source of an improvement remains knowable.
 
 ### 3.3 Remote Control Goals
 
@@ -137,8 +142,8 @@ Six goal categories cover everything TinyOS is meant to achieve. Each is stated 
 - **G-DX-4: A strict, never-relaxed priority ordering** for every design and code trade-off: safety, then security, then correctness, then performance.
 - **G-DX-5: Bounded crate size** — no crate exceeds 20,000 lines of code excluding tests, enforced by CI, so the codebase never accumulates an incomprehensible monolith.
 - **G-DX-6: Strict, reviewer-enforced SOLID principles**, adapted to idiomatic Rust, treated as blocking on every PR — detailed in full in [Section 9](#9-codebase-governance--crate-size-and-solid-principles).
-- **G-DX-7: Performance as a genuine, measured goal**, pursued only once G-DX-2 through G-DX-4 hold, with the explicit intent of extracting the maximum throughput and lowest latency the target hardware allows.
-- **G-DX-8: Bounded total OS image size.** The built TinyOS image — kernel, HAL, scheduler, memory allocator, ACI, shell, and every other non-driver component — fits within **8MB**, excluding drivers (which are isolated, separately-loaded components per the [Universal Driver Model](docs/universal-driver-model.md) and scale with the hardware catalog, not with the OS core). Enforced by CI the same way `G-DX-5`'s crate-size ceiling is: an automated size check, not a claim taken on faith. Directly serves `G-PC-3` below — a small, auditable trusted computing base is what makes "low attack surface by design" a checkable property instead of an assertion.
+- **G-DX-7: Performance as a genuine, measured goal and implementation spine**, pursued only once G-DX-2 through G-DX-4 hold. Every Story selects domains from the 625-test performance catalogue before implementation, and its Reports retain the relevant latency, cycle, memory, allocation, queue, footprint, isolation, fault, and observability evidence. Performance is not a later optimization pass.
+- **G-DX-8: Bounded base OS image and measured bundles.** The TinyOS base image — verified handoff, kernel, HAL, scheduler, memory allocator, capability/ACI core, shell, configuration and recovery path — fits within **8MB**. Drivers and signed application/runtime bundles are separately loaded and separately measured; a component required to boot, authorize, contain, audit, update or recover cannot relabel itself as an application to escape the ceiling. Every deployment Report also records the total footprint of all selected bundles. Enforced by CI as a measured property, not taken on faith. Directly serves `G-PC-3` below — a small, auditable trusted computing base is what makes "low attack surface by design" checkable while still allowing optional Chrome-class, language-runtime, game, compatibility and GPU profiles to exist outside it.
 
 ### 3.7 Process & Executable Compatibility Goals
 
@@ -148,6 +153,43 @@ Directed by the project (2026-07-26 session): TinyOS must be able to load and ru
 - **G-PC-2: Minimal, explicitly-enumerated compatibility surface.** The set of Windows API calls a loaded executable can invoke is a small, explicitly-enumerated allowlist sized to what the validation case (`blue-sharc.exe`, an Ollama-like inference runtime: process/thread basics, file/mmap access, heap allocation, console I/O) actually calls — never a general `kernel32`/`ntdll` reimplementation. An import a loaded executable makes that isn't on the allowlist is a load-time rejection (fail closed), not a best-effort stub.
 - **G-PC-3: No privileged bypass for a loaded executable.** Every emulated API call a loaded executable makes is mediated by the exact same ACI capability model that governs every other caller (HBP, WCI, the local shell, an LLM agent) — restated from Non-Negotiable #2 because "it's just running a program" is exactly the framing under which a privileged bypass would otherwise seem harmless. A loaded executable's file/memory/process access is capability-scoped like a driver's (`G-HW-1`), never granted ambient kernel authority.
 - **G-PC-4: Small, auditable trusted computing base for the loader itself.** The PE loader and API-translation layer are held to the same crate-size ceiling (`G-DX-5`) and SOLID review (`G-DX-6`) as every other component, and are explicitly in scope for the adversarial/fuzz testing `G-DX-2` requires for security-relevant subsystems — a PE header, section table, and import table are all untrusted, externally-supplied input from the kernel's own trust-boundary perspective, exactly like the ACPI tables `G-HW-4`'s parser already treats as untrusted.
+
+### 3.8 Security & Adversarial Resilience Goals
+
+The governing security contract is [`SECURITY_CHARTER.md`](SECURITY_CHARTER.md), expanded by [`docs/security-spine.md`](docs/security-spine.md) and made machine-readable by [`goals/security/`](goals/security/). These goals deliberately reject ambient-authority assumptions common to general-purpose operating systems.
+
+- **G-SEC-1: Authentic code only.** Every boot stage, OS update, TXE executable, future TON library, and driver is content-addressed, signed, origin-labelled, revocation-aware, and anti-rollback checked before it can become executable.
+- **G-SEC-2: Process memory is private by construction.** Active per-process address spaces, W^X/NX, guard pages, generation-safe teardown, and complete context switching prevent one process from reading, writing, executing, or remapping another process's memory.
+- **G-SEC-3: Sharing is an explicit revocable object.** Cross-process memory exists only through typed, rights-sized, participant-bound grants with deterministic revocation; knowing an address or task ID grants nothing.
+- **G-SEC-4: Sandbox first, empty authority first.** Every executable, parser, driver, browser-like component, and agent begins in a disposable sandbox with no ambient capabilities. Its signed manifest requests authority; policy may grant only a subset.
+- **G-SEC-5: Origin and entitlement survive every transformation.** Files and messages retain immutable origin, signer, trust, entitlement, quarantine, and derivation labels across rename, copy, extraction, conversion, compilation, IPC, and storage.
+- **G-SEC-6: Network access is least-authority and absent by default.** No default listener exists. Bind, listen, connect, route, raw-frame, name-service, and administrative rights are separate endpoint capabilities inside per-task network namespaces.
+- **G-SEC-7: Active content and tracking are optional, isolated, and partitioned.** Downloads begin non-executable in quarantine; complex parsers run in disposable resource-bounded sandboxes; cookies and equivalent identifiers are opt-in, origin-partitioned, inspectable, bounded, and expiring.
+- **G-SEC-8: Ransomware and worms cannot gain durable ambient reach.** The running system image is immutable, updates are signed and atomic, autorun is absent, abnormal bulk writes and propagation are bounded and attributable, and storage recovery uses known-good snapshots where configured.
+- **G-SEC-9: Drivers are opt-in and device-isolated.** An unselected driver contributes zero bytes and zero live authority. A selected driver is signed, isolated outside the kernel, and limited to explicit DMA, IRQ, and MMIO grants enforced by the IOMMU or a safe bounce-buffer fallback.
+- **G-SEC-10: One policy and provenance path governs every caller.** Human, AI, executable, driver, network, shell, and deploy actions pass through the same ACI decision model and leave ordered, tamper-evident spoors; secrets remain purpose-bound and non-exportable.
+- **G-SEC-11: Fable-class AI attacks are a release adversary.** TinyOS treats frontier model output as hostile input and withstands long-horizon, autonomous, adaptive, multi-stage, parallel exploit campaigns through capability/action/rate budgets, observability, revocation, and a deterministic kill path. “Fable-class” is a TinyOS-defined adversary class, not an external certification.
+- **G-SEC-12: Exhaustion is contained.** Every queue, parser, allocator, retry loop, sandbox, model action stream, and network path has declared CPU, memory, time, depth, and rate bounds with priority-safe RT reserves and bounded recovery.
+- **G-SEC-13: Five containment classes are enforced independently of authority and priority.** C0 Root of Trust, C1 Trusted Kernel Core, C2 Isolated System Services, C3 Sandboxed Applications, and C4 Hostile Transient Domains have explicit launch, input, failure, teardown, evidence, and communication contracts. Class never grants a capability or scheduling priority; complex hostile formats never enter C1; C2 drivers are assumed compromisable; C4 cannot promote in place; and every Feature and Story declares its applicable classes before implementation.
+- **G-SEC-14: Remote-origin bytes have exactly one path to execution.** Network, HBP, WCI, ACI, shell, model, file, debug, compatibility, and deploy inputs are non-executable C4 data. Only the complete machine-checked `RCG-01..RCG-14` chain may produce sealed executable mappings in a fresh C3 domain; no production fallback, writable-to-executable transition, JIT exception, in-place patch, or remote trust-root enrollment exists.
+- **G-SEC-15: One compromised process is insufficient for system takeover.** Private active memory, kernel-owned capability spaces, caller-funded CPU and broker work, finite quotas, mediated IPC, IOMMU/device grants, immutable system state, contained faults, and revoke-before-reuse remain enforced even when one C2, C3, or C4 component is fully attacker-controlled.
+
+### 3.9 Application, UX & Compatibility Goals
+
+The concrete destinations and their goal/performance/security join live in [`goals/context/`](goals/context/). These goals define what “application support” means without moving runtimes into the kernel or weakening the Security Charter.
+
+- **G-APP-1: Stable native application ABI and SDK.** Rust-first applications compile to the versioned TinyOS ABI, package as signed TXE/TON objects, and use generated capability-safe APIs for IPC, storage, network, graphics, audio, input, time, configuration, secrets, inference, and physical control.
+- **G-APP-2: Wails and Tauri are first-class UX lanes.** Wails Go backends and Tauri Rust backends run as C3 applications; local webviews receive only signed-manifest commands, and any remote origin is moved to a separate C4 renderer with no local application authority.
+- **G-APP-3: .NET 10-or-later C# support is AOT-first.** Production C# applications prefer self-contained Native AOT, use generated TinyOS bindings, and cannot use runtime code emission, arbitrary assembly loading, unrestricted P/Invoke, name-only native loading, COM/DCOM, remoting, debugger process access, or cross-process memory writes.
+- **G-APP-4: JavaScript runtime support is OS-sandboxed.** Node current-LTS and, after research, Bun run in dedicated C3 domains. Runtime permission flags are defence in depth; native addons, FFI, inspectors, child processes, workers, WASI, lifecycle scripts, shell execution, and generated code are individually absent or brokered according to the signed profile.
+- **G-APP-5: Games prove the interactive platform.** Dangerous Dave, DOOM, Quake II, and Quake III form an escalating source-port/conformance sequence for graphics, frame pacing, input, audio, storage, TCP/UDP, multiplayer, hostile assets, malicious servers, and application-fault containment.
+- **G-APP-6: Chrome-class browsing is compartmentalised and optional.** A browser controller, per-site hostile renderers, and network/GPU/storage/media/secret brokers occupy separate Protection Domains. A profile without the browser links none of its code, parsers, codecs, JIT, extensions, listeners, or state.
+- **G-APP-7: TinyOS Linux Environment without ambient Linux authority.** TLE progresses from POSIX-familiar tools through source compatibility to selected ABI translation or a lightweight guest only where justified. It has private storage, network, process, and device namespaces and is not presented as “WSL2 inside TinyOS.”
+- **G-APP-8: Windows TinyOS Tools make co-residency seamless.** WST connects a simultaneously-running Windows host to TinyOS over HBP shared memory, virtio/vsock, or Hyper-V sockets and exposes typed telemetry, deploy, IDE, file-object, and application bridges without ambient drive mounts, process handles, port forwarding, or TinyOS memory access.
+- **G-APP-9: TinySpot remote UX.** Remote desktop, telemetry, input, audio, clipboard, file transfer, administration, and recording are independent capabilities; the capture/codec/network path never enters the RT timing boundary and reconnect never silently restores command authority.
+- **G-APP-10: Browser-hosted laboratory.** A semantic WebAssembly build or browser-hosted machine emulator can boot and demonstrate TinyOS inside the browser sandbox. It is explicitly a portable lab, not evidence for hard-RT timing, DMA/IOMMU, verified boot, power-loss recovery, or bare-metal security.
+- **G-APP-11: RT and UX halves communicate through one bounded contract.** Native UI, webview, game, host, remote, and language-runtime frontends use typed IPC, explicit page grants, spoors, or capability-scoped sockets; none receives direct RT task or device state.
+- **G-APP-12: Edge and data-centre workloads coordinate as teams.** Fleet and server-farm profiles combine authenticated endpoints, per-tenant budgets, spoors, distributed inference, failure isolation, and immutable deployment so one node, tenant, coordinator, or model cannot acquire ambient fleet authority.
 
 ---
 
@@ -251,6 +293,21 @@ Each deployment mode (Section 4.1) maps to a feature-flag profile at build time 
 
 Feature-flagging out an entire subsystem (rather than just leaving it unconfigured) is itself a security and reliability measure: an `rt-control`-profile device has no inference code in its binary at all, so there is no inference-related attack surface or bug class to worry about on that class of device, full stop.
 
+Application capability is layered onto those mission profiles through separately signed, measured bundles rather than by growing one universal base image:
+
+| Optional application profile | Adds | Does not add implicitly |
+|---|---|---|
+| `app-native` | TXE/TON ABI, SDK services, selected native applications | Webview, managed runtime, browser, Linux guest |
+| `app-webview` | Window/display/input service plus selected Tauri or Wails runtime | Remote browsing, arbitrary navigation, Node/Bun, generic shell |
+| `app-dotnet-aot` | .NET 10-or-later Native AOT support and generated bindings | JIT, arbitrary assembly loading, unrestricted P/Invoke |
+| `app-js` | Selected Node or research Bun runtime domain | Native addons, FFI, inspector, child processes, network |
+| `app-games` | Selected graphics/audio/input/game packages | Multiplayer endpoints unless separately selected |
+| `app-browser` | Chrome-class compartment system and selected codecs/features | Default remote debug, extensions, tracking, listeners |
+| `app-compat` | TLE compatibility personality or guest | Host files, devices, ports, process handles |
+| `app-remote` | TinySpot capture/codec/session services | Input, clipboard, files, administration unless separately granted |
+
+Every combination is a named deployment profile whose link map, task set, parsers, capabilities, queues, listeners, DMA/MMIO grants, memory budget, and application targets are recorded. The 8 MiB ceiling continues to govern the non-driver core; large optional packages do not enter the core TCB merely because one profile selects them.
+
 ### 4.4 Network & Security Configuration Profiles
 
 | Profile | Applies to | Authentication model |
@@ -313,6 +370,8 @@ The MVP is not "a demo." It is the smallest hardware and software configuration 
 
 Testing is not a phase that happens after implementation — per [`agent/CODING_STANDARDS.md`](agent/CODING_STANDARDS.md#test-driven-development-mandatory), every feature is built test-first, and this section describes the full taxonomy of tests TinyOS uses and how they map onto the goals in Section 3 and the hardware tiers already defined in the [Target Hardware & Test Matrix](README.md#target-hardware--test-matrix).
 
+The mandatory [`goals/assurance/`](goals/assurance/) spine binds each Feature to implementation/subject containment classes and boundary tests, then binds each Story to performance domains, security controls, and containment classes before implementation. Functional `Verified` and assurance `verified` are intentionally separate: legacy functional passes remain `baseline-debt` until dated raw performance, boundary, and adversarial evidence closes their mapped release gates.
+
 ### 6.1 TDD discipline recap
 
 Red, green, refactor, for every feature, with no exceptions for "trivial" code, and mandatory adversarial tests for every safety- and security-relevant subsystem — this is specified in full in `agent/CODING_STANDARDS.md` and is not repeated here beyond this pointer, because that document is the authoritative source and this document should not risk drifting out of sync with it by duplicating its detail.
@@ -327,7 +386,9 @@ Red, green, refactor, for every feature, with no exceptions for "trivial" code, 
 | **Fuzz testing** | Feed malformed/adversarial byte streams into any parser that accepts external input — HBP/WCI frame parsers, TINYCMD's DOS/POSIX front-ends, deploy image validation | G-RC-2, G-HW-3, all frame-parsing code |
 | **Mutation testing** | Deliberately mutate implementation code and confirm the test suite catches the mutation — a check on test *quality*, not just test *presence* | Applied selectively to safety/security-critical crates (ACI policy engine, HBP/WCI auth, watchdog) given its cost |
 | **Timing regression / WCET benchmarks** | Measure worst-case execution time for every RT task and fail CI on regression, per Roadmap Phase 1 | G-RT-1, G-RT-3, G-PA-1 |
+| **Performance/frugality catalogue tests** | Apply all 25 latency, cycle, memory, allocation, queue, throughput, load-isolation, denial, fault, soak, observability, footprint, and comparison guardrails to every selected OS domain | G-DX-7, G-DX-8, all RT/inference/driver goals |
 | **Adversarial/security tests** | Actively attempt to violate a security invariant: unauthenticated command, expired session, replayed frame, capability-scope escalation, path traversal in shell commands | G-RC-2, G-RC-3, G-AI-3, all of Section 8 |
+| **Campaign-level AI adversary tests** | Run long-horizon adaptive attack chains across hundreds of actions, rewinds, encodings, races, tool calls, and coordinated agents while verifying containment and kill behavior | G-SEC-11, G-SEC-12, G-SEC-13 |
 | **Golden-file / acceptance tests** | For TINYCMD, run each MVP verb through both DOS and POSIX front-ends against a fixture and assert equivalent underlying action, per `docs/cli-compatibility-mvp.md` | G-RT-5 |
 | **Driver conformance suites** | Every class driver and vendor extension runs the same conformance suite for its device class, per the Universal Driver Model | G-HW-2, G-HW-3, Liskov Substitution (Section 9.2) |
 | **Chaos / fault-injection tests** | Deliberately kill a task, drop a link mid-session, corrupt a deploy transfer, starve a resource — and assert the system reaches its documented safe state, not an undefined one | G-PA-3, G-PA-7, G-RC-5, all of Section 7 |
@@ -399,11 +460,17 @@ Reliability is treated as an engineered property with specific mechanisms behind
 
 ### 8.1 Threat model
 
-TinyOS's threat model assumes: an attacker may have network access to a WCI-exposed device (it's WiFi-reachable by design); an attacker may have physical access to a device in some deployments (a co-bot in a shared workspace is not physically locked away the way a data-center server is); a dependency in the supply chain may be compromised; and an LLM agent — local or external — may be manipulated (via prompt injection or otherwise) into requesting actions it shouldn't. The security architecture is built assuming all four of these will actually be attempted, not merely theorized about.
+TinyOS's threat model assumes: an attacker may have network access to a WCI-exposed device; physical access to some deployments; a compromised dependency, update, executable, driver, file, browser-like parser, or peripheral; control of one sandboxed process; and access to a frontier AI agent capable of sustained adaptive exploit discovery and chaining. The architecture assumes cross-process memory tampering, remote code-injection attempts, unsigned executable substitution, illegal sharing, port attacks, origin laundering, drive-by content, ransomware, worms, tracking, resource exhaustion, and policy-confusion attempts will occur. [`SECURITY_CHARTER.md`](SECURITY_CHARTER.md) defines the governing Protection Domain and remote-code exclusion properties; [`docs/security-spine.md`](docs/security-spine.md) expands the threat mapping.
 
 ### 8.2 Capability-based security recap
 
-The Agent Command Interface is TinyOS's single security boundary: every caller (human shell, HBP host, WCI remote controller, local or external LLM agent) is authenticated, resolved to a capability scope, and every action is checked against that scope before execution, with full audit provenance. This is specified in depth in the README (Design Pillar 5) and in `docs/hbp-spec.md`/`docs/wci-spec.md`; this section states the security *guarantee* that architecture produces: **no caller, regardless of type, has an implicit or bypassable privilege** — this is Non-Negotiable #2, restated here because it is the load-bearing security guarantee everything else in this section depends on.
+The Agent Command Interface is TinyOS's single **command-authorization** boundary: every caller (human shell, HBP host, WCI remote controller, local or external LLM agent) is authenticated, resolved to a capability scope, and every requested action is checked against that scope before execution, with full audit provenance. It is one layer of the wider Security Charter rather than a substitute for MMU, capability-space, scheduling, IOMMU, provenance, fault, and teardown enforcement. The resulting command guarantee is: **no caller, regardless of type, has an implicit or bypassable privilege**.
+
+#### 8.2.1 Governing Protection Domain and code-admission charter
+
+Every runnable component is a lightweight Protection Domain combining private active memory, a kernel-owned capability space, scheduling and resource budgets, provenance, lifecycle generation, class, and fault/teardown routing. The same primitive isolates C2 services, C3 applications, and C4 transient parsers; flexibility comes from explicit capability and budget profiles rather than containers, duplicate kernels, or weaker boundaries.
+
+Every remote or external object remains non-executable C4 data until all 14 gates in [`goals/security/code-admission-gates.tsv`](goals/security/code-admission-gates.tsv) pass. The C4 inspection instance is then destroyed and a fresh C3 domain is constructed with sealed RX code, NX writable data, guard pages, empty initial authority, and only the manifest-policy intersection. The 14 [`PD-*` contracts](goals/security/protection-domain-contracts.tsv) continue to constrain admitted code even if an attacker controls it completely; the complete [`C0–C4 matrix`](goals/security/class-communication-matrix.tsv) leaves no undocumented communication path.
 
 ### 8.3 Supply chain security
 
@@ -432,6 +499,16 @@ The Agent Command Interface is TinyOS's single security boundary: every caller (
 
 - Adversarial tests (Section 6.2) for ACI, HBP, WCI, and deploy code run on every PR touching those subsystems — not periodically, because these are exactly the subsystems where a regression is most consequential.
 - A broader, periodic adversarial review (effectively an internal red-team pass against the current HIL hardware) is planned once Tier 1/2 hardware and the ACI capability registry are both mature enough (post Roadmap Phase 5) to make such a review meaningful rather than premature.
+
+### 8.8 Sandbox-first execution, provenance, and measurable absence
+
+An executable or downloaded object is data until its signature, origin, entitlement, anti-rollback state, complete dependency closure, import manifest, requested capabilities, and memory map validate through the Security Charter's code-admission chain. Every process receives a fresh private address space and an empty capability set. Files are accessed through object capabilities or capability-mounted namespaces; copying or renaming never upgrades trust. Network endpoints, active-content parsers, cookie state, and drivers are absent unless the deployment selects them.
+
+“Near-zero attack surface” is measured as negative presence evidence. An unselected component must contribute zero linked bytes, interrupts, DMA/MMIO grants, capabilities, queues, worker tasks, network listeners, and reachable parser entry points. Idle-but-linked is not absent.
+
+### 8.9 Fable-class AI adversary
+
+“Fable-class” is defined locally as a frontier AI adversary capable of autonomous long-horizon reconnaissance, vulnerability discovery and validation, exploit chaining, lateral-movement planning, tool use, adaptive retries, rewinding, and parallel probing. It is not an industry certification. Provider-side model safeguards are defense in depth, never a TinyOS trust boundary; every model output is untrusted input. SEC-16 campaign tests must preserve capability, memory, timing, provenance, exhaustion, and recovery invariants over hundreds of adaptive actions, not merely block one prompt.
 
 ---
 
@@ -471,19 +548,30 @@ This table maps every Roadmap phase (as specified in [`README.md`](README.md#roa
 
 | Roadmap Phase | Goals primarily validated | MVP hardware involved | Key test types |
 |---|---|---|---|
-| Phase 0 — Kernel skeleton | G-RT-1, G-RT-2, G-RT-7, G-HW-4 | Tier 0 (QEMU), then both MVP boards | Unit, integration, Tier 0 |
-| Phase 1 — Determinism proof | G-RT-1, G-RT-3, G-PA-1 | Both MVP boards | Timing regression, property-based |
-| Phase 1.5 — Deploy tooling | G-RC-6, G-DX-3 | Both MVP boards | Adversarial (deploy), chaos (interrupted deploy) |
-| Phase 2 — Shell & UX | G-RT-5, G-RT-6 | Both MVP boards | Golden-file/acceptance |
-| Phase 3 — Connectivity | G-HW-2, G-PA-4 (via CAN/e-stop wiring where applicable) | Both MVP boards + peripheral hardware (Section 4.2.3/4.2.4) | Driver conformance, Tier 0 (Renode) |
-| Phase 4 — Host bridge | G-RC-1, G-RC-2 | x86_64 mini-PC (HBP target) | Adversarial (HBP auth), integration |
-| Phase 5 — Agent Command Interface | G-AI-2 through G-AI-5, G-RC-2, G-RC-3 | Both MVP boards | Adversarial, property-based (policy engine) |
-| Phase 6 — LLM integration | G-AI-1, G-AI-2, G-AI-3 | Jetson Orin Nano Super | Integration, adversarial |
-| Phase 6b — Heterogeneous compute | G-AI-6, G-HW-6 | Jetson Orin Nano Super | Driver conformance (UMM), timing regression (admission control isolation) |
-| Phase 7 — Edge bring-up | G-HW-1 through G-HW-5 | Jetson Orin Nano Super | Driver conformance, HIL |
-| Phase 8 — Fleet mode | G-RC-4, G-AI-7 | Multiple units of both MVP board types (post-MVP purchase) | Integration, chaos (partial fleet connectivity loss) |
+| Phase 0 — Kernel skeleton | G-RT-1, G-RT-2, G-RT-7, G-HW-4; G-SEC-2 through G-SEC-4, G-SEC-9 through G-SEC-15 | Tier 0 (QEMU), then both MVP boards | Unit, integration, Tier 0, assurance-spine |
+| Phase 1 — Determinism proof | G-RT-1, G-RT-3, G-PA-1; G-SEC-2, G-SEC-8, G-SEC-12 through G-SEC-15 | Both MVP boards | Timing regression, property-based, hostile-load |
+| Phase 1.5 — Deploy tooling | G-RC-6, G-DX-3; G-SEC-1, G-SEC-8, G-SEC-10, G-SEC-14, G-SEC-15 | Both MVP boards | Adversarial (deploy), chaos (interrupted deploy) |
+| Phase 2 — Shell & UX | G-RT-5, G-RT-6; G-SEC-5, G-SEC-7 | Both MVP boards | Golden-file/acceptance, active-content isolation |
+| Phase 3 — Connectivity | G-HW-2, G-PA-4; G-SEC-5 through G-SEC-9, G-SEC-12 through G-SEC-15 | Both MVP boards + peripheral hardware (Section 4.2.3/4.2.4) | Driver conformance, Tier 0 (Renode), network adversarial |
+| Phase 4 — Host bridge | G-RC-1, G-RC-2; G-SEC-6, G-SEC-10, G-SEC-14, G-SEC-15 | x86_64 mini-PC (HBP target) | Adversarial (HBP auth), integration |
+| Phase 5 — Agent Command Interface | G-AI-2 through G-AI-5, G-RC-2, G-RC-3; G-SEC-1 through G-SEC-15 | Both MVP boards | Adversarial, property-based (policy engine), campaign |
+| Phase 6 — LLM integration | G-AI-1, G-AI-2, G-AI-3; G-SEC-4, G-SEC-10 through G-SEC-15 | Jetson Orin Nano Super | Integration, adversarial, Fable-class campaign |
+| Phase 6b — Heterogeneous compute | G-AI-6, G-HW-6; G-SEC-2, G-SEC-9, G-SEC-12 through G-SEC-15 | Jetson Orin Nano Super | Driver conformance (UMM), timing regression (admission control isolation) |
+| Phase 7 — Edge bring-up | G-HW-1 through G-HW-5; G-SEC-9 | Jetson Orin Nano Super | Driver conformance, HIL, opt-out absence |
+| Phase 8 — Fleet mode | G-RC-4, G-AI-7; G-SEC-6, G-SEC-8, G-SEC-10 through G-SEC-13 | Multiple units of both MVP board types (post-MVP purchase) | Integration, chaos, coordinated campaign |
 
 The **5-axis CNC flagship demonstration** (G-PA-8) is not a single phase — it's the integration milestone that Phases 0, 1, 2, and 3 build toward jointly (RT scheduler, timing determinism, TINYCMD/G-code front-end, and connectivity all have to land before simultaneous 5-axis contouring is demonstrable end-to-end), with the Wire DED and resin-curing reference workloads following as architecture-validation checkpoints on the same timeline rather than separate phases of their own.
+
+The following destination horizons are recorded now so earlier ABI, graphics, IPC, network, memory, scheduler, and containment decisions do not make them impossible. They are not inserted into the numbered MVP critical path and are not yet decomposed:
+
+| Horizon Epic | Destination | Primary goals | Dependency |
+|---|---|---|---|
+| `EPIC-H1` | Application ABI, display/audio/input and game proving path | G-APP-1, G-APP-5, G-APP-11 | P0, P2, P3, P5 |
+| `EPIC-H2` | Wails, Tauri, .NET AOT, Node and Bun runtime profiles | G-APP-2 through G-APP-4 | H1, P5 |
+| `EPIC-H3` | Chrome-class browser and TinySpot remote UX | G-APP-6, G-APP-9 | H1, H2, P3, P4 |
+| `EPIC-H4` | TLE and WST host/compatibility environment | G-APP-7, G-APP-8 | P4, P5, H1 |
+| `EPIC-H5` | Browser-hosted TinyOS laboratory | G-APP-10 | P0, P2 |
+| `EPIC-H6` | Edge and data-centre application coordination | G-APP-12, G-AI-7, G-RC-4 | P6B, P8 |
 
 ---
 
@@ -501,6 +589,14 @@ The **5-axis CNC flagship demonstration** (G-PA-8) is not a single phase — it'
 - **Vendor extension** — an additive, optional capability layer on top of a class driver, never required for baseline function.
 - **Deployment mode** — a build-time-selected profile (Inference-only, Real-Time control, Inference + Real-Time Execution, …) defining which ACI capabilities and subsystems are present.
 - **SOLID** — Single Responsibility, Open/Closed, Liskov Substitution, Interface Segregation, Dependency Inversion; five design principles, Rust-adapted and enforced without exception per Section 9.2.
+- **Assurance spine** — the mandatory join from every Feature to containment/boundary contracts and every Story to selected performance domains, security controls, and containment classes, enforced by CI and closed only by raw Report evidence.
+- **Fable-class adversary** — TinyOS's project-defined frontier AI attacker: autonomous, long-horizon, adaptive, exploit-chain-capable, and able to probe in parallel; not an external certification.
+- **Protection Domain** — TinyOS's lightweight sandbox primitive: private active address space, kernel-owned capability space, scheduling/resource budgets, provenance, lifecycle generation, containment class, and fault/teardown route.
+- **RCG** — Remote Code Gate; one of the 14 mandatory, fail-closed transitions in the only permitted external-data-to-executable path.
+- **TLE** — TinyOS Linux Environment; the future POSIX/Linux compatibility workspace or guest, always outside C1 and never an ambient-authority subsystem.
+- **WST** — Windows TinyOS Tools; the Windows-side HBP service and UX/tooling family for a co-resident TinyOS partition or guest.
+- **TinySpot** — the planned capability-separated TinyOS remote desktop, telemetry, and input service family.
+- **Application support level** — `core-native`, `native-txe`, `managed-aot`, `isolated-runtime`, `compatibility-guest`, or `browser-hosted`; integration depth, not a trust rank.
 
 ---
 
@@ -509,10 +605,17 @@ The **5-axis CNC flagship demonstration** (G-PA-8) is not a single phase — it'
 Every document in the repository, one line each, for quick navigation from this master specification:
 
 - [`agent.md`](agent.md) — the single entry point for any coding agent (LLM-tool-agnostic); read this first if you're an agent, not a human.
+- [`SECURITY_CHARTER.md`](SECURITY_CHARTER.md) — the governing Protection Domain, C0–C4 communication, remote-code exclusion, and hostile-takeover resistance charter.
 - [`README.md`](README.md) — the living, current-state design document; the first place to check if anything here seems out of date.
 - [`session/`](session/) — dated handover documents, one folder per calendar date (`session/hand-YYYY-MM-DD/`), each with an `index.html` indexing that date's numbered `NN-*.md` handover write-ups in order; see [`session/README.md`](session/README.md) for the naming convention. Start with the most recent dated folder's `index.html`.
 - [`agent/CODING_STANDARDS.md`](agent/CODING_STANDARDS.md) — the authoritative, binding coding rules: language policy, priority ordering, crate size ceiling, SOLID enforcement, TDD mandate, tooling standard.
 - [`goals/`](goals/) — the Verification & Validation model: Goals (from Section 3 above) → Epics → Features → Stories → Tests → Reports, cross-referenced against sessions; see the [live progress dashboard](goals/index.html).
+- [`goals/assurance/`](goals/assurance/) — mandatory Story-to-performance/security contracts and lifecycle gates.
+- [`goals/performance/`](goals/performance/) — the machine-validated 25 × 25 performance, frugality, compactness, isolation, and comparison catalogue.
+- [`goals/security/`](goals/security/) — the machine-validated security controls, Protection Domain contracts, code-admission gates, class communication matrix, and containment catalogues.
+- [`goals/context/`](goals/context/) — the machine-validated side-by-side join of destination goals, performance domains, applications, security controls, containment classes, roadmap horizons, and claim gates.
+- [`docs/whole-system-context.md`](docs/whole-system-context.md) — the destination architecture for application runtimes, games, networking, browser, TinySpot, TLE/WST, fleet/data-centre workloads, and browser-hosted TinyOS.
+- [`docs/security-spine.md`](docs/security-spine.md) — sandbox-first execution, process/memory isolation, provenance, network, active-content, driver, ransomware, and Fable-class threat architecture.
 - [`docs/hbp-spec.md`](docs/hbp-spec.md) — Host Bridge Protocol wire-level spec (same-machine host comms).
 - [`docs/physical-ai-reference-workloads.md`](docs/physical-ai-reference-workloads.md) — the 5-axis CNC (flagship MVP demonstration), Wire DED robot arm, and resin-curing UV array reference workloads, and the shared RT primitives that let all three run on one kernel.
 - [`docs/extended-domain-workloads.md`](docs/extended-domain-workloads.md) — vision-tier exploration of how far the architecture generalizes (washing machine through rotary detonation engine), tiered honestly by realism; not a roadmap commitment.

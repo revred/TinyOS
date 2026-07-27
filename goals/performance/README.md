@@ -4,7 +4,11 @@ Status: **Specified, not verified** — 625 test contracts; thresholds are provi
 
 This catalogue turns TinyOS's performance, frugality, compactness, isolation, and fail-safe ambitions into individually addressable tests. It is deliberately compact: **25 performance domains × 25 guardrails = 625 tests**, expanded in [`catalogue.tsv`](catalogue.tsv). Every cell has a stable ID of the form `PERF-Dnn-Gnn`.
 
-The catalogue does not claim that unbuilt subsystems already pass. The `readiness` field distinguishes current Phase-0 prototypes, partial/stand-in surfaces, specified work, and design-only future work. A test becomes Verified only after raw evidence and a report exist; merely appearing here means only that the contract is specified.
+The catalogue is part of the mandatory [`../assurance/`](../assurance/) spine. Every Story selects one or more domains in [`../assurance/story-contracts.tsv`](../assurance/story-contracts.tsv); selecting a domain brings all 25 guardrails into that Story's assurance contract. Adding an unmapped Story fails CI.
+
+The same 625 cells also steer product destinations through [`../context/application-platforms.tsv`](../context/application-platforms.tsv). Each concrete runtime, framework, game, browser, remote-UX, compatibility, inference or fleet target selects the domains that must hold for that workload; [`../context/landing-zones.tsv`](../context/landing-zones.tsv) keeps those selections beside its goals and security/class contracts. This creates future evidence obligations without pretending unbuilt applications pass.
+
+The catalogue does not claim that unbuilt subsystems already pass. The `readiness` field distinguishes current Phase-0 prototypes, partial/stand-in surfaces, specified work, and design-only future work. A test becomes Verified only after raw evidence and a report exist; merely appearing here means only that the contract is specified. A Story's functional `Verified` status does not satisfy these contracts.
 
 See [`current-state-review.md`](current-state-review.md) for the repository audit that shaped these domains and priorities.
 
@@ -29,6 +33,8 @@ Guardrails G01–G23 are release gates once the corresponding subsystem exists. 
 8. A threshold can tighten with evidence. Loosening a release threshold requires an ADR, a V&V report, and confirmation that no safety/security invariant changed.
 9. Driver and profile results include negative footprint evidence: an opt-out subsystem must contribute no executable bytes, registered interrupts, DMA grants, capabilities, queues, or reachable parser surface.
 10. Reports retain raw samples, percentile method, outliers, failures, compiler/link map, energy/thermal data, and comparison harness version.
+11. Application/runtime results are end to end. Framework bridges, GC, JITless or admitted-code paths, broker IPC, TCP/TLS, GPU copies, provenance checks, denials and teardown remain inside the measured boundary rather than being subtracted as “platform overhead.”
+12. AI results report TTFT, prefill, decode, quality, energy, thermal state and RT interference together. Game/browser results report frame pacing and input-to-photon latency, not only synthetic rendering throughput.
 
 ## Domains
 
@@ -106,12 +112,13 @@ The TSV is the canonical machine-readable expansion. Its `status` is initially `
 
 A performance failure never gets hidden by a functional pass. Conversely, an unavailable future subsystem is **not failed and not passed**; it remains specified until its implementing Story is ready.
 
-## Integrity gate
+## Integrity and spine gates
 
 From `os/`:
 
 ```text
 cargo run -p xtask -- check-performance-catalogue
+cargo run -p xtask -- check-assurance-spine
 ```
 
-The command rejects missing/duplicate IDs, malformed rows, unknown axes, empty evidence fields, and anything other than the complete D01..D25 × G01..G25 cross-product.
+The first command rejects missing/duplicate IDs, malformed rows, unknown axes, empty evidence fields, and anything other than the complete D01..D25 × G01..G25 cross-product. The second also enumerates all Story/Feature files and verifies their performance-domain and security-control mappings.

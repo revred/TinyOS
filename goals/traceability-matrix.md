@@ -9,7 +9,7 @@ The single-page cross-reference between Goals, the V&V hierarchy, and execution 
 | Goal | Epic | Feature | Story | Test | Report | Status |
 |---|---|---|---|---|---|---|
 | G-RT-7, G-HW-4 (partial) | `EPIC-P0` | `FEAT-P0-01` | `STORY-P0-01-01` | `TEST-P0-01-01-A` | `REPORT-2026-07-26-01` | Verified (local; CI pending) |
-| G-DX-5, G-DX-6 | `EPIC-P0` | `FEAT-P0-01` | `STORY-P0-01-02` | `TEST-P0-01-02-A` | `REPORT-2026-07-26-03` | Verified (local; CI pending) |
+| G-DX-5, G-DX-6, G-DX-7, G-SEC-10, G-SEC-12, G-SEC-13 | `EPIC-P0` | `FEAT-P0-01` | `STORY-P0-01-02` | `TEST-P0-01-02-A` | `REPORT-2026-07-26-03`, `-23`, `-25`, `-26`, `-28` | Verified (local; assurance baseline debt) |
 | G-DX-3 | `EPIC-P0` | `FEAT-P0-01` | `STORY-P0-01-03` | `TEST-P0-01-03-A` | `REPORT-2026-07-26-02` | Verified (local; CI pending) |
 | G-RT-1 | `EPIC-P0` | `FEAT-P0-02` | `STORY-P0-02-01` | (5 `#[test]` fns in `sched.rs`) | `REPORT-2026-07-26-05` | Verified (local) |
 | G-RT-1 | `EPIC-P0` | `FEAT-P0-02` | `STORY-P0-02-02` | `TEST-P0-02-02-A` | `REPORT-2026-07-26-08` | Verified (local) |
@@ -20,26 +20,59 @@ The single-page cross-reference between Goals, the V&V hierarchy, and execution 
 | G-RT-2 | `EPIC-P0` | `FEAT-P0-03` | `STORY-P0-03-02` | `TEST-P0-03-02-A` | `REPORT-2026-07-26-14` | Verified (local) |
 | G-RT-2 | `EPIC-P0` | `FEAT-P0-03` | `STORY-P0-03-03` | `TEST-P0-03-03-A` | `REPORT-2026-07-26-04` | Verified (local) |
 | G-HW-4 | `EPIC-P0` | `FEAT-P0-04` | `STORY-P0-04-01` | `TEST-P0-04-01-A` | `REPORT-2026-07-26-06` | Verified (local; CI pending) |
-| G-HW-4 | `EPIC-P0` | `FEAT-P0-04` | `STORY-P0-04-02` | — | — | Planned, not yet started |
-| G-HW-4 | `EPIC-P0` | `FEAT-P0-04` | `STORY-P0-04-03` | — | — | Planned, not yet started |
+| G-HW-4 | `EPIC-P0` | `FEAT-P0-04` | `STORY-P0-04-02` | `TEST-P0-04-02-A` | `REPORT-2026-07-26-27` | Verified (host + Tier 0; assurance baseline debt) |
+| G-HW-4 | `EPIC-P0` | `FEAT-P0-04` | `STORY-P0-04-03` | `TEST-P0-04-03-A` | `REPORT-2026-07-26-29` | Verified (host + Tier 0; assurance baseline debt) |
 | G-PC-1, G-PC-4 | `EPIC-P0` | `FEAT-P0-05` | `STORY-P0-05-01` | `TEST-P0-05-01-A` | `REPORT-2026-07-26-07` | Verified (local) |
 | G-PC-1, G-RT-2 | `EPIC-P0` | `FEAT-P0-05` | `STORY-P0-05-02` | `TEST-P0-05-02-A` | `REPORT-2026-07-26-09` | Verified (local) |
 | G-PC-2, G-PC-3, G-AI-3 | `EPIC-P0` | `FEAT-P0-05` | `STORY-P0-05-03` | `TEST-P0-05-03-A` | `REPORT-2026-07-26-10` | Verified (local) |
-| G-PC-1..4 | `EPIC-P0` | `FEAT-P0-05` | `STORY-P0-05-04` | `TEST-P0-05-04-A` | — | Planned, not yet started (Test specified) |
+| G-PC-1..4 | `EPIC-P0` | `FEAT-P0-05` | `STORY-P0-05-04` | `TEST-P0-05-04-A` | `REPORT-2026-07-26-20` | Verified (local) |
+| G-DX-3 | `EPIC-P0` | `FEAT-P0-08` | `STORY-P0-08-01` | `TEST-P0-08-01-A` | `REPORT-2026-07-26-19` | Verified (local) |
 | G-PA-6, G-AI-3 | `EPIC-P0` | `FEAT-P0-06` | `STORY-P0-06-01` | `TEST-P0-06-01-A` | `REPORT-2026-07-26-15` | Verified (local) |
 | G-PA-6, G-AI-3 | `EPIC-P0` | `FEAT-P0-06` | `STORY-P0-06-02` | `TEST-P0-06-02-A` | `REPORT-2026-07-26-16` | Verified (local) |
-| G-PC-3, G-AI-3 | `EPIC-P0` | `FEAT-P0-07` | `STORY-P0-07-01` | — | — | Planned, not yet started |
-| G-PC-3, G-RT-2 | `EPIC-P0` | `FEAT-P0-07` | `STORY-P0-07-02` | — | — | Planned, not yet started |
+| G-PA-6, G-AI-3, G-RT-1 | `EPIC-P0` | `FEAT-P0-06` | `STORY-P0-06-03` | `TEST-P0-06-03-A` | `REPORT-2026-07-26-17` | Verified (local) |
+| G-PA-6, G-AI-3, G-RT-1 | `EPIC-P0` | `FEAT-P0-06` | `STORY-P0-06-04` | `TEST-P0-06-04-A` | `REPORT-2026-07-26-18` | Verified (local) |
+| G-PC-3, G-AI-3 | `EPIC-P0` | `FEAT-P0-07` | `STORY-P0-07-01` | `TEST-P0-07-01-A` | `REPORT-2026-07-26-21` | Verified (local; assurance baseline debt) |
+| G-PC-3, G-RT-2 | `EPIC-P0` | `FEAT-P0-07` | `STORY-P0-07-02` | `TEST-P0-07-02-A` | `REPORT-2026-07-26-22`, `REPORT-2026-07-26-24` | Verified (host + Tier 0; assurance baseline debt) |
 
-## EPIC-P1 through EPIC-P8 — backlog, not yet decomposed
+## EPIC-P1 (Determinism Proof) — fully decomposed, no Story started
+
+Decomposed 2026-07-27 in [`EPIC-P1.md`](epics/EPIC-P1.md): 6 Features, 10 Stories, all `specified` with valid contract rows. Tests are written when each Story starts, per the TDD workflow.
+
+| Goal | Epic | Feature | Story | Test | Report | Status |
+|---|---|---|---|---|---|---|
+| G-RT-3, G-DX-7 | `EPIC-P1` | `FEAT-P1-01` | `STORY-P1-01-01` | — | — | Specified |
+| G-RT-3, G-DX-7 | `EPIC-P1` | `FEAT-P1-01` | `STORY-P1-01-02` | — | — | Specified |
+| G-SEC-2, G-SEC-14 | `EPIC-P1` | `FEAT-P1-02` | `STORY-P1-02-01` | — | — | Specified |
+| G-SEC-2, G-SEC-14 | `EPIC-P1` | `FEAT-P1-02` | `STORY-P1-02-02` | — | — | Specified |
+| G-SEC-2, G-RT-1 | `EPIC-P1` | `FEAT-P1-03` | `STORY-P1-03-01` | — | — | Specified |
+| G-SEC-2, G-SEC-8 (partial) | `EPIC-P1` | `FEAT-P1-03` | `STORY-P1-03-02` | — | — | Specified |
+| G-RT-1 | `EPIC-P1` | `FEAT-P1-04` | `STORY-P1-04-01` | — | — | Specified |
+| G-RT-3, G-PA-1 (groundwork) | `EPIC-P1` | `FEAT-P1-04` | `STORY-P1-04-02` | — | — | Specified |
+| G-SEC-12, G-SEC-14 | `EPIC-P1` | `FEAT-P1-05` | `STORY-P1-05-01` | — | — | Specified |
+| G-PA-1 | `EPIC-P1` | `FEAT-P1-06` | `STORY-P1-06-01` | — | — | Specified |
+
+## EPIC-P1_5 through EPIC-P8 — backlog, not yet decomposed
 
 See [`goals/epics/backlog.md`](epics/backlog.md) for the full Goal-to-Epic mapping for the remaining Roadmap phases. No Features, Stories, or Tests exist for these yet.
 
-## Cross-cutting performance catalogue
+## EPIC-H1 through EPIC-H6 — destination horizons
 
-[`performance/catalogue.tsv`](performance/catalogue.tsv) specifies 625 performance guardrails as the complete cross-product of 25 OS domains and 25 measurement/safety guardrails. They serve G-DX-7 and the latency, determinism, frugality, isolation, driver, inference, security, and compactness goals across every Roadmap phase.
+These are deliberately not decomposed into current Features/Stories. [`context/landing-zones.tsv`](context/landing-zones.tsv) provides their machine-readable Goal → performance domain → application → security/class → claim-gate context now; [`epics/backlog.md`](epics/backlog.md) names the future Epic owners. This lets Phase-0 through Phase-8 architecture preserve the destination without falsely showing future applications as implemented work.
 
-These contracts are not counted as Story-level `TEST-*` artifacts and do not change any verification status in the matrix above. Every row begins `specified`; a row becomes reportable only when its owning subsystem has an implementing Story and evidence from the tier named in the catalogue. See [`performance/README.md`](performance/README.md) for the execution and comparison rules and [`performance/current-state-review.md`](performance/current-state-review.md) for the current audit.
+## Mandatory assurance spine
+
+The V&V hierarchy above is governed by the root [`Security Charter`](../SECURITY_CHARTER.md) and joined to performance, security, and containment by [`assurance/feature-contracts.tsv`](assurance/feature-contracts.tsv) and [`assurance/story-contracts.tsv`](assurance/story-contracts.tsv). Every Feature has exactly one boundary contract; every Story has exactly one assurance row selecting:
+
+- one or more domains from the complete 25 × 25 [`performance/catalogue.tsv`](performance/catalogue.tsv), expanding to all 25 guardrails per selected domain;
+- one or more release controls from [`security/controls.tsv`](security/controls.tsv);
+- one or more of the five canonical classes from [`security/containment-classes.tsv`](security/containment-classes.tsv), while the parent Feature selects mandatory [`BND-*` tests](security/containment-tests.tsv);
+- an assurance state distinct from the Story's functional status.
+
+The current 25 Story rows expand to 1,025 Story/performance contracts. The 19 application/platform targets expand to 6,575 destination/performance obligations by selecting the same canonical domains and guardrails. All 24 functionally Verified Stories are `baseline-debt`, not assurance `verified`; the one planned Story is `specified`. The distinction prevents functional reports or future application context from being misrepresented as latency, cycle, allocation, footprint, signing, active process-isolation, hostile-load, or AI-campaign evidence.
+
+The Charter adds 14 machine-readable Protection Domain invariants, 14 mandatory code-admission gates, every one of the 25 ordered C0–C4 communication pairs, 19 application/platform targets, and nine landing zones. Those rows keep current Feature/Story work and destination planning on the same performance/security vocabulary rather than separate suites.
+
+`cargo run -p xtask -- check-assurance-spine` enumerates Story and Feature files and fails CI for missing/stale mappings, unknown IDs, an incomplete or disconnected Charter, incomplete Protection Domain/code-admission/class-path catalogues, disconnected application/landing-zone context, incomplete five-class or 20-test containment catalogues, an incomplete 625-cell performance catalogue, or an incomplete 20-control security catalogue. See [`assurance/README.md`](assurance/README.md) for lifecycle rules, [`performance/README.md`](performance/README.md) for measurement/claim rules, [`security/README.md`](security/README.md) for security release rules, and [`context/README.md`](context/README.md) for the destination join.
 
 ## Session cross-reference
 
@@ -61,9 +94,24 @@ These contracts are not counted as Story-level `TEST-*` artifacts and do not cha
 | [`session/hand-2026-07-26/20-strategic-objectives-spoor-ipc-blue-sharc-correction.md`](../session/hand-2026-07-26/20-strategic-objectives-spoor-ipc-blue-sharc-correction.md) | New strategic direction from the user: spoor (universal audit atom, borrowed from `Sharc.Blue`), local IPC, and `blue.atom`/`blue-sharc.exe`-driven deploy tooling for Raspberry Pi 5. Corrected `FEAT-P0-05.md`/`STORY-P0-05-04.md`'s inaccurate "`blue-sharc.exe` is an Ollama-like inference runtime" framing (it's an MCP sidecar/context engine; removed the erroneous `G-AI-1` claim). Added and implemented **`FEAT-P0-06`** (spoor) — `STORY-P0-06-01` (new `kernel::spoor` module: packed `Spoor` type, `Category`/`Actor`/`Action`/`Outcome` enums, `REPORT-2026-07-26-15`) Verified; `STORY-P0-06-02` (journal writer) specified, not yet implemented. Added (specified, not implemented) **`FEAT-P0-07`** (local IPC: message channels + shared-memory grants, explicitly no loopback TCP, mirroring `Sharc.Blue`'s own retired-loopback-TCP doctrine) with two Stories. Recorded a real network-facing TCP/IP stack as a separate, later `EPIC-P3` concern in `goals/epics/backlog.md`, not part of `EPIC-P0`. |
 | [`session/hand-2026-07-26/21-story-p0-06-02-spoor-journal-implementation.md`](../session/hand-2026-07-26/21-story-p0-06-02-spoor-journal-implementation.md) | Implemented and Verified `STORY-P0-06-02` (append-only spoor journal, new `kernel::spoor_journal::SpoorJournal<N>` fixed-capacity ring buffer storing each entry as its raw `Spoor::to_bits()` value, plus `JOURNAL_MAGIC` matching `Sharc.Blue`'s own on-disk format exactly, `REPORT-2026-07-26-16`) — completes `FEAT-P0-06` (2/2 Stories Verified; one follow-up, wiring a real subsystem to emit spoors, tracked separately per that Feature's own exit criteria). |
 | [`session/hand-2026-07-26/22-performance-catalogue-625-guardrails.md`](../session/hand-2026-07-26/22-performance-catalogue-625-guardrails.md) | Added the cross-cutting 625-test performance catalogue, current-state audit, measurement/claim rules, `xtask` integrity validator with five tests, CI gate, and dashboard links. All catalogue rows remain Specified until their owning subsystem and tier evidence exist. |
+| [`session/hand-2026-07-26/23-story-p0-06-03-spoor-adoption-kernel-lock.md`](../session/hand-2026-07-26/23-story-p0-06-03-spoor-adoption-kernel-lock.md) | Added and implemented **`STORY-P0-06-03`** (`kernel::lock::PriorityInheritingLock::try_lock`/`unlock` now stamp `Category::Lock`/`Action::Boost`/`Action::Restore` spoors into a caller-supplied `SpoorJournal<J>` on real priority-mutating events, `REPORT-2026-07-26-17`) — closes `FEAT-P0-06`'s own exit-criteria follow-up (now 3/3 Stories Verified, no open follow-up). No production call site or capacity constant added yet — no dispatcher is wired into `main.rs`, per `kernel::capacities`' own "don't add a capacity with nothing consuming it" discipline. |
+| [`session/hand-2026-07-26/24-story-p0-06-04-spoor-adoption-kernel-wcet.md`](../session/hand-2026-07-26/24-story-p0-06-04-spoor-adoption-kernel-wcet.md) | Added and implemented **`STORY-P0-06-04`** (`kernel::wcet::record_tick`/`reset_budget_window` now stamp `Category::Wcet`/`Action::Overrun`/`Action::ResetBudget` spoors into a caller-supplied `SpoorJournal<J>` on real budget-boundary-crossing events, `REPORT-2026-07-26-18`), by explicit user request beyond `FEAT-P0-06`'s already-met exit criteria — now 4/4 Stories Verified. Still no production call site or capacity constant — no dispatcher/timer loop is wired into `main.rs`, unchanged from `STORY-P0-06-03`'s own scope note. |
+| [`session/hand-2026-07-26/25-story-p0-05-04-and-txe-packer.md`](../session/hand-2026-07-26/25-story-p0-05-04-and-txe-packer.md) | Added and implemented **`FEAT-P0-08`** (`STORY-P0-08-01`, `xtask pack-txe`: a deterministic PE→TXE re-layout tool making every section's on-disk offset page-aligned and its `.bss` tail physically zero-written, `REPORT-2026-07-26-19`) and closed **`STORY-P0-05-04`** (rewrote its own acceptance criteria before implementation: the real `blue-sharc.exe` imports 220 Win32/CRT functions across 14 DLLs, infeasible to execute this session with no CR3 switch/IDT/threads; generalized `exec::address_space::AddressSpace::create` to a copy-based mapper tolerating real-world file alignment; proved the real image's parse/map/import-gate pipeline end to end under QEMU instead, plus a corrupted-copy fixture and a new `xtask check-image-size` G-DX-8 whole-image check, `REPORT-2026-07-26-20`) — `FEAT-P0-05` now 4/4 Stories Verified. Recorded a future TXE security-scanning/signing/sandboxing vision and a `.ton` shared-library naming convention in `goals/epics/backlog.md` under `EPIC-P5`, not implemented. `EPIC-P0` now at 21/26 Stories Verified. |
+| [`session/hand-2026-07-26/26-feat-p0-07-local-ipc.md`](../session/hand-2026-07-26/26-feat-p0-07-local-ipc.md) | Implemented and functionally Verified `FEAT-P0-07`: fixed-capacity local message channel (`REPORT-21`) and shared-memory grant/revoke with a Tier-0 fixture (`REPORT-22`). Both Stories remain assurance baseline debt. |
+| [`session/hand-2026-07-26/27-assurance-and-security-spine.md`](../session/hand-2026-07-26/27-assurance-and-security-spine.md) | Made the 625-test catalogue and 20 security controls a mandatory Story/Test/Report assurance spine, added CI enforcement and `REPORT-23`, defined the Fable-class/sandbox-first threat architecture, filed a control-by-control current-state audit, and corrected current progress to 23/25 functionally Verified Stories with 0 assurance-verified. |
+| [`session/hand-2026-07-26/28-story-p0-07-02-transactional-grants.md`](../session/hand-2026-07-26/28-story-p0-07-02-transactional-grants.md) | Hardened shared-memory grants with zero-page rejection, transactional rollback, a fixed-capacity generation registry, stale-token rejection, and `REPORT-24`; task-exit revocation remains blocked on a real teardown path. |
+| [`session/hand-2026-07-26/30-five-class-containment-contracts.md`](../session/hand-2026-07-26/30-five-class-containment-contracts.md) | Integrated exact C0–C4 definitions and BND-01–BND-20 into all Feature, Story, Test, control, dashboard, workflow, and CI contracts; filed structural `REPORT-25` while keeping runtime containment as baseline debt. |
+| [`session/hand-2026-07-26/31-security-charter-and-remote-code-exclusion.md`](../session/hand-2026-07-26/31-security-charter-and-remote-code-exclusion.md) | Established the root Security Charter, 14 Protection Domain contracts, 14 code-admission gates, and complete 25-pair C0–C4 communication matrix; wired exact PD/RCG selections into every Feature and Test; hardened deploy/HBP/WCI specifications against executable injection; extended CI and filed structural `REPORT-26`. |
+| [`session/hand-2026-07-26/32-story-p0-04-02-idt-apic-bring-up.md`](../session/hand-2026-07-26/32-story-p0-04-02-idt-apic-bring-up.md) | Implemented the real 256-entry IDT and local-APIC timer boot path, retired the legacy PIC, added fail-closed unrouted vectors and Tier-0 fixtures, and filed `REPORT-27`; domain-aware exception teardown, TSS/IST, and a production tick consumer remain open. |
+| [`session/hand-2026-07-26/33-security-charter-review-and-next-steps.md`](../session/hand-2026-07-26/33-security-charter-review-and-next-steps.md) | Confirmed the Security Charter and complete C0–C4 matrix as governing, repaired stale assurance-gate counts after IDT/APIC landed, and made the dashboard theme unconditionally dark. |
+| [`session/hand-2026-07-26/34-whole-system-context-and-application-flight-plan.md`](../session/hand-2026-07-26/34-whole-system-context-and-application-flight-plan.md) | Joined Goals, performance, applications, and security through 19 application-platform contracts and nine landing zones; expanded the Charter for optional runtimes, added CI validation/dashboard context, and filed structural `REPORT-28` without claiming runtime support. |
+| [`session/hand-2026-07-26/35-story-p0-04-03-pci-bus-enumeration.md`](../session/hand-2026-07-26/35-story-p0-04-03-pci-bus-enumeration.md) | Implemented and Verified `STORY-P0-04-03` (read-only legacy-CAM PCI bus-0 enumeration into the new `hal::device::DeviceTable`, Tier 0 QEMU-verified via `fixture-pci-enumeration` plus 14 host tests, wired into the real boot path, `REPORT-29`) — completes `FEAT-P0-04` (3/3) and makes every EPIC-P0 Story functionally Verified; ECAM, bridge traversal, and device-IRQ routing named as deferred. |
+| [`session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md`](../session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md) | Recorded EPIC-P0's functional closure and created/decomposed `EPIC-P1` (Determinism Proof): 6 Features, 10 `specified` Stories with machine-checked contract rows (14 Features / 35 Stories / 1,500 Story-performance contracts in the spine), faults-before-CR3 ordering preserved, hardware-tier timing evidence named as standing release-blocking debt. No implementation started; Tests arrive test-first per Story. |
+| [`session/hand-2026-07-26/37-epic-p1-mandate-hardware-direction-and-loose-ends.md`](../session/hand-2026-07-26/37-epic-p1-mandate-hardware-direction-and-loose-ends.md) | Next-session mandate from four user directives: Raspberry Pi 5 named the only viable short-term hardware (ARM64 consequence and sequencing decision recorded as LE-09), TDD enforcement reaffirmed, goal-list discrepancy closed, and all open caveats promoted into the canonical loose-ends register LE-01–LE-10 (carried forward in every EPIC-P1 handover until fixed or explicitly retired). Start point: `STORY-P1-01-01` with an arch-neutral measurement API; cheap CI probe (LE-07) before deep work. |
 
 ## How to keep this in sync
 
-1. Adding a new Story or Test: add a row here (or extend an existing Feature's rows) in the same PR.
+1. Adding a new Feature, Story, or Test: add a row here (or extend an existing Feature's rows), add the Feature to `assurance/feature-contracts.tsv`, and add/update the Story in `assurance/story-contracts.tsv` in the same PR. An unmapped Feature or Story fails CI.
 2. A Test's Status changes (e.g. first pass, or a regression): update the Status column and add the Report row in the "Session cross-reference" table if a handover discusses it, in the same PR that adds the Report file under `goals/reports/`.
 3. Decomposing a backlog Epic into Features/Stories: move it out of the "not yet decomposed" section into its own fully-populated block, matching the `EPIC-P0` pattern above.
+4. A Story becomes assurance `verified` only when its dated Reports close every applicable mapped release gate with raw evidence. Functional status and assurance status are never conflated.

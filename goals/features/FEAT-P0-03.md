@@ -30,6 +30,14 @@ The deterministic memory model required by Goal **G-RT-2**: static or pool-based
 
 Per [`session/hand-2026-07-26/08-cover-note-mvp-continuation-and-ns-file-access.md`](../../session/hand-2026-07-26/08-cover-note-mvp-continuation-and-ns-file-access.md), this Feature is also the direct prerequisite for Phase 6's mmap/pointer-based model-file access (TinyOS's own kernel virtual-memory manager, demand-paging a file-backed region) — whoever extends `Pool<T, N>` toward a virtual-memory allocator should keep that consumer in mind, not just the RT task/IPC pool use case this Feature's own title suggests. This is also recorded in project memory (`inference-mmap-model-loading`).
 
+## Containment contract
+
+Canonical row: [`assurance/feature-contracts.tsv`](../assurance/feature-contracts.tsv) · implementation **C1** · subjects **C1–C4** · boundary tests **BND-04, -15, -20**.
+
+That row also selects this Feature’s [`PD-*`](../security/protection-domain-contracts.tsv) and [`RCG-*`](../security/code-admission-gates.tsv) Security Charter obligations. Every Test repeats the exact selections and CI rejects drift.
+
+Allocation conveys storage, never cross-domain authority. Handles and pages are generation-safe, capacity-bounded, wiped or invalidated before cross-class reuse, and incapable of aliasing a previous owner after teardown. Required evidence includes capacity edges, stale-handle attacks, residual-data checks, deterministic exhaustion, and one-defect containment without consuming another class's reserve.
+
 ## Exit criteria
 
 `STORY-P0-03-01` through `-03` all reach **Verified**. **Met**, as of 2026-07-26 (`-01`/`-03`: `REPORT-2026-07-26-04`; `-02`: `REPORT-2026-07-26-14`).

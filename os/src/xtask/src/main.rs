@@ -8,8 +8,10 @@
 
 #![forbid(unsafe_code)]
 
+mod assurance;
 mod governance;
 mod performance_catalogue;
+mod txe;
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -34,7 +36,7 @@ fn main() -> ExitCode {
     let mut args = env::args().skip(1);
     let Some(command) = args.next() else {
         eprintln!(
-            "usage: cargo run -p xtask -- <qemu-x86_64|check-crate-sizes|check-performance-catalogue|governance-fixture-test> [options]"
+            "usage: cargo run -p xtask -- <qemu-x86_64|check-assurance-spine|check-crate-sizes|check-image-size|check-performance-catalogue|governance-fixture-test|pack-txe> [options]"
         );
         return ExitCode::from(XtaskExit::HarnessError as u8);
     };
@@ -53,6 +55,15 @@ fn main() -> ExitCode {
                 Some("context-switch") => ("kernel", "kernel", Some("fixture-context-switch")),
                 Some("address-space") => ("exec", "exec-fixture", None),
                 Some("win32-shim") => ("exec", "win32-shim-fixture", None),
+                Some("blue-sharc") => ("exec", "blue-sharc-fixture", None),
+                Some("blue-sharc-broken") => ("exec", "blue-sharc-broken-fixture", None),
+                Some("shared-memory") => ("exec", "shared-memory-fixture", None),
+                Some("idt-apic-timer") => ("kernel", "kernel", Some("fixture-idt-apic-timer")),
+                Some("idt-apic-unrouted") => {
+                    ("kernel", "kernel", Some("fixture-idt-apic-unrouted"))
+                }
+                Some("pci-enumeration") => ("kernel", "kernel", Some("fixture-pci-enumeration")),
+                Some("pool-bench") => ("kernel", "kernel", Some("fixture-pool-bench")),
                 Some(other) => {
                     eprintln!("xtask: unknown --fixture value '{other}'");
                     return ExitCode::from(XtaskExit::HarnessError as u8);
@@ -96,6 +107,72 @@ fn main() -> ExitCode {
                 }
                 Err(message) => {
                     eprintln!("xtask: performance catalogue invalid: {message}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        "check-assurance-spine" => {
+            let result = os_root().and_then(|root| {
+                let repo_root = root.parent().ok_or_else(|| {
+                    format!("could not resolve repository root from {}", root.display())
+                })?;
+                assurance::check_assurance_spine(repo_root)
+            });
+            match result {
+                Ok(summary) => {
+                    println!(
+                        "assurance-spine-check: {} Features, {} Stories, {} Tests, {} Reports, {} containment classes, {} boundary tests, {} security controls, {} Protection Domain contracts, {} code-admission gates, {} class communication pairs, {} application/platform targets, {} landing zones, {} selected Story/performance contracts, {} selected application/performance contracts",
+                        summary.feature_count,
+                        summary.story_count,
+                        summary.test_count,
+                        summary.report_count,
+                        summary.containment_class_count,
+                        summary.boundary_test_count,
+                        summary.security_control_count,
+                        summary.protection_domain_contract_count,
+                        summary.code_admission_gate_count,
+                        summary.class_communication_pair_count,
+                        summary.application_platform_count,
+                        summary.landing_zone_count,
+                        summary.selected_performance_contracts,
+                        summary.selected_application_performance_contracts
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(message) => {
+                    eprintln!("xtask: assurance spine invalid: {message}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        "pack-txe" => {
+            let rest: Vec<String> = args.collect();
+            let input = rest.iter().find_map(|a| a.strip_prefix("--input=").map(str::to_string));
+            let output = rest.iter().find_map(|a| a.strip_prefix("--output=").map(str::to_string));
+            let (Some(input), Some(output)) = (input, output) else {
+                eprintln!("usage: cargo run -p xtask -- pack-txe --input=<path> --output=<path>");
+                return ExitCode::from(XtaskExit::HarnessError as u8);
+            };
+            match pack_txe(&input, &output) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(message) => {
+                    eprintln!("xtask: {message}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        "check-image-size" => {
+            let ceiling = args
+                .find_map(|a| a.strip_prefix("--ceiling=").map(str::to_string))
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(8 * 1024 * 1024);
+            match check_image_size(ceiling) {
+                Ok(size) => {
+                    println!("check-image-size: kernel image {size} bytes (ceiling {ceiling})");
+                    ExitCode::SUCCESS
+                }
+                Err(message) => {
+                    eprintln!("xtask: G-DX-8 image-size ceiling violated: {message}");
                     ExitCode::FAILURE
                 }
             }
@@ -214,6 +291,63 @@ fn qemu_x86_64(
         )),
         None => Err("QEMU process terminated by signal, not a normal exit".to_string()),
     }
+}
+
+/// Reads `input`, re-layouts it via [`txe::pack`] (`STORY-P0-08-01`), and
+/// writes the result to `output` — the host-side half of producing a TXE
+/// from a real PE build artifact.
+fn pack_txe(input: &str, output: &str) -> Result<(), String> {
+    let bytes = std::fs::read(input).map_err(|e| format!("failed to read {input}: {e}"))?;
+    let packed = txe::pack(&bytes).map_err(|e| format!("failed to pack {input}: {e:?}"))?;
+    std::fs::write(output, &packed).map_err(|e| format!("failed to write {output}: {e}"))?;
+    println!("pack-txe: wrote {output} ({} bytes, from {} bytes)", packed.len(), bytes.len());
+    Ok(())
+}
+
+/// Builds `kernel`'s own release binary against the custom x86_64 target and
+/// checks its file size against `ceiling` — `G-DX-8`'s whole-image (not
+/// per-crate) budget, applied to what actually ships (`kernel`'s own linked
+/// binary) rather than to Tier 0 fixture binaries (`exec-fixture`,
+/// `win32-shim-fixture`, `blue-sharc-fixture`, ...), which exist only to
+/// drive QEMU-harness tests and are never part of a shipped image — the same
+/// "test code doesn't count" convention `check-crate-sizes` already applies
+/// by excluding `#[cfg(test)]` bodies. `os/src/drivers*` doesn't exist as a
+/// crate yet, so there is nothing to exclude from this measurement today;
+/// `kernel` links no `exec` code either (no production call site exists
+/// yet, per `STORY-P0-06-03`/`-04`'s own precedent for the identical gap),
+/// so this measures exactly what ships right now, not a future superset.
+fn check_image_size(ceiling: u64) -> Result<u64, String> {
+    let os_root = os_root()?;
+    let target_spec = os_root.join("targets").join("x86_64-tinyos.json");
+
+    let build_status = Command::new("cargo")
+        .current_dir(&os_root)
+        .arg("build")
+        .arg("--release")
+        .arg("-p")
+        .arg("kernel")
+        .arg("--target")
+        .arg(&target_spec)
+        .arg("-Z")
+        .arg("json-target-spec")
+        .arg("-Z")
+        .arg("build-std=core,compiler_builtins")
+        .arg("-Z")
+        .arg("build-std-features=compiler-builtins-mem")
+        .status()
+        .map_err(|e| format!("failed to invoke cargo build: {e}"))?;
+    if !build_status.success() {
+        return Err("kernel release build failed".to_string());
+    }
+
+    let kernel_elf = os_root.join("target").join("x86_64-tinyos").join("release").join("kernel");
+    let size = std::fs::metadata(&kernel_elf)
+        .map_err(|e| format!("could not stat {}: {e}", kernel_elf.display()))?
+        .len();
+    if size > ceiling {
+        return Err(format!("kernel image is {size} bytes, exceeding the {ceiling}-byte ceiling"));
+    }
+    Ok(size)
 }
 
 /// Locates `qemu-system-x86_64` on `PATH`, falling back to the default

@@ -225,6 +225,25 @@ pub fn read_file<const FRAMES: usize>(
     Ok(0)
 }
 
+/// `KERNEL32.dll!HeapAlloc`, scoped the same way as [`write_file`]/
+/// [`read_file`] (`STORY-P0-05-04`).
+///
+/// This kernel has no real heap allocator wired to a loaded process yet — a
+/// separate, unimplemented subsystem, flagged here rather than silently
+/// assumed complete, mirroring `write_file`'s own "no real driver backing
+/// it yet" precedent. A well-formed, in-policy call proves the capability-
+/// mediation path this Story's checkpoint exercises (an allowlisted call
+/// resolves and is only permitted when the policy grants it) by reporting
+/// `size` back as a stand-in allocation handle, the same "report success,
+/// no real backing yet" shape `write_file` already established — it does
+/// not yet hand back real, usable memory.
+pub fn heap_alloc(policy: &impl CapabilityPolicy, size: u64) -> Result<u64, ShimError> {
+    if !policy.is_granted(Api::HeapAlloc) {
+        return Err(ShimError::PolicyDenied);
+    }
+    Ok(size)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,6 +307,10 @@ mod tests {
     #[repr(C, align(4096))]
     struct AlignedPages([u8; 8192]);
 
+    fn staging() -> AlignedPages {
+        AlignedPages([0; 8192])
+    }
+
     const RW: Permissions = Permissions { read: true, write: true, execute: false };
     const IMAGE_BASE: u64 = 0x1_4000_0000;
 
@@ -306,12 +329,19 @@ mod tests {
     #[test]
     fn write_file_is_rejected_when_the_policy_denies_it() {
         let bytes = AlignedPages([0; 8192]);
+        let mut staging = staging();
         let mut pml4 = PageTable::new();
         let mut frame_pool: Pool<PageTable, 4> = Pool::new();
         let sections = one_rw_section();
-        let space =
-            AddressSpace::create(&mut pml4, &mut frame_pool, &sections, IMAGE_BASE, &bytes.0)
-                .unwrap();
+        let space = AddressSpace::create(
+            &mut pml4,
+            &mut frame_pool,
+            &sections,
+            IMAGE_BASE,
+            &bytes.0,
+            &mut staging.0,
+        )
+        .unwrap();
 
         let result = write_file(
             &DenyPolicy(Api::WriteFile),
@@ -328,12 +358,19 @@ mod tests {
     #[test]
     fn write_file_rejects_a_buffer_running_past_the_mapped_section() {
         let bytes = AlignedPages([0; 8192]);
+        let mut staging = staging();
         let mut pml4 = PageTable::new();
         let mut frame_pool: Pool<PageTable, 4> = Pool::new();
         let sections = one_rw_section();
-        let space =
-            AddressSpace::create(&mut pml4, &mut frame_pool, &sections, IMAGE_BASE, &bytes.0)
-                .unwrap();
+        let space = AddressSpace::create(
+            &mut pml4,
+            &mut frame_pool,
+            &sections,
+            IMAGE_BASE,
+            &bytes.0,
+            &mut staging.0,
+        )
+        .unwrap();
 
         let result = write_file(
             &AllowAllPolicy,
@@ -348,12 +385,19 @@ mod tests {
     #[test]
     fn write_file_rejects_a_buffer_pointing_at_unmapped_memory() {
         let bytes = AlignedPages([0; 8192]);
+        let mut staging = staging();
         let mut pml4 = PageTable::new();
         let mut frame_pool: Pool<PageTable, 4> = Pool::new();
         let sections = one_rw_section();
-        let space =
-            AddressSpace::create(&mut pml4, &mut frame_pool, &sections, IMAGE_BASE, &bytes.0)
-                .unwrap();
+        let space = AddressSpace::create(
+            &mut pml4,
+            &mut frame_pool,
+            &sections,
+            IMAGE_BASE,
+            &bytes.0,
+            &mut staging.0,
+        )
+        .unwrap();
 
         // Address 0 is inside the kernel's own reserved region — never
         // part of any process's mapped section.
@@ -368,6 +412,7 @@ mod tests {
     fn read_file_rejects_a_read_only_destination_buffer() {
         const RX: Permissions = Permissions { read: true, write: false, execute: true };
         let bytes = AlignedPages([0; 8192]);
+        let mut staging = staging();
         let mut pml4 = PageTable::new();
         let mut frame_pool: Pool<PageTable, 4> = Pool::new();
         let sections = [SectionDescriptor {
@@ -377,9 +422,15 @@ mod tests {
             file_size: PAGE_SIZE as u32,
             permissions: RX,
         }];
-        let space =
-            AddressSpace::create(&mut pml4, &mut frame_pool, &sections, IMAGE_BASE, &bytes.0)
-                .unwrap();
+        let space = AddressSpace::create(
+            &mut pml4,
+            &mut frame_pool,
+            &sections,
+            IMAGE_BASE,
+            &bytes.0,
+            &mut staging.0,
+        )
+        .unwrap();
 
         let result = read_file(&AllowAllPolicy, &space, Buffer { virt_addr: IMAGE_BASE, len: 16 });
         assert_eq!(result, Err(ShimError::OutOfBounds));
@@ -390,12 +441,19 @@ mod tests {
     #[test]
     fn write_file_succeeds_for_a_well_formed_in_bounds_buffer() {
         let bytes = AlignedPages([0; 8192]);
+        let mut staging = staging();
         let mut pml4 = PageTable::new();
         let mut frame_pool: Pool<PageTable, 4> = Pool::new();
         let sections = one_rw_section();
-        let space =
-            AddressSpace::create(&mut pml4, &mut frame_pool, &sections, IMAGE_BASE, &bytes.0)
-                .unwrap();
+        let space = AddressSpace::create(
+            &mut pml4,
+            &mut frame_pool,
+            &sections,
+            IMAGE_BASE,
+            &bytes.0,
+            &mut staging.0,
+        )
+        .unwrap();
 
         let result = write_file(&AllowAllPolicy, &space, Buffer { virt_addr: IMAGE_BASE, len: 64 });
         assert_eq!(result, Ok(64));
@@ -404,14 +462,34 @@ mod tests {
     #[test]
     fn zero_length_buffer_is_always_in_bounds() {
         let bytes = AlignedPages([0; 8192]);
+        let mut staging = staging();
         let mut pml4 = PageTable::new();
         let mut frame_pool: Pool<PageTable, 4> = Pool::new();
         let sections = one_rw_section();
-        let space =
-            AddressSpace::create(&mut pml4, &mut frame_pool, &sections, IMAGE_BASE, &bytes.0)
-                .unwrap();
+        let space = AddressSpace::create(
+            &mut pml4,
+            &mut frame_pool,
+            &sections,
+            IMAGE_BASE,
+            &bytes.0,
+            &mut staging.0,
+        )
+        .unwrap();
 
         let result = write_file(&AllowAllPolicy, &space, Buffer { virt_addr: 0, len: 0 });
         assert_eq!(result, Ok(0));
+    }
+
+    // STORY-P0-05-04 AC1: a well-formed, in-policy HeapAlloc call succeeds.
+    #[test]
+    fn heap_alloc_succeeds_when_granted() {
+        assert_eq!(heap_alloc(&AllowAllPolicy, 64), Ok(64));
+    }
+
+    // STORY-P0-05-04: a policy-denied HeapAlloc call is rejected, not
+    // silently degraded to a no-op.
+    #[test]
+    fn heap_alloc_is_rejected_when_the_policy_denies_it() {
+        assert_eq!(heap_alloc(&DenyPolicy(Api::HeapAlloc), 64), Err(ShimError::PolicyDenied));
     }
 }

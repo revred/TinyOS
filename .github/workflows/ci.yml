@@ -12,7 +12,7 @@ defaults:
 
 jobs:
   governance-gates:
-    name: Format, lint, crate-size ceiling, missing_docs
+    name: Format, lint, size, assurance, missing_docs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,6 +32,9 @@ jobs:
 
       - name: Performance catalogue integrity (625 tests)
         run: cargo run -p xtask -- check-performance-catalogue
+
+      - name: Assurance spine coverage (Stories, performance, security)
+        run: cargo run -p xtask -- check-assurance-spine
 
       - name: missing_docs check
         run: cargo doc --workspace --no-deps

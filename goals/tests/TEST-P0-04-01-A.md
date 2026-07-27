@@ -3,6 +3,14 @@
 Status: **Verified — passing locally, 2026-07-26**
 Story: [`STORY-P0-04-01`](../stories/STORY-P0-04-01.md)
 Tier: Tier 0 (QEMU x86_64), per [Target Hardware & Test Matrix](../../README.md#target-hardware--test-matrix)
+Assurance contract: [`goals/assurance/story-contracts.tsv`](../assurance/story-contracts.tsv)
+Performance domains: `D01`, `D22`
+Security controls: `SEC-13`, `SEC-18`, `SEC-19`, `SEC-20`
+Containment classes: `C0`, `C1`, `C2`
+Boundary tests: `BND-02`, `BND-06`, `BND-07`, `BND-08`, `BND-18`, `BND-20`
+Protection Domain contracts: `PD-02`, `PD-08`, `PD-10`, `PD-12`, `PD-13`
+Code admission gates: `RCG-07`, `RCG-12`, `RCG-13`, `RCG-14`
+Assurance state: `baseline-debt`
 
 ## Specification
 

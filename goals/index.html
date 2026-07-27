@@ -6,44 +6,41 @@
 <title>TinyOS Goals — V&amp;V Progress Dashboard</title>
 <style>
   :root {
-    color-scheme: light dark;
-    --bg: #ffffff;
-    --fg: #1a1a1a;
-    --muted: #5a5a5a;
-    --border: #d8d8d8;
-    --code-bg: #f2f2f2;
-    --accent: #0b5fff;
-    --tag-bg: #eef2ff;
-    --card-bg: #fafafa;
-    --planned: #6b7280;
-    --planned-bg: #f1f2f4;
-    --progress: #b45309;
-    --progress-bg: #fef3c7;
-    --blocked: #b91c1c;
-    --blocked-bg: #fee2e2;
-    --verified: #15803d;
-    --verified-bg: #dcfce7;
+    color-scheme: dark;
+    --bg: #14161a;
+    --fg: #e8e8e8;
+    --muted: #a0a0a0;
+    --border: #333740;
+    --code-bg: #1e2126;
+    --accent: #6fa8ff;
+    --tag-bg: #1c2333;
+    --card-bg: #191c21;
+    --planned: #9ca3af;
+    --planned-bg: #24272e;
+    --progress: #fbbf24;
+    --progress-bg: #3a2e0e;
+    --blocked: #f87171;
+    --blocked-bg: #3a1414;
+    --verified: #4ade80;
+    --verified-bg: #10321c;
+    --accent-soft: #17233b;
+    --accent-border: #315790;
+    --performance: #c4b5fd;
+    --performance-bg: #281d3b;
+    --performance-border: #574078;
+    --security: #6ee7b7;
+    --security-bg: #122f2a;
+    --security-border: #285c50;
+    --containment: #7dd3fc;
+    --containment-bg: #112c3a;
+    --containment-border: #28586c;
+    --applications: #fda4af;
+    --applications-bg: #351a22;
+    --applications-border: #713342;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #14161a;
-      --fg: #e8e8e8;
-      --muted: #a0a0a0;
-      --border: #333740;
-      --code-bg: #1e2126;
-      --accent: #6fa8ff;
-      --tag-bg: #1c2333;
-      --card-bg: #191c21;
-      --planned: #9ca3af;
-      --planned-bg: #24272e;
-      --progress: #fbbf24;
-      --progress-bg: #3a2e0e;
-      --blocked: #f87171;
-      --blocked-bg: #3a1414;
-      --verified: #4ade80;
-      --verified-bg: #10321c;
-    }
-  }
+  /* This page is always dark, unconditionally — not contingent on
+     OS/browser color-scheme preference, so it renders the same for every
+     viewer regardless of their system setting. */
   * { box-sizing: border-box; }
   body {
     max-width: 960px;
@@ -132,27 +129,307 @@
     padding: 0.7rem 1rem;
     margin-top: 0.5rem;
   }
+  .trace-model {
+    margin: 1.25rem 0 1.75rem;
+    padding: 1.15rem;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background:
+      linear-gradient(135deg, var(--accent-soft) 0, transparent 42%),
+      var(--card-bg);
+  }
+  .trace-kicker {
+    margin-bottom: 0.7rem;
+    color: var(--accent);
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+  }
+  .trace-flow {
+    display: grid;
+    grid-template-columns:
+      minmax(88px, 1fr) 22px minmax(88px, 1fr) 22px minmax(88px, 1fr)
+      22px minmax(88px, 1fr) 22px minmax(88px, 1fr) 22px minmax(88px, 1fr);
+    align-items: stretch;
+  }
+  .trace-node {
+    min-width: 0;
+    padding: 0.7rem 0.45rem;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--bg);
+    text-align: center;
+  }
+  .trace-node.delivery {
+    border-color: var(--accent-border);
+    background: var(--accent-soft);
+  }
+  .trace-node .step-number {
+    display: block;
+    margin-bottom: 0.18rem;
+    color: var(--muted);
+    font-size: 0.65rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+  }
+  .trace-node strong {
+    display: block;
+    font-size: 0.9rem;
+    line-height: 1.2;
+  }
+  .trace-node small {
+    display: block;
+    margin-top: 0.22rem;
+    color: var(--muted);
+    font-size: 0.68rem;
+    line-height: 1.25;
+  }
+  .trace-arrow {
+    align-self: center;
+    color: var(--muted);
+    font-size: 1rem;
+    text-align: center;
+  }
+  .assurance-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin-top: 0.85rem;
+  }
+  .assurance-lane {
+    padding: 0.8rem;
+    border: 1px solid;
+    border-radius: 10px;
+  }
+  .assurance-lane.performance {
+    border-color: var(--performance-border);
+    background: var(--performance-bg);
+  }
+  .assurance-lane.security {
+    border-color: var(--security-border);
+    background: var(--security-bg);
+  }
+  .assurance-lane.containment {
+    border-color: var(--containment-border);
+    background: var(--containment-bg);
+  }
+  .assurance-lane.applications {
+    border-color: var(--applications-border);
+    background: var(--applications-bg);
+  }
+  .lane-heading {
+    display: flex;
+    gap: 0.75rem;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 0.6rem;
+  }
+  .performance .lane-heading strong { color: var(--performance); }
+  .security .lane-heading strong { color: var(--security); }
+  .containment .lane-heading strong { color: var(--containment); }
+  .applications .lane-heading strong { color: var(--applications); }
+  .lane-heading span {
+    color: var(--muted);
+    font-size: 0.72rem;
+    text-align: right;
+  }
+  .lane-steps {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.35rem;
+  }
+  .lane-step {
+    position: relative;
+    padding: 0.45rem 0.3rem;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--bg) 78%, transparent);
+    font-size: 0.73rem;
+    font-weight: 700;
+    line-height: 1.25;
+    text-align: center;
+  }
+  .lane-step + .lane-step::before {
+    position: absolute;
+    left: -0.42rem;
+    color: var(--muted);
+    content: "→";
+    font-weight: 400;
+  }
+  .session-rail {
+    display: flex;
+    gap: 0.7rem;
+    align-items: center;
+    margin-top: 0.75rem;
+    padding: 0.55rem 0.75rem;
+    border-top: 1px dashed var(--border);
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+  .session-rail strong {
+    color: var(--fg);
+    white-space: nowrap;
+  }
+  .context-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin: 1rem 0;
+  }
+  .context-card {
+    min-width: 0;
+    padding: 0.9rem;
+    border: 1px solid var(--border);
+    border-top-width: 3px;
+    border-radius: 10px;
+    background: var(--card-bg);
+  }
+  .context-card.goals { border-top-color: var(--accent); }
+  .context-card.performance { border-top-color: var(--performance); }
+  .context-card.applications { border-top-color: var(--applications); }
+  .context-card.security { border-top-color: var(--security); }
+  .context-card strong {
+    display: block;
+    margin-bottom: 0.35rem;
+  }
+  .context-card p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.8rem;
+    line-height: 1.45;
+  }
+  .horizon {
+    display: inline-block;
+    margin-bottom: 0.45rem;
+    color: var(--muted);
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .landing-table td:first-child {
+    width: 4.5rem;
+    color: var(--accent);
+    font-weight: 800;
+    white-space: nowrap;
+  }
+  .landing-table td:last-child {
+    width: 7rem;
+    white-space: nowrap;
+  }
+  @media (max-width: 860px) {
+    .assurance-grid { grid-template-columns: 1fr; }
+    .context-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 720px) {
+    .trace-flow {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.5rem;
+    }
+    .trace-arrow { display: none; }
+  }
+  @media (max-width: 420px) {
+    body { padding-right: 1rem; padding-left: 1rem; }
+    .trace-model { padding: 0.85rem; }
+    .trace-flow { grid-template-columns: 1fr; }
+    .context-grid { grid-template-columns: 1fr; }
+    .lane-heading { display: block; }
+    .lane-heading span {
+      display: block;
+      margin-top: 0.15rem;
+      text-align: left;
+    }
+    .lane-steps { grid-template-columns: 1fr; }
+    .lane-step + .lane-step::before {
+      top: -0.44rem;
+      left: 50%;
+      transform: rotate(90deg);
+    }
+    .session-rail { align-items: flex-start; }
+  }
 </style>
 </head>
 <body>
 
 <h1>TinyOS Goals — V&amp;V Progress Dashboard</h1>
-<p class="muted">Goals → Epics → Features → Stories → Tests → Reports, cross-referenced against session handovers.</p>
-<div class="snapshot-note">This page is a manually-updated status snapshot, not an auto-refreshing live feed — there is no build/server behind it. It should be updated in the same PR that changes any Epic/Feature/Story/Test status, per <a href="traceability-matrix.md"><code>goals/traceability-matrix.md</code></a>'s sync rule. Treat "last updated" below as the actual freshness signal, not the word "dashboard."</p>
-<p class="muted" style="margin-top:0.5rem">Last updated: 26 July 2026 · Session: <a href="../session/hand-2026-07-26/index.html">hand-2026-07-26</a></p>
+<p class="muted">Goals → Epics → Features → Stories → Tests → Reports, crossed at every level by mandatory performance, security, and containment assurance.</p>
+<div class="snapshot-note">This page is a manually-updated status snapshot, not an auto-refreshing live feed — there is no build/server behind it. It should be updated in the same PR that changes any Epic/Feature/Story/Test status, per <a href="traceability-matrix.md"><code>goals/traceability-matrix.md</code></a>'s sync rule. Treat "last updated" below as the actual freshness signal, not the word "dashboard."</div>
+<p class="muted" style="margin-top:0.5rem">Last updated: 27 July 2026 · Session: <a href="../session/hand-2026-07-27/index.html">hand-2026-07-27</a> (previous: <a href="../session/hand-2026-07-26/index.html">hand-2026-07-26</a>)</p>
 
 <h2>Overall progress</h2>
 <div class="stat-row">
-  <div class="stat"><div class="n">1&nbsp;/&nbsp;9</div><div class="l">Epics decomposed</div></div>
-  <div class="stat"><div class="n">5</div><div class="l">Features (EPIC-P0)</div></div>
-  <div class="stat"><div class="n">17&nbsp;/&nbsp;23</div><div class="l">Stories verified</div></div>
-  <div class="stat"><div class="n">16&nbsp;/&nbsp;17</div><div class="l">Tests verified (local)</div></div>
+  <div class="stat"><div class="n">2&nbsp;/&nbsp;9</div><div class="l">Epics decomposed</div></div>
+  <div class="stat"><div class="n">14</div><div class="l">Features (EPIC-P0 + P1)</div></div>
+  <div class="stat"><div class="n">25&nbsp;/&nbsp;35</div><div class="l">Stories functionally verified</div></div>
+  <div class="stat"><div class="n">24&nbsp;/&nbsp;24</div><div class="l">Test docs verified (local)</div></div>
 </div>
-<div class="bar-track"><div class="bar-fill" style="width:74%"></div></div>
-<p class="muted" style="font-size:0.85rem">16 of 17 currently-specified Tests (<code>goals/tests/*.md</code>) have a passing Report, as of 2026-07-26 — verified locally against the pinned nightly toolchain; not yet observed passing in CI. `STORY-P0-02-01` has 5 passing test functions with no separate `TEST-*.md` doc (see its Story page), so isn't counted in this Test-doc figure despite being Verified. `FEAT-P0-02` (preemptive priority scheduler core, 5/5 Stories), `FEAT-P0-03` (static/pool memory allocator, 3/3 Stories), and `FEAT-P0-06` (spoor — a universal 64-bit audit atom borrowed from the sibling `Sharc.Blue` project's own doctrine, 2/2 Stories: the packed <code>Spoor</code> type plus a new <code>kernel::spoor_journal::SpoorJournal&lt;N&gt;</code> ring buffer) are all now fully Verified. **`FEAT-P0-07`** (local IPC — message channels and shared-memory grants, explicitly never a network-addressable socket, mirroring `Sharc.Blue`'s own retired-loopback-TCP doctrine) specified, not yet implemented; a real TCP/IP stack is tracked separately under `EPIC-P3`, not this Epic. `FEAT-P0-05.md`/`STORY-P0-05-04.md`'s framing of `blue-sharc.exe` was corrected — it's `Sharc.Blue`'s MCP sidecar/context engine, not an inference runtime. `STORY-P0-04-02`–`-03`, `STORY-P0-05-04`, and both `FEAT-P0-07` Stories remain not started.</p>
+<div class="bar-track"><div class="bar-fill" style="width:71%"></div></div>
+<p class="muted" style="font-size:0.85rem">24 of 24 committed <code>TEST-*.md</code> documents have a passing Report, as of 2026-07-27 — verified locally against the pinned nightly toolchain; not yet observed passing in CI. <code>STORY-P0-02-01</code> has 5 passing test functions with no separate Test document, so is not included in the Test-document figure. The repository contains 35 Story files (all 25 EPIC-P0 Stories functionally Verified — <code>STORY-P0-04-03</code>, the last, closed with read-only PCI bus-0 enumeration; EPIC-P1's 10 are Specified, not started) and 24 Test documents. Assurance progress is tracked separately below and must not be inferred from this bar.</p>
 
-<h2>EPIC-P0 — Kernel Skeleton <span class="badge progress">IN PROGRESS</span></h2>
-<p><a href="epics/EPIC-P0.md">epics/EPIC-P0.md</a> · Roadmap Phase 0 · Goals: G-RT-1, G-RT-2, G-RT-7, G-HW-4</p>
+<h2>Assurance release status <span class="badge blocked">BASELINE DEBT</span></h2>
+<div class="stat-row">
+  <div class="stat"><div class="n">625</div><div class="l">Performance catalogue cells</div></div>
+  <div class="stat"><div class="n">5&nbsp;+&nbsp;20</div><div class="l">Containment classes + boundary tests</div></div>
+  <div class="stat"><div class="n">14&nbsp;+&nbsp;14&nbsp;+&nbsp;25</div><div class="l">PD + code gates + class paths</div></div>
+  <div class="stat"><div class="n">35&nbsp;/&nbsp;35</div><div class="l">Stories mapped by CI</div></div>
+  <div class="stat"><div class="n">20</div><div class="l">Security controls</div></div>
+  <div class="stat"><div class="n">19&nbsp;+&nbsp;9</div><div class="l">Application targets + landing zones</div></div>
+  <div class="stat"><div class="n">0</div><div class="l">Stories assurance-verified</div></div>
+</div>
+<section class="trace-model" aria-labelledby="security-charter">
+  <div class="trace-kicker">Governing security charter</div>
+  <h3 id="security-charter" style="margin-top:0"><a href="../SECURITY_CHARTER.md">Protection Domains + remote-code exclusion</a></h3>
+  <p>One lightweight sandbox primitive combines private active memory, kernel-owned capabilities, CPU/resource budgets, provenance, lifecycle generation, containment class, and fault teardown. Every external byte remains non-executable C4 data unless all <a href="security/code-admission-gates.tsv">14 code-admission gates</a> pass; inspection is destroyed and admitted code starts as a fresh empty-authority C3 domain.</p>
+  <p class="muted"><a href="security/protection-domain-contracts.tsv">14 PD invariants</a> · <a href="security/code-admission-gates.tsv">14 remote-code gates</a> · <a href="security/class-communication-matrix.tsv">all 25 C0–C4 paths</a> · no remote W→X, process-write, in-place patch, JIT exception, driver load, deploy activation, or trust-root enrollment path.</p>
+</section>
+<p>The <a href="assurance/README.md"><strong>assurance spine</strong></a> is now a mandatory join through every Feature and Story. Every Feature declares its implementation/subject containment classes, authority posture, hostile inputs, boundary tests, and required evidence; every Story selects performance domains, security controls, and classes. The Security Charter is connected transitively and exhaustively to all 20 controls and 20 boundary tests. Current mappings expand to <strong>1,500 Story/performance contracts</strong>. All 25 functionally Verified Stories are honestly marked <code>baseline-debt</code>; EPIC-P1's 10 Stories are <code>specified</code>. No Story is yet assurance <code>verified</code> — converting that state is <code>EPIC-P1</code>'s explicit charge.</p>
+<p class="muted">This is a release block, not a claim that Phase 0 has failed. The current functional suite predates the assurance spine and does not contain raw latency tails, CPU-cycle, allocation, memory-footprint, signing, active-address-space isolation, hostile-load, or campaign-level security evidence. Those results must be produced by dated Reports; the dashboard will not backfill them from functional passes.</p>
+
+<h2>Whole-system flight plan</h2>
+<p>The destination is represented as four inseparable planes. A future application does not become a vague compatibility promise: it names its Goal, selects the performance cells it must earn, declares its execution and containment model, and identifies the security controls that remain true at the measured speed. The machine-readable joins are in <a href="context/application-platforms.tsv"><code>application-platforms.tsv</code></a> and <a href="context/landing-zones.tsv"><code>landing-zones.tsv</code></a>; the narrative architecture is <a href="../docs/whole-system-context.md"><code>docs/whole-system-context.md</code></a>.</p>
+<div class="context-grid" aria-label="Four-plane whole-system context">
+  <article class="context-card goals">
+    <span class="horizon">Why</span>
+    <strong>Goals</strong>
+    <p>Falsifiable outcomes: real-time control, quality-adjusted AI velocity, application compatibility, connectivity, developer experience, hardware and fleet operation.</p>
+  </article>
+  <article class="context-card performance">
+    <span class="horizon">How fast</span>
+    <strong>Performance</strong>
+    <p>625 core guardrails plus per-application selections for latency tails, CPU/GPU cycles, allocations, queues, memory, IPC, token delivery, load isolation and footprint.</p>
+  </article>
+  <article class="context-card applications">
+    <span class="horizon">What runs</span>
+    <strong>Applications</strong>
+    <p>19 explicit targets across native tasks, AI, UX frameworks, managed and JavaScript runtimes, games, browser, remote UX, host bridge, compatibility and fleet profiles.</p>
+  </article>
+  <article class="context-card security">
+    <span class="horizon">Under what authority</span>
+    <strong>Security</strong>
+    <p>Protection Domains, C0–C4 placement, signed admission, provenance, no ambient IPC/files/network, revocable grants, bounded brokers and fail-closed teardown.</p>
+  </article>
+</div>
+
+<h3>Destination landing zones</h3>
+<table class="landing-table">
+<thead><tr><th>ID</th><th>Outcome to earn</th><th>Horizon</th></tr></thead>
+<tbody>
+<tr><td>LZ-01</td><td>Bare-metal reflex and physical control without interference from UX, network, faults, or inference.</td><td>Next</td></tr>
+<tr><td>LZ-02</td><td>Quality-adjusted local AI: TTFT, useful tokens/s, memory bandwidth and energy measured together.</td><td>Later</td></tr>
+<tr><td>LZ-03</td><td>Tauri, Wails, .NET, Node and—after research—Bun through a common least-authority ABI.</td><td>Later</td></tr>
+<tr><td>LZ-04</td><td>Dangerous Dave, DOOM, Quake II and Quake III as graphics, audio, input and multiplayer proofs.</td><td>Later</td></tr>
+<tr><td>LZ-05</td><td>Chrome-class browsing and TinySpot remote UX as optional compartment systems.</td><td>Research</td></tr>
+<tr><td>LZ-06</td><td>TinyOS Linux Environment plus Windows TinyOS Tools, with no ambient cross-OS sharing.</td><td>Later</td></tr>
+<tr><td>LZ-07</td><td>Capability-scoped fleet and data-centre teamwork, including partition and worm containment.</td><td>Later</td></tr>
+<tr><td>LZ-08</td><td>A browser-hosted TinyOS lab for demos and conformance, never mislabeled as hard-real-time proof.</td><td>Research</td></tr>
+<tr><td>LZ-09</td><td>Minimal composable product profiles that publish proof of every absent driver, listener and parser.</td><td>Now</td></tr>
+</tbody>
+</table>
+<p class="muted"><strong>Current reality:</strong> the 256-entry IDT and local-APIC timer now run in the real boot path, and local IPC/shared grants are bounded and generation-safe. Per-task active <code>CR3</code>, domain-aware <code>#PF</code>/<code>#GP</code> teardown, capability spaces, executable sealing, IOMMU isolation, production TCP/IP, GPU/display/audio services and all application runtimes remain design or roadmap work. None of the landing zones is therefore claimed complete.</p>
+
+<h2>EPIC-P0 — Kernel Skeleton <span class="badge verified">FUNCTIONALLY COMPLETE (local)</span></h2>
+<p><a href="epics/EPIC-P0.md">epics/EPIC-P0.md</a> · Roadmap Phase 0 · Goals: G-RT-1, G-RT-2, G-RT-7, G-HW-4 · Closed functionally 2026-07-27 (Handover 36): all 25 Stories Verified, 24/24 Test docs passing locally.</p>
+<p class="muted" style="font-size:0.85rem"><strong>Not yet "done" outright — three things remain, per this Epic's own exit criteria:</strong> (1) a CI run observed green — every "Verified" claim is local-only, loose end <code>LE-07</code>; (2) release-grade assurance evidence — every Story is <code>baseline-debt</code>, and converting that (dated Reports with raw performance/security/containment data) is <code>EPIC-P1</code>'s explicit charge, with <a href="reports/REPORT-2026-07-27-01.md">REPORT-2026-07-27-01</a>'s honest D07 scoring showing how much is genuinely open; (3) hardware-tier validation — no physical board has run this work; the Pi 5 direction (<code>LE-09</code>) is the path. Functional scope itself is closed and will not reopen.</p>
 
 <table>
 <thead><tr><th>Feature</th><th>Status</th><th>Stories</th></tr></thead>
@@ -162,7 +439,7 @@
   <td><span class="badge verified">VERIFIED (local)</span></td>
   <td>
     <a href="stories/STORY-P0-01-01.md">STORY-P0-01-01</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-01-01-A.md">TEST-P0-01-01-A</a> · <a href="reports/REPORT-2026-07-26-01.md">Report</a><br>
-    <a href="stories/STORY-P0-01-02.md">STORY-P0-01-02</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-01-02-A.md">TEST-P0-01-02-A</a> · <a href="reports/REPORT-2026-07-26-03.md">Report</a><br>
+    <a href="stories/STORY-P0-01-02.md">STORY-P0-01-02</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-01-02-A.md">TEST-P0-01-02-A</a> · <a href="reports/REPORT-2026-07-26-03.md">Report</a> · <a href="reports/REPORT-2026-07-26-23.md">Assurance gate report</a> · <a href="reports/REPORT-2026-07-26-25.md">Containment-contract report</a> · <a href="reports/REPORT-2026-07-26-26.md">Security Charter report</a> · <a href="reports/REPORT-2026-07-26-28.md">Whole-system context report</a><br>
     <a href="stories/STORY-P0-01-03.md">STORY-P0-01-03</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-01-03-A.md">TEST-P0-01-03-A</a> · <a href="reports/REPORT-2026-07-26-02.md">Report</a>
   </td>
 </tr>
@@ -189,21 +466,22 @@
 </tr>
 <tr>
   <td><a href="features/FEAT-P0-04.md">FEAT-P0-04</a> — x86_64 HAL backend &amp; ACPI manifest normalization</td>
-  <td><span class="badge progress">IN PROGRESS</span></td>
+  <td><span class="badge verified">VERIFIED (local)</span></td>
   <td>
     <a href="stories/STORY-P0-04-01.md">STORY-P0-04-01</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-04-01-A.md">TEST-P0-04-01-A</a> · <a href="reports/REPORT-2026-07-26-06.md">Report</a><br>
-    <a href="stories/STORY-P0-04-02.md">STORY-P0-04-02</a> · <a href="stories/STORY-P0-04-03.md">STORY-P0-04-03</a> — <span class="badge planned">PLANNED</span>, not yet started
+    <a href="stories/STORY-P0-04-02.md">STORY-P0-04-02</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-04-02-A.md">TEST-P0-04-02-A</a> · <a href="reports/REPORT-2026-07-26-27.md">Report</a><br>
+    <a href="stories/STORY-P0-04-03.md">STORY-P0-04-03</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-04-03-A.md">TEST-P0-04-03-A</a> · <a href="reports/REPORT-2026-07-26-29.md">Report</a>
   </td>
 </tr>
 <tr>
   <td><a href="features/FEAT-P0-05.md">FEAT-P0-05</a> — Executable loading &amp; process compatibility (<code>Sharc.Blue</code> PE loader)</td>
-  <td><span class="badge progress">IN PROGRESS</span></td>
+  <td><span class="badge verified">VERIFIED (local)</span></td>
   <td>
     <a href="stories/STORY-P0-05-01.md">STORY-P0-05-01</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-05-01-A.md">TEST-P0-05-01-A</a> · <a href="reports/REPORT-2026-07-26-07.md">Report</a><br>
     <a href="stories/STORY-P0-05-02.md">STORY-P0-05-02</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-05-02-A.md">TEST-P0-05-02-A</a> · <a href="reports/REPORT-2026-07-26-09.md">Report</a><br>
     <a href="stories/STORY-P0-05-03.md">STORY-P0-05-03</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-05-03-A.md">TEST-P0-05-03-A</a> · <a href="reports/REPORT-2026-07-26-10.md">Report</a><br>
-    <a href="stories/STORY-P0-05-04.md">STORY-P0-05-04</a> · <a href="tests/TEST-P0-05-04-A.md">Test</a><br>
-    <span class="muted">`-04` remains <span class="badge planned">PLANNED</span>, not yet started — <code>STORY-P0-05-03</code> has now landed, unblocking `STORY-P0-05-04`</span>
+    <a href="stories/STORY-P0-05-04.md">STORY-P0-05-04</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-05-04-A.md">TEST-P0-05-04-A</a> · <a href="reports/REPORT-2026-07-26-20.md">Report</a><br>
+    <span class="muted">`-04`'s own acceptance criteria were rewritten before implementation — see <code>STORY-P0-05-04.md</code>'s correction note; the real <code>blue-sharc.exe</code>'s entry point is not executed this session (220 Win32/CRT imports across 14 DLLs, no CR3 switch/IDT/threads yet)</span>
   </td>
 </tr>
 <tr>
@@ -211,26 +489,44 @@
   <td><span class="badge verified">VERIFIED (local)</span></td>
   <td>
     <a href="stories/STORY-P0-06-01.md">STORY-P0-06-01</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-06-01-A.md">TEST-P0-06-01-A</a> · <a href="reports/REPORT-2026-07-26-15.md">Report</a><br>
-    <a href="stories/STORY-P0-06-02.md">STORY-P0-06-02</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-06-02-A.md">TEST-P0-06-02-A</a> · <a href="reports/REPORT-2026-07-26-16.md">Report</a>
+    <a href="stories/STORY-P0-06-02.md">STORY-P0-06-02</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-06-02-A.md">TEST-P0-06-02-A</a> · <a href="reports/REPORT-2026-07-26-16.md">Report</a><br>
+    <a href="stories/STORY-P0-06-03.md">STORY-P0-06-03</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-06-03-A.md">TEST-P0-06-03-A</a> · <a href="reports/REPORT-2026-07-26-17.md">Report</a><br>
+    <a href="stories/STORY-P0-06-04.md">STORY-P0-06-04</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-06-04-A.md">TEST-P0-06-04-A</a> · <a href="reports/REPORT-2026-07-26-18.md">Report</a>
   </td>
 </tr>
 <tr>
   <td><a href="features/FEAT-P0-07.md">FEAT-P0-07</a> — Local IPC (shared memory &amp; message channels)</td>
-  <td><span class="badge planned">PLANNED</span></td>
+  <td><span class="badge verified">VERIFIED (local)</span></td>
   <td>
-    <a href="stories/STORY-P0-07-01.md">STORY-P0-07-01</a> · <a href="stories/STORY-P0-07-02.md">STORY-P0-07-02</a> — <span class="badge planned">PLANNED</span>, not yet started<br>
-    <span class="muted">Local IPC only — a real TCP/IP stack is tracked separately under <code>EPIC-P3</code>, not this Epic</span>
+    <a href="stories/STORY-P0-07-01.md">STORY-P0-07-01</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-07-01-A.md">TEST-P0-07-01-A</a> · <a href="reports/REPORT-2026-07-26-21.md">Report</a><br>
+    <a href="stories/STORY-P0-07-02.md">STORY-P0-07-02</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-07-02-A.md">TEST-P0-07-02-A</a> · <a href="reports/REPORT-2026-07-26-22.md">Report</a> · <a href="reports/REPORT-2026-07-26-24.md">Addendum</a><br>
+    <span class="muted">Functionally Verified, assurance baseline debt. Local IPC only; a real TCP/IP stack remains under <code>EPIC-P3</code>.</span>
+  </td>
+</tr>
+<tr>
+  <td><a href="features/FEAT-P0-08.md">FEAT-P0-08</a> — TXE: TinyOS-native page-aligned executable packaging</td>
+  <td><span class="badge verified">VERIFIED (local)</span></td>
+  <td>
+    <a href="stories/STORY-P0-08-01.md">STORY-P0-08-01</a> <span class="badge verified">VERIFIED</span> · Test: <a href="tests/TEST-P0-08-01-A.md">TEST-P0-08-01-A</a> · <a href="reports/REPORT-2026-07-26-19.md">Report</a><br>
+    <span class="muted"><code>xtask pack-txe</code> — a deterministic PE re-layout tool; produces <code>STORY-P0-05-04</code>'s own real fixture artifact</span>
   </td>
 </tr>
 </tbody>
 </table>
 
-<h2>Backlog — EPIC-P1 through EPIC-P8 <span class="badge planned">NOT DECOMPOSED</span></h2>
-<p>See <a href="epics/backlog.md">epics/backlog.md</a> for the full Goal-to-Epic mapping. Decomposed into Features/Stories just-in-time, when work on each begins — see <a href="#model">the model</a> below for why.</p>
+<h2>EPIC-P1 — Determinism Proof <span class="badge progress">DECOMPOSED — NEXT UP</span></h2>
+<p><a href="epics/EPIC-P1.md">Decomposed 2026-07-27</a> now that every EPIC-P0 Story is functionally Verified: 6 Features, 10 Stories, all <em>specified</em> with valid assurance-contract rows (35/35 Stories mapped by CI). Ordering: measurement first (<a href="features/FEAT-P1-01.md">FEAT-P1-01</a>, the timing-regression CI gate), then faults before address spaces (<a href="features/FEAT-P1-02.md">FEAT-P1-02</a> → <a href="features/FEAT-P1-03.md">FEAT-P1-03</a>, per Handover 32/33/35's standing CR3 reasoning), preemption/deadline enforcement (<a href="features/FEAT-P1-04.md">FEAT-P1-04</a>), then the two proof Features — hostile load (<a href="features/FEAT-P1-05.md">FEAT-P1-05</a>) and the G-PA-1 decision-to-actuation bound (<a href="features/FEAT-P1-06.md">FEAT-P1-06</a>). This Epic is where <code>baseline-debt</code> first converts to <code>verified</code>.</p>
+<p><strong>Hardware direction (user, 2026-07-27):</strong> the <strong>Raspberry Pi 5</strong> is the only viable hardware in the short term. It is ARM64 and TinyOS has an x86_64 HAL only, so Tier 0 (QEMU) proves every mechanism while a minimal ARM64 bring-up slice + deploy path is scoped as loose end <code>LE-09</code> — until Pi 5 measurement exists, every timing claim carries named, dated hardware-tier debt. See <a href="epics/EPIC-P1.md">the Epic's hardware ladder</a>.</p>
+<p><strong>Expected artifacts per Story</strong> (TDD enforced — Red before Green, Test docs written when each Story starts, never pre-written):
+a failing-first <code>TEST-P1-*-A</code> doc whose metadata exactly mirrors the Story's contract row · host tests and/or a Tier 0 fixture (adversarial for FEAT-P1-02/-03/-05, property-based entering with -05) · a dated <code>REPORT-*</code> with raw evidence (timing Stories: percentile distributions + committed baselines; the regression gate demonstrated to fail on a planted regression) · Story/Feature/matrix/dashboard status updates in the same change · spine counts advancing (Tests 24 → 34, Reports 29 → 39+ as Stories land).
+<strong>Epic exit:</strong> all 6 Features Verified at Tier 0, the timing gate live in CI and proven able to fail, first <code>baseline-debt → verified</code> conversions (at least SEC-03/SEC-19/SEC-20 each on one Story), and the Security Charter runtime-evidence list shrunk by active address spaces, fault containment/teardown, and W^X sealing.</p>
+<p><strong>Loose-ends register</strong> (user directive: fix soon — carried forward in every EPIC-P1 handover until each is closed or explicitly retired): <a href="../session/hand-2026-07-26/37-epic-p1-mandate-hardware-direction-and-loose-ends.md">LE-01…LE-10 in Handover 37</a> — priority-inheritance behavioral proof, WCET timer/watchdog, real fault handling, TSS/IST, dormant address spaces (all owned by EPIC-P1 Stories); pool-bench harness error (→ STORY-P1-01-01); <em>CI never observed running this work (LE-07, unowned — probe first)</em>; I/O APIC routing and ECAM/bridge traversal (deferred with named triggers); the Pi 5/ARM64 sequencing decision (LE-09).</p>
+
+<h2>Backlog — EPIC-P1_5 through EPIC-P8 <span class="badge planned">NOT DECOMPOSED</span></h2>
+<p>See <a href="epics/backlog.md">epics/backlog.md</a> for the full Goal-to-Epic mapping. Decomposed into Features/Stories just-in-time, when work on each begins — see <a href="#model">the model</a> below for why. Every future Epic inherits its phase's <code>G-SEC-*</code> goals and cannot add a Story without performance/security mappings.</p>
 <table>
 <thead><tr><th>Epic</th><th>Roadmap phase</th><th>Goals</th></tr></thead>
 <tbody>
-<tr><td>EPIC-P1</td><td>Phase 1 — Determinism proof</td><td>G-RT-1, G-RT-3, G-PA-1</td></tr>
 <tr><td>EPIC-P1_5</td><td>Phase 1.5 — Deploy tooling</td><td>G-RC-6, G-DX-3</td></tr>
 <tr><td>EPIC-P2</td><td>Phase 2 — Shell &amp; UX</td><td>G-RT-5, G-RT-6</td></tr>
 <tr><td>EPIC-P3</td><td>Phase 3 — Connectivity</td><td>G-HW-2, G-PA-4</td></tr>
@@ -245,9 +541,74 @@
 
 <h2 id="model">The model</h2>
 <p>This folder is where TinyOS's goals become traceable, testable work — and stay traceable once they're built. It exists so that "does this Story actually verify a real Goal, and has it actually been tested?" has a written, checkable answer instead of a remembered one.</p>
-<pre>Goal  →  Epic  →  Feature  →  Story  →  Test  →  Report
- │                                        │
- └──────────── cross-referenced against Sessions ─────┘</pre>
+<section class="trace-model" aria-labelledby="model">
+  <div class="trace-kicker">Traceability spine</div>
+  <div class="trace-flow" aria-label="Goal to evidence flow">
+    <div class="trace-node"><span class="step-number">01</span><strong>Goal</strong><small>measurable outcome</small></div>
+    <span class="trace-arrow" aria-hidden="true">→</span>
+    <div class="trace-node"><span class="step-number">02</span><strong>Epic</strong><small>roadmap phase</small></div>
+    <span class="trace-arrow" aria-hidden="true">→</span>
+    <div class="trace-node"><span class="step-number">03</span><strong>Feature</strong><small>coherent capability</small></div>
+    <span class="trace-arrow" aria-hidden="true">→</span>
+    <div class="trace-node delivery"><span class="step-number">04</span><strong>Story</strong><small>contract declared</small></div>
+    <span class="trace-arrow" aria-hidden="true">→</span>
+    <div class="trace-node delivery"><span class="step-number">05</span><strong>Test</strong><small>test shape</small></div>
+    <span class="trace-arrow" aria-hidden="true">→</span>
+    <div class="trace-node delivery"><span class="step-number">06</span><strong>Report</strong><small>raw evidence</small></div>
+  </div>
+
+  <div class="assurance-grid">
+    <div class="assurance-lane performance">
+      <div class="lane-heading">
+        <strong>Performance</strong>
+        <span>625 guardrails · D01–D25 × G01–G25</span>
+      </div>
+      <div class="lane-steps" aria-label="Performance assurance path">
+        <span class="lane-step">Story contract</span>
+        <span class="lane-step">Measured test</span>
+        <span class="lane-step">Evidence gate</span>
+      </div>
+    </div>
+    <div class="assurance-lane security">
+      <div class="lane-heading">
+        <strong>Security</strong>
+        <span>20 controls · SEC-01–SEC-20</span>
+      </div>
+      <div class="lane-steps" aria-label="Security assurance path">
+        <span class="lane-step">Story contract</span>
+        <span class="lane-step">Adversarial test</span>
+        <span class="lane-step">Evidence gate</span>
+      </div>
+    </div>
+    <div class="assurance-lane containment">
+      <div class="lane-heading">
+        <strong>Containment</strong>
+        <span>5 classes · 20 boundary tests</span>
+      </div>
+      <div class="lane-steps" aria-label="Containment assurance path">
+        <span class="lane-step">Feature placement</span>
+        <span class="lane-step">Story classes</span>
+        <span class="lane-step">Boundary evidence</span>
+      </div>
+    </div>
+    <div class="assurance-lane applications">
+      <div class="lane-heading">
+        <strong>Applications</strong>
+        <span>19 targets · 9 landing zones</span>
+      </div>
+      <div class="lane-steps" aria-label="Application context path">
+        <span class="lane-step">Support level</span>
+        <span class="lane-step">Profile evidence</span>
+        <span class="lane-step">Claim gate</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="session-rail">
+    <strong>Session record</strong>
+    <span>Cross-references decisions so the intent survives implementation and handover.</span>
+  </div>
+</section>
 
 <table>
 <thead><tr><th>Level</th><th>What it is</th><th>Where it lives</th><th>Example ID</th></tr></thead>
@@ -268,14 +629,38 @@
   <span class="badge blocked">BLOCKED</span> cannot proceed, reason stated explicitly &nbsp;·&nbsp;
   <span class="badge verified">VERIFIED</span> Test(s) passed, Report filed
 </p>
-<p class="muted">A Story is never Verified on implementation alone — only a passing Test with a filed Report earns that status.</p>
+<p class="muted">A Story is never functionally Verified on implementation alone. Assurance <code>verified</code> is stricter again: the Report must close its mapped performance and security release gates with raw evidence.</p>
 
 <h3 id="jit-decomposition">Just-in-time decomposition</h3>
-<p>Only <code>EPIC-P0</code> is decomposed to Feature/Story/Test level — it's the next real work. Decomposing every future Epic today would produce dozens of Story files describing undesigned work, which this project's own principles argue against. Decompose an Epic when work on it is about to start, not before.</p>
+<p><code>EPIC-P0</code> (functionally complete) and <code>EPIC-P1</code> (next up) are decomposed to Feature/Story level. Decomposing every future Epic today would produce dozens of Story files describing undesigned work, which this project's own principles argue against. Decompose an Epic when work on it is about to start, not before — <code>EPIC-P1</code> was decomposed the day <code>EPIC-P0</code> closed, which is exactly the model working as designed.</p>
 
-<h2>Cross-cutting performance catalogue</h2>
-<p><a href="performance/README.md"><strong>625 performance guardrail tests</strong></a> cover 25 OS domains against 25 measurable latency, CPU-cycle, memory, allocation, queue, throughput, isolation, fault-containment, observability, footprint, and comparative-evidence checks. The complete machine-readable expansion is <a href="performance/catalogue.tsv"><code>performance/catalogue.tsv</code></a>; the <a href="performance/current-state-review.md">current-state review</a> records which Phase-0 surfaces exist and which future subsystems remain only specified or designed.</p>
-<p class="muted">These cross-cutting contracts are intentionally not added to the Story/Test verification counts above: all 625 begin as <code>Specified</code>, not Verified, and become executable evidence only when the owning Epic/Story exists. Linux and “10× RTOS” comparisons are claim gates requiring same-hardware, safety-equivalent evidence, never assumed project facts.</p>
+<h2>Goals, performance, applications, and security are the spine</h2>
+<p><a href="performance/README.md"><strong>625 performance guardrail tests</strong></a> cover 25 OS domains against 25 measurable latency, CPU-cycle, memory, allocation, queue, throughput, isolation, fault-containment, observability, footprint, and comparative-evidence checks. <a href="security/README.md"><strong>20 security controls</strong></a> cover signed execution, private process memory, revocable sharing, sandbox-first authority, origin/entitlement, network/port isolation, active content, downloads, privacy/tracking, ransomware/worms, drivers/DMA, secrets, updates, resource exhaustion, and Fable-class adaptive AI campaigns. <a href="security/containment-classes.tsv"><strong>Five containment classes</strong></a> and <a href="security/containment-tests.tsv"><strong>20 boundary tests</strong></a> make component placement, hostile input, promotion, teardown, negative surface, and single-defect containment explicit. The root <a href="../SECURITY_CHARTER.md"><strong>Security Charter</strong></a> adds the canonical Protection Domain and only permitted remote-data-to-code path.</p>
+<p>They are joined to every current and future Feature and Story by <a href="assurance/feature-contracts.tsv"><code>feature-contracts.tsv</code></a> and <a href="assurance/story-contracts.tsv"><code>story-contracts.tsv</code></a>. Adding an unmapped artifact, invalid class/test reference, stale contract, malformed control, incomplete charter/catalogue, uncovered control/boundary, or missing C0–C4 pair fails <code>xtask check-assurance-spine</code> in CI. The <a href="security/current-state-review.md">current-state review</a> keeps design contracts separate from implemented runtime evidence. Linux and “10× RTOS” comparisons remain claim gates requiring same-hardware, safety-equivalent raw evidence.</p>
+
+<h3>Five containment classes</h3>
+<table>
+<thead><tr><th>Class</th><th>Runtime role</th><th>Default posture</th></tr></thead>
+<tbody>
+<tr><td><strong>C0</strong> · Root of Trust</td><td>Boot verification, measurement, recovery and one-way handoff</td><td>No reusable runtime command surface</td></tr>
+<tr><td><strong>C1</strong> · Trusted Kernel Core</td><td>Scheduler, MMU, fixed IPC/capability checks, faults, interrupts and budgets</td><td>No complex hostile-format parser</td></tr>
+<tr><td><strong>C2</strong> · Isolated System Service</td><td>Drivers and device/network/storage/loader brokers</td><td>Assumed compromisable; narrow restartable grants</td></tr>
+<tr><td><strong>C3</strong> · Sandboxed Application</td><td>Signed installed programs, inference runtime and tools</td><td>Fresh private process; empty authority until policy grants a manifest subset</td></tr>
+<tr><td><strong>C4</strong> · Hostile Transient Domain</td><td>Downloads, unknown executables, parsers, scripts, documents and model output</td><td>Quarantined, disposable, zero authority, never promoted in place</td></tr>
+</tbody>
+</table>
+<p class="muted">Containment class is independent of capabilities, scheduling priority, and provenance. A class never grants authority; a signed driver remains isolated C2; a human is an authenticated principal rather than a class.</p>
+
+<table>
+<thead><tr><th>Threat family</th><th>TinyOS invariant</th><th>Controls</th></tr></thead>
+<tbody>
+<tr><td>Unsigned executable hijack or malicious update</td><td>Verified boot; signed content-addressed TXE/TON; quarantine and anti-rollback before mapping</td><td>SEC-01, -02, -10, -17</td></tr>
+<tr><td>Cross-process memory overwrite or illegal sharing</td><td>Private active address spaces; W^X/NX; typed rights-sized revocable grants only</td><td>SEC-03, -04, -18, -19</td></tr>
+<tr><td>Network, browser, download, cookie, worm, ransomware</td><td>No default listener; disposable parsers; origin labels; opt-in partitioned state; immutable recoverable system</td><td>SEC-06 – -12</td></tr>
+<tr><td>Driver and malicious-device compromise</td><td>Opt-in signed isolated drivers; zero surface when absent; narrow IOMMU-enforced DMA/IRQ/MMIO</td><td>SEC-13, -18</td></tr>
+<tr><td>Fable-class adaptive AI campaign</td><td>All model output untrusted; capability/action/rate budgets; spoors; revocation; deterministic kill path</td><td>SEC-14 – -16, -20</td></tr>
+</tbody>
+</table>
 
 <h2>Folder layout</h2>
 <pre>goals/
@@ -291,7 +676,23 @@
   tests/
     TEST-P0-01-01-A.md ...
   reports/
-    README.md                  Report format/schema; empty until Phase 0 testing begins</pre>
+    README.md                  Report schema and execution records
+  assurance/
+    feature-contracts.tsv      Mandatory Feature → class/boundary-test contract
+    story-contracts.tsv        Mandatory Story → performance/security/class join
+  context/
+    application-platforms.tsv  19 application/runtime targets and evidence contracts
+    landing-zones.tsv          9 destination outcomes joining all four planes
+  performance/
+    catalogue.tsv              Complete 25 × 25 performance catalogue
+  security/
+    protection-domain-contracts.tsv  Canonical PD-01–PD-14 sandbox invariants
+    code-admission-gates.tsv         Canonical RCG-01–RCG-14 data-to-code path
+    class-communication-matrix.tsv   Complete 25-pair C0–C4 path policy
+    containment-classes.tsv    Canonical C0–C4 definitions
+    containment-tests.tsv      Canonical BND-01–BND-20 attack contracts
+    controls.tsv               Canonical 20-control security catalogue
+    current-state-review.md    Honest code-level gap audit</pre>
 
 <footer>
   TinyOS goals dashboard · <a href="traceability-matrix.md">traceability-matrix.md</a> for the full cross-reference table · <a href="../agent.md">agent.md</a> for agent orientation · <a href="../README.md">repository root README</a>

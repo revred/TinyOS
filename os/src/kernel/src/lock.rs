@@ -26,8 +26,24 @@
 //! outranks the medium task after contention, and is restored after
 //! release) rather than on live preemption, which is the furthest this
 //! Story's acceptance criteria can be verified without that dispatcher.
+//!
+//! **`STORY-P0-06-03`**: every boost and every restore also stamps a
+//! [`crate::spoor::Spoor`] into a caller-supplied
+//! [`crate::spoor_journal::SpoorJournal`] — `FEAT-P0-06`'s own exit
+//! criterion that at least one real subsystem actually emit spoors through
+//! its API, not just compile against it. The journal is a parameter, not a
+//! field this type owns (the same Dependency Inversion `crate::wcet`'s
+//! `OverrunHandler` already established): `PriorityInheritingLock` picks no
+//! capacity `N` of its own, so wiring in a real, sized journal later is
+//! additive, not a rewrite. Only the two priority-*mutating* events are
+//! stamped — a contended `try_lock` that doesn't boost (contender already
+//! outranked) and an `unlock` with nothing to restore are no-ops on
+//! priority, so they stamp nothing, matching this journal's own "audit
+//! trail of what changed" scope rather than every call attempt.
 
 use crate::sched::{Priority, Scheduler, TaskId};
+use crate::spoor::{Action, Actor, Category, Outcome, Spoor};
+use crate::spoor_journal::SpoorJournal;
 
 /// Errors [`PriorityInheritingLock::try_lock`]/`unlock` fail closed with,
 /// per `agent/CODING_STANDARDS.md`'s "no stringly-typed errors" rule.
@@ -78,9 +94,15 @@ impl PriorityInheritingLock {
     /// whatever blocking/retry discipline it uses while contended, since
     /// this module has no dispatcher to park it against (see the module
     /// doc comment).
-    pub fn try_lock<const N: usize>(
+    ///
+    /// A boost stamps a [`Spoor`] (`Category::Lock`, `Action::Boost`) into
+    /// `journal`, `TARGET` the holder's task-pool index and `COST` the
+    /// boosted-to priority value — see the module doc comment
+    /// (`STORY-P0-06-03`).
+    pub fn try_lock<const N: usize, const J: usize>(
         &mut self,
         scheduler: &mut Scheduler<N>,
+        journal: &mut SpoorJournal<J>,
         task: TaskId,
         task_priority: Priority,
     ) -> Result<(), LockError> {
@@ -98,6 +120,14 @@ impl PriorityInheritingLock {
                         self.original_priority = Some(holder_priority);
                     }
                     scheduler.set_priority(holder, task_priority).ok_or(LockError::UnknownTask)?;
+                    journal.append(Spoor::stamp(
+                        Category::Lock,
+                        Actor::Kernel,
+                        Action::Boost,
+                        Outcome::Ok,
+                        holder.index() as u16,
+                        task_priority.value() as u32,
+                    ));
                 }
                 Err(LockError::AlreadyLocked)
             }
@@ -111,15 +141,29 @@ impl PriorityInheritingLock {
     /// contended while held) — deterministic release, per
     /// `STORY-P0-02-03` acceptance criterion 2: no path leaves `task`
     /// permanently boosted.
-    pub fn unlock<const N: usize>(
+    ///
+    /// A restore stamps a [`Spoor`] (`Category::Lock`, `Action::Restore`)
+    /// into `journal`, `TARGET` `task`'s task-pool index and `COST` the
+    /// restored-to priority value — no spoor is stamped when there was
+    /// nothing to restore (`STORY-P0-06-03`).
+    pub fn unlock<const N: usize, const J: usize>(
         &mut self,
         scheduler: &mut Scheduler<N>,
+        journal: &mut SpoorJournal<J>,
         task: TaskId,
     ) -> Result<(), LockError> {
         match self.holder {
             Some(holder) if holder == task => {
                 if let Some(original) = self.original_priority.take() {
                     scheduler.set_priority(task, original).ok_or(LockError::UnknownTask)?;
+                    journal.append(Spoor::stamp(
+                        Category::Lock,
+                        Actor::Kernel,
+                        Action::Restore,
+                        Outcome::Ok,
+                        task.index() as u16,
+                        original.value() as u32,
+                    ));
                 }
                 self.holder = None;
                 Ok(())
@@ -164,12 +208,13 @@ mod tests {
     #[test]
     fn contention_boosts_the_holder_above_the_medium_priority_task() {
         let mut sched: Scheduler<4> = Scheduler::new();
+        let mut journal: SpoorJournal<4> = SpoorJournal::new();
         let low = sched.create_task(priority(5), BUDGET, dummy_entry).unwrap();
         let medium = sched.create_task(priority(15), BUDGET, dummy_entry).unwrap();
         let high = sched.create_task(priority(25), BUDGET, dummy_entry).unwrap();
 
         let mut lock = PriorityInheritingLock::new();
-        assert_eq!(lock.try_lock(&mut sched, low, priority(5)), Ok(()));
+        assert_eq!(lock.try_lock(&mut sched, &mut journal, low, priority(5)), Ok(()));
 
         // Before contention: low's priority is unchanged, and (the classic
         // inversion problem) sits below medium's.
@@ -177,7 +222,10 @@ mod tests {
         assert!(sched.priority_of(low) < sched.priority_of(medium));
 
         // High contends for the lock low holds.
-        assert_eq!(lock.try_lock(&mut sched, high, priority(25)), Err(LockError::AlreadyLocked));
+        assert_eq!(
+            lock.try_lock(&mut sched, &mut journal, high, priority(25)),
+            Err(LockError::AlreadyLocked)
+        );
 
         // Priority inheritance: low is now boosted to high's priority,
         // outranking medium — a real dispatcher would no longer let medium
@@ -187,6 +235,17 @@ mod tests {
         assert!(sched.priority_of(low) > sched.priority_of(medium));
         // medium's own priority is untouched by contention it isn't party to.
         assert_eq!(sched.priority_of(medium), Some(priority(15)));
+
+        // STORY-P0-06-03: the unlocking-free acquire stamps nothing (no
+        // boost happened), the granting acquire stamps nothing either —
+        // only the boost itself did.
+        let spoors: std::vec::Vec<Spoor> = journal.iter().collect();
+        assert_eq!(spoors.len(), 1);
+        assert_eq!(spoors[0].category(), Category::Lock);
+        assert_eq!(spoors[0].action(), Action::Boost);
+        assert_eq!(spoors[0].outcome(), Outcome::Ok);
+        assert_eq!(spoors[0].target(), low.index() as u16);
+        assert_eq!(spoors[0].cost(), 25);
     }
 
     // STORY-P0-02-03 AC2: releasing the lock restores the holder's
@@ -194,16 +253,26 @@ mod tests {
     #[test]
     fn unlock_restores_the_holders_original_priority() {
         let mut sched: Scheduler<4> = Scheduler::new();
+        let mut journal: SpoorJournal<4> = SpoorJournal::new();
         let low = sched.create_task(priority(5), BUDGET, dummy_entry).unwrap();
         let high = sched.create_task(priority(25), BUDGET, dummy_entry).unwrap();
 
         let mut lock = PriorityInheritingLock::new();
-        lock.try_lock(&mut sched, low, priority(5)).unwrap();
-        lock.try_lock(&mut sched, high, priority(25)).unwrap_err();
+        lock.try_lock(&mut sched, &mut journal, low, priority(5)).unwrap();
+        lock.try_lock(&mut sched, &mut journal, high, priority(25)).unwrap_err();
         assert_eq!(sched.priority_of(low), Some(priority(25)));
 
-        assert_eq!(lock.unlock(&mut sched, low), Ok(()));
+        assert_eq!(lock.unlock(&mut sched, &mut journal, low), Ok(()));
         assert_eq!(sched.priority_of(low), Some(priority(5)));
+
+        // STORY-P0-06-03: boost then restore — exactly two spoors, in
+        // order, the restore naming the pre-boost priority it returned to.
+        let spoors: std::vec::Vec<Spoor> = journal.iter().collect();
+        assert_eq!(spoors.len(), 2);
+        assert_eq!(spoors[0].action(), Action::Boost);
+        assert_eq!(spoors[1].action(), Action::Restore);
+        assert_eq!(spoors[1].target(), low.index() as u16);
+        assert_eq!(spoors[1].cost(), 5);
     }
 
     // A lock that was never contended releases as a no-op on priority —
@@ -211,12 +280,17 @@ mod tests {
     #[test]
     fn unlock_without_contention_leaves_priority_unchanged() {
         let mut sched: Scheduler<2> = Scheduler::new();
+        let mut journal: SpoorJournal<4> = SpoorJournal::new();
         let low = sched.create_task(priority(5), BUDGET, dummy_entry).unwrap();
 
         let mut lock = PriorityInheritingLock::new();
-        lock.try_lock(&mut sched, low, priority(5)).unwrap();
-        assert_eq!(lock.unlock(&mut sched, low), Ok(()));
+        lock.try_lock(&mut sched, &mut journal, low, priority(5)).unwrap();
+        assert_eq!(lock.unlock(&mut sched, &mut journal, low), Ok(()));
         assert_eq!(sched.priority_of(low), Some(priority(5)));
+
+        // STORY-P0-06-03: nothing to boost, nothing to restore — the
+        // journal stays empty rather than recording a no-op event.
+        assert!(journal.is_empty());
     }
 
     // A lower-priority contender must not de-boost (or otherwise disturb)
@@ -224,18 +298,23 @@ mod tests {
     #[test]
     fn a_lower_priority_contender_does_not_change_the_holders_priority() {
         let mut sched: Scheduler<4> = Scheduler::new();
+        let mut journal: SpoorJournal<4> = SpoorJournal::new();
         let holder = sched.create_task(priority(20), BUDGET, dummy_entry).unwrap();
         let low_contender = sched.create_task(priority(5), BUDGET, dummy_entry).unwrap();
 
         let mut lock = PriorityInheritingLock::new();
-        lock.try_lock(&mut sched, holder, priority(20)).unwrap();
-        lock.try_lock(&mut sched, low_contender, priority(5)).unwrap_err();
+        lock.try_lock(&mut sched, &mut journal, holder, priority(20)).unwrap();
+        lock.try_lock(&mut sched, &mut journal, low_contender, priority(5)).unwrap_err();
 
         assert_eq!(sched.priority_of(holder), Some(priority(20)));
         // Releasing after a non-boosting contention still succeeds and
         // changes nothing.
-        assert_eq!(lock.unlock(&mut sched, holder), Ok(()));
+        assert_eq!(lock.unlock(&mut sched, &mut journal, holder), Ok(()));
         assert_eq!(sched.priority_of(holder), Some(priority(20)));
+
+        // STORY-P0-06-03: a contention that never boosts (contender
+        // outranked) stamps nothing.
+        assert!(journal.is_empty());
     }
 
     // Repeated contention from progressively higher-priority waiters keeps
@@ -245,19 +324,33 @@ mod tests {
     #[test]
     fn repeated_boosts_still_restore_the_original_priority_on_unlock() {
         let mut sched: Scheduler<4> = Scheduler::new();
+        let mut journal: SpoorJournal<4> = SpoorJournal::new();
         let low = sched.create_task(priority(5), BUDGET, dummy_entry).unwrap();
         let mid_waiter = sched.create_task(priority(15), BUDGET, dummy_entry).unwrap();
         let high_waiter = sched.create_task(priority(25), BUDGET, dummy_entry).unwrap();
 
         let mut lock = PriorityInheritingLock::new();
-        lock.try_lock(&mut sched, low, priority(5)).unwrap();
-        lock.try_lock(&mut sched, mid_waiter, priority(15)).unwrap_err();
+        lock.try_lock(&mut sched, &mut journal, low, priority(5)).unwrap();
+        lock.try_lock(&mut sched, &mut journal, mid_waiter, priority(15)).unwrap_err();
         assert_eq!(sched.priority_of(low), Some(priority(15)));
-        lock.try_lock(&mut sched, high_waiter, priority(25)).unwrap_err();
+        lock.try_lock(&mut sched, &mut journal, high_waiter, priority(25)).unwrap_err();
         assert_eq!(sched.priority_of(low), Some(priority(25)));
 
-        assert_eq!(lock.unlock(&mut sched, low), Ok(()));
+        assert_eq!(lock.unlock(&mut sched, &mut journal, low), Ok(()));
         assert_eq!(sched.priority_of(low), Some(priority(5)));
+
+        // STORY-P0-06-03: two escalating boosts (15, then 25), then a
+        // single restore back to the *original* priority (5) — never an
+        // intermediate boosted value, mirroring AC2's own priority-value
+        // guarantee at the audit-trail level.
+        let spoors: std::vec::Vec<Spoor> = journal.iter().collect();
+        assert_eq!(spoors.len(), 3);
+        assert_eq!(spoors[0].action(), Action::Boost);
+        assert_eq!(spoors[0].cost(), 15);
+        assert_eq!(spoors[1].action(), Action::Boost);
+        assert_eq!(spoors[1].cost(), 25);
+        assert_eq!(spoors[2].action(), Action::Restore);
+        assert_eq!(spoors[2].cost(), 5);
     }
 
     // Attempting to unlock a lock held by a different task fails closed
@@ -265,12 +358,16 @@ mod tests {
     #[test]
     fn unlock_by_a_non_holder_is_rejected() {
         let mut sched: Scheduler<2> = Scheduler::new();
+        let mut journal: SpoorJournal<4> = SpoorJournal::new();
         let holder = sched.create_task(priority(10), BUDGET, dummy_entry).unwrap();
         let impostor = sched.create_task(priority(10), BUDGET, dummy_entry).unwrap();
 
         let mut lock = PriorityInheritingLock::new();
-        lock.try_lock(&mut sched, holder, priority(10)).unwrap();
-        assert_eq!(lock.unlock(&mut sched, impostor), Err(LockError::NotHeldByCaller));
+        lock.try_lock(&mut sched, &mut journal, holder, priority(10)).unwrap();
+        assert_eq!(
+            lock.unlock(&mut sched, &mut journal, impostor),
+            Err(LockError::NotHeldByCaller)
+        );
     }
 
     // A reentrant lock attempt by the current holder is rejected (this
@@ -278,10 +375,14 @@ mod tests {
     #[test]
     fn reentrant_lock_attempt_by_the_holder_is_rejected() {
         let mut sched: Scheduler<2> = Scheduler::new();
+        let mut journal: SpoorJournal<4> = SpoorJournal::new();
         let holder = sched.create_task(priority(10), BUDGET, dummy_entry).unwrap();
 
         let mut lock = PriorityInheritingLock::new();
-        lock.try_lock(&mut sched, holder, priority(10)).unwrap();
-        assert_eq!(lock.try_lock(&mut sched, holder, priority(10)), Err(LockError::AlreadyLocked));
+        lock.try_lock(&mut sched, &mut journal, holder, priority(10)).unwrap();
+        assert_eq!(
+            lock.try_lock(&mut sched, &mut journal, holder, priority(10)),
+            Err(LockError::AlreadyLocked)
+        );
     }
 }

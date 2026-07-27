@@ -3,6 +3,14 @@
 Status: **Verified**
 Story: [`STORY-P0-05-01`](../stories/STORY-P0-05-01.md)
 Tier: Host unit test (no QEMU/hardware dependency), per [Target Hardware & Test Matrix](../../README.md#target-hardware--test-matrix) — mirrors `hal_x86_64::acpi`'s pure-parsing/unsafe-boundary split (`TEST-P0-04-01-A`'s sibling host tests).
+Assurance contract: [`goals/assurance/story-contracts.tsv`](../assurance/story-contracts.tsv)
+Performance domains: `D09`
+Security controls: `SEC-02`, `SEC-06`, `SEC-09`, `SEC-19`, `SEC-20`
+Containment classes: `C1`, `C4`
+Boundary tests: `BND-03`, `BND-04`, `BND-05`, `BND-09`, `BND-10`, `BND-11`, `BND-12`, `BND-19`, `BND-20`
+Protection Domain contracts: `PD-01`, `PD-02`, `PD-03`, `PD-04`, `PD-05`, `PD-06`, `PD-08`, `PD-11`, `PD-12`, `PD-13`, `PD-14`
+Code admission gates: `RCG-01`, `RCG-02`, `RCG-03`, `RCG-04`, `RCG-05`, `RCG-06`, `RCG-07`, `RCG-08`, `RCG-09`, `RCG-10`, `RCG-11`, `RCG-12`, `RCG-13`, `RCG-14`
+Assurance state: `baseline-debt`
 
 ## Specification
 

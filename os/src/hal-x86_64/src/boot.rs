@@ -67,9 +67,9 @@ global_asm!(
 _start:
         mov $boot_stack_top, %esp
 
-        // Zero the temporary page-table region (PML4, one PDPT, one PD).
+        // Zero the temporary page-table region (PML4, one PDPT, two PDs).
         mov $boot_pml4, %edi
-        mov $3072, %ecx
+        mov $4096, %ecx
         xor %eax, %eax
         rep stosl
 
@@ -83,6 +83,13 @@ _start:
         or $0x3, %eax
         mov %eax, boot_pdpt
 
+        // PDPT[3] -> a second PD, covering the 1GiB at physical
+        // 0xC0000000-0xFFFFFFFF (present, writable) — see
+        // `boot_pd_gib3`'s own comment for why this range specifically.
+        mov $boot_pd_gib3, %eax
+        or $0x3, %eax
+        mov %eax, boot_pdpt+24
+
         // PD[0..512] -> 2MiB huge pages covering the first 1GiB, identity mapped.
         mov $0, %ecx
     fill_pd:
@@ -93,6 +100,20 @@ _start:
         inc %ecx
         cmp $512, %ecx
         jne fill_pd
+
+        // boot_pd_gib3[0..512] -> 2MiB huge pages covering
+        // 0xC0000000-0xFFFFFFFF, identity mapped — see its own `.bss`
+        // comment for why.
+        mov $0, %ecx
+    fill_pd_gib3:
+        mov $0x200000, %eax
+        mul %ecx
+        add $0xC0000000, %eax
+        or $0x83, %eax
+        mov %eax, boot_pd_gib3(,%ecx,8)
+        inc %ecx
+        cmp $512, %ecx
+        jne fill_pd_gib3
 
         // Load CR3 with the PML4 physical address.
         mov $boot_pml4, %eax
@@ -149,6 +170,20 @@ _start:
     boot_pdpt:
         .skip 4096
     boot_pd:
+        .skip 4096
+    boot_pd_gib3:
+        // Identity-maps 0xC0000000-0xFFFFFFFF (`STORY-P0-04-02`) so
+        // `hal_x86_64::interrupts` can reach the local APIC's real,
+        // non-relocated MMIO window at its architectural default,
+        // 0xFEE00000 (Intel SDM Vol 3A §11.4.1) — QEMU's own APIC device
+        // model does not honor `IA32_APIC_BASE`'s relocation field (proven
+        // empirically during this Story's bring-up: writing a relocated
+        // base and then reading any local-APIC register back, including
+        // the read-only APIC ID register, returned all-zero, meaning the
+        // access was landing on ordinary backing memory rather than being
+        // intercepted by the APIC), so mapping the *default* address is
+        // the only path that actually reaches real hardware under this
+        // project's Tier 0 target, not just a simplification.
         .skip 4096
     .align 16
     boot_stack_bottom:

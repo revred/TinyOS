@@ -20,6 +20,14 @@ The first milestone, per [`docs/mvp-delivery-strategy.md`](../../docs/mvp-delive
 | [`STORY-P0-01-02`](../stories/STORY-P0-01-02.md) | CI pipeline runs format/lint/crate-size-ceiling checks on every PR | Verified |
 | [`STORY-P0-01-03`](../stories/STORY-P0-01-03.md) | `xtask qemu-x86_64` command builds and launches the kernel under QEMU | Verified |
 
+## Containment contract
+
+Canonical row: [`assurance/feature-contracts.tsv`](../assurance/feature-contracts.tsv) · implementation **C0/C1** · subjects **C0–C4** · boundary tests **BND-01, -02, -03, -17, -18**.
+
+That row also selects this Feature’s [`PD-*`](../security/protection-domain-contracts.tsv) and [`RCG-*`](../security/code-admission-gates.tsv) Security Charter obligations. Every Test repeats the exact selections and CI rejects drift.
+
+Boot and governance may verify, measure, transfer, or reject; they never create runtime ambient authority. C0 must expose no reusable runtime command surface after handoff, C1 must link no complex hostile-format parser, and CI must reject incomplete class, Feature, Story, security-control, or boundary-test contracts. Required evidence includes authenticated handoff, runtime-reentry denial, privileged-parser absence, complete mappings, and negative build-profile surface scans.
+
 ## Exit criteria
 
 All three Stories reach **Verified**. Met locally on 2026-07-26 (see `goals/reports/REPORT-2026-07-26-01` through `-03`); CI has not yet run against this work. This unblocks `FEAT-P0-02` (scheduler), since scheduler work needs a booting kernel to run inside.

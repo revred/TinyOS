@@ -3,6 +3,14 @@
 Status: **Verified — passing locally, 2026-07-26**
 Story: [`STORY-P0-03-03`](../stories/STORY-P0-03-03.md)
 Tier: Host unit test (no QEMU/hardware dependency), per [Target Hardware & Test Matrix](../../README.md#target-hardware--test-matrix)
+Assurance contract: [`goals/assurance/story-contracts.tsv`](../assurance/story-contracts.tsv)
+Performance domains: `D07`
+Security controls: `SEC-03`, `SEC-19`, `SEC-20`
+Containment classes: `C1`, `C2`, `C3`, `C4`
+Boundary tests: `BND-04`, `BND-15`, `BND-20`
+Protection Domain contracts: `PD-01`, `PD-06`, `PD-08`, `PD-13`
+Code admission gates: `RCG-09`, `RCG-10`, `RCG-13`, `RCG-14`
+Assurance state: `baseline-debt`
 
 ## Specification
 

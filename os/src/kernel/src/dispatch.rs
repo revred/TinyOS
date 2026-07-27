@@ -81,6 +81,7 @@ mod tests {
     use super::*;
     use crate::lock::PriorityInheritingLock;
     use crate::sched::{Priority, WcetBudgetTicks};
+    use crate::spoor_journal::SpoorJournal;
 
     const STACK_SIZE: usize = 4096;
     const N: usize = 4;
@@ -171,14 +172,15 @@ mod tests {
         // Low acquires a lock (out of band — representing it already holds
         // a resource before this scenario's contention begins).
         let mut lock = PriorityInheritingLock::new();
-        assert_eq!(lock.try_lock(&mut sched, low, priority(5)), Ok(()));
+        let mut journal: SpoorJournal<4> = SpoorJournal::new();
+        assert_eq!(lock.try_lock(&mut sched, &mut journal, low, priority(5)), Ok(()));
 
         // High contends for the lock low holds: boosts low to high's
         // priority (25). `high` was already marked Blocked above (this
         // module's own scope: it doesn't auto-park a contending task, the
         // caller does).
         assert_eq!(
-            lock.try_lock(&mut sched, high, priority(25)),
+            lock.try_lock(&mut sched, &mut journal, high, priority(25)),
             Err(crate::lock::LockError::AlreadyLocked)
         );
         assert_eq!(sched.priority_of(low), Some(priority(25)));
@@ -193,7 +195,7 @@ mod tests {
         // Low releases the lock, restoring its original priority; medium
         // (now the only Ready task left, since low returns to Ready too
         // but at its restored priority 5) is picked again.
-        assert_eq!(lock.unlock(&mut sched, low), Ok(()));
+        assert_eq!(lock.unlock(&mut sched, &mut journal, low), Ok(()));
         assert_eq!(sched.priority_of(low), Some(priority(5)));
         // SAFETY: see above.
         let third = unsafe { run_once(&mut sched, &raw mut DISPATCHER_CTX, &raw mut CONTEXTS) };

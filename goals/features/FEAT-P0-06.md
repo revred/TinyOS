@@ -1,6 +1,6 @@
 # FEAT-P0-06 — Spoor: Universal 64-Bit Audit Atom
 
-Status: **Verified — 2/2 Stories Verified** (see Exit Criteria for the one still-open follow-up)
+Status: **Verified — 4/4 Stories Verified** (exit criteria fully met; `STORY-P0-06-04` adopts spoor into a second subsystem beyond what the exit criteria required)
 Epic: [`EPIC-P0`](../epics/EPIC-P0.md)
 Introduced in: (this Feature — 2026-07-26, per a new strategic objective directing that TinyOS's audit primitive be universal, borrowed from `C:\Code\Sharc.Workspace\Sharc.Blue`)
 
@@ -41,12 +41,24 @@ Adopting the identical layout (not just "a similar idea") is deliberate: it mean
 |---|---|---|
 | [`STORY-P0-06-01`](../stories/STORY-P0-06-01.md) | Core packed `Spoor` type: category/actor/action/outcome/target/cost encoding, `stamp`/`complete` constructors | Verified |
 | [`STORY-P0-06-02`](../stories/STORY-P0-06-02.md) | Append-only spoor journal writer (fixed-capacity, no heap ring buffer) | Verified |
+| [`STORY-P0-06-03`](../stories/STORY-P0-06-03.md) | Wire `kernel::lock` to emit spoors on boost/restore (this Feature's own exit-criteria follow-up) | Verified |
+| [`STORY-P0-06-04`](../stories/STORY-P0-06-04.md) | Wire `kernel::wcet` to emit spoors on overrun/reset (second subsystem, beyond what the exit criteria required) | Verified |
 
-`STORY-P0-06-01` implemented and Verified in [`session/hand-2026-07-26/20-strategic-objectives-spoor-ipc-blue-sharc-correction.md`](../../session/hand-2026-07-26/20-strategic-objectives-spoor-ipc-blue-sharc-correction.md) — a new `kernel::spoor` module (`REPORT-2026-07-26-15`). `STORY-P0-06-02` implemented and Verified in [`session/hand-2026-07-26/21-story-p0-06-02-spoor-journal-implementation.md`](../../session/hand-2026-07-26/21-story-p0-06-02-spoor-journal-implementation.md) — a new `kernel::spoor_journal::SpoorJournal<N>` ring buffer, storing each entry as its raw `Spoor::to_bits()` value alongside a `JOURNAL_MAGIC` matching `Sharc.Blue`'s own on-disk format exactly (`REPORT-2026-07-26-16`).
+`STORY-P0-06-01` implemented and Verified in [`session/hand-2026-07-26/20-strategic-objectives-spoor-ipc-blue-sharc-correction.md`](../../session/hand-2026-07-26/20-strategic-objectives-spoor-ipc-blue-sharc-correction.md) — a new `kernel::spoor` module (`REPORT-2026-07-26-15`). `STORY-P0-06-02` implemented and Verified in [`session/hand-2026-07-26/21-story-p0-06-02-spoor-journal-implementation.md`](../../session/hand-2026-07-26/21-story-p0-06-02-spoor-journal-implementation.md) — a new `kernel::spoor_journal::SpoorJournal<N>` ring buffer, storing each entry as its raw `Spoor::to_bits()` value alongside a `JOURNAL_MAGIC` matching `Sharc.Blue`'s own on-disk format exactly (`REPORT-2026-07-26-16`). **`STORY-P0-06-03`** (added mid-Feature, per this Feature's own named exit-criteria follow-up) implemented and Verified in [`session/hand-2026-07-26/23-story-p0-06-03-spoor-adoption-kernel-lock.md`](../../session/hand-2026-07-26/23-story-p0-06-03-spoor-adoption-kernel-lock.md) — `kernel::lock::PriorityInheritingLock::try_lock`/`unlock` (`STORY-P0-02-03`, `FEAT-P0-02`) each now stamp a `Spoor` into a caller-supplied `SpoorJournal<J>` on an actual priority boost/restore, proving the API is genuinely usable, not just a type that compiles (`REPORT-2026-07-26-17`). **`STORY-P0-06-04`** (added by explicit user request once this Feature's own exit criteria were already fully met) implemented and Verified in [`session/hand-2026-07-26/24-story-p0-06-04-spoor-adoption-kernel-wcet.md`](../../session/hand-2026-07-26/24-story-p0-06-04-spoor-adoption-kernel-wcet.md) — `kernel::wcet::record_tick`/`reset_budget_window` (`STORY-P0-02-04`, `FEAT-P0-02`) each now stamp a `Spoor` into a caller-supplied `SpoorJournal<J>` on an actual budget overrun/reset, adopting spoor into a second subsystem (`REPORT-2026-07-26-18`).
 
 Query/replay/summarize tooling (`Sharc.Blue`'s `spoor.query`/`spoor.watch`/`spoor.replay`/`spoor.summarize` atoms) is deliberately out of scope for Phase 0 — TinyOS has no shell/tooling layer yet to host such commands (that's `EPIC-P2`, Phase 2 — Shell & UX). This Feature's job is only to make spoor stamping and journaling *available* to every other Phase 0 subsystem; consuming/querying the journal is later work.
 
+## Containment contract
+
+Canonical row: [`assurance/feature-contracts.tsv`](../assurance/feature-contracts.tsv) · implementation **C1** · subjects **C0–C4** · boundary test **BND-17**.
+
+That row also selects this Feature’s [`PD-*`](../security/protection-domain-contracts.tsv) and [`RCG-*`](../security/code-admission-gates.tsv) Security Charter obligations. Every Test repeats the exact selections and CI rejects drift.
+
+A spoor observes a decision but never authorizes one. Every boundary record must identify source and target class, actor, action, object, decision, result, sequence, and relevant generation while remaining fixed-size and bounded. Required evidence covers allow, deny, fault, revoke, restart, promotion, concurrent ordering, wrap pressure, tamper detection, and reserved critical-event capacity.
+
 ## Exit criteria
 
-- `STORY-P0-06-01` and `-02` both reach **Verified**.
-- At least one other Phase 0 subsystem (a natural candidate: `kernel::lock`'s contention/boost events, or `kernel::wcet`'s overrun detection) is updated to actually emit spoors through this Feature's API, proving it's genuinely usable, not just a type that compiles — tracked as a follow-up Story once `-01`/`-02` land, not blocking this Feature's own Verified status (mirroring `STORY-P0-03-02`'s own "don't add a capacity with nothing consuming it" discipline, applied here as "don't claim adoption before a real caller exists").
+- `STORY-P0-06-01` and `-02` both reach **Verified**. **Met.**
+- At least one other Phase 0 subsystem is updated to actually emit spoors through this Feature's API, proving it's genuinely usable, not just a type that compiles. **Met** by `STORY-P0-06-03`: `kernel::lock::PriorityInheritingLock` now stamps `Category::Lock`/`Action::Boost`/`Action::Restore` spoors on real priority-mutating events.
+
+**All four Stories now Verified — this Feature's exit criteria are fully met, with no open follow-up.** `STORY-P0-06-04` adopted spoor into `kernel::wcet` as well, beyond what the exit criteria required, per explicit user request. A production caller wiring a real `SpoorJournal<N>` into `main.rs` (and the capacity/footprint accounting that would then justify, per `kernel::capacities`' own "don't add a capacity with nothing consuming it" discipline) remains open — tracked as a consequence of `FEAT-P0-02`'s own still-open dispatcher/timer gap, not this Feature's.

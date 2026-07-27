@@ -45,6 +45,9 @@ pub enum PagingError {
     AlreadyMapped,
     /// `virt` or `phys` is not [`PAGE_SIZE`]-aligned.
     Misaligned,
+    /// [`unmap_4k`] was called against a `virt` with no present leaf entry
+    /// (some level from the PML4 down to the leaf PTE is not present).
+    NotMapped,
 }
 
 const ENTRY_COUNT: usize = 512;
@@ -152,6 +155,42 @@ pub fn map_4k(
         flags |= NO_EXECUTE;
     }
     pt.entries[index] = (phys & ADDR_MASK) | flags;
+    Ok(())
+}
+
+/// Clears `virt`'s leaf page-table entry, if present — the counterpart to
+/// [`map_4k`] (`STORY-P0-07-02`, deterministic shared-memory grant
+/// revocation). Never frees an intermediate PDPT/PD/PT level even if this
+/// was its last present leaf entry: this module has no notion of a
+/// `FrameAllocator`-side "free," and an empty-but-still-`PRESENT`
+/// intermediate level is otherwise harmless, just unreclaimed — matching
+/// this module's own "read/write ordinary memory, no CPU control
+/// registers" scope, never more.
+///
+/// Fails closed with [`PagingError::Misaligned`] if `virt` isn't
+/// [`PAGE_SIZE`]-aligned, or [`PagingError::NotMapped`] if any level from
+/// the PML4 down to the leaf PTE is not present — never silently a no-op.
+pub fn unmap_4k(pml4: &mut PageTable, virt: u64) -> Result<(), PagingError> {
+    if !virt.is_multiple_of(PAGE_SIZE) {
+        return Err(PagingError::Misaligned);
+    }
+    let mut table = pml4;
+    for shift in DIRECTORY_SHIFTS {
+        let entry = table.entries[table_index(shift, virt)];
+        if entry & PRESENT == 0 {
+            return Err(PagingError::NotMapped);
+        }
+        let child_addr = entry & ADDR_MASK;
+        // SAFETY: mirrors `walk_create`/`translate` — a present entry in a
+        // table this function was handed only ever points to another live
+        // `PageTable` that `map_4k`/`walk_create` constructed.
+        table = unsafe { &mut *(child_addr as *mut PageTable) };
+    }
+    let index = table_index(LEAF_SHIFT, virt);
+    if table.entries[index] & PRESENT == 0 {
+        return Err(PagingError::NotMapped);
+    }
+    table.entries[index] = 0;
     Ok(())
 }
 
@@ -311,6 +350,47 @@ mod tests {
         map_4k(&mut pml4, &mut allocator, 0x2000, 0xa000, false, true).unwrap();
 
         assert_eq!(translate(&pml4, 0x1000).unwrap().phys, 0x9000);
+        assert_eq!(translate(&pml4, 0x2000).unwrap().phys, 0xa000);
+    }
+
+    // STORY-P0-07-02: unmapping a present page clears it deterministically
+    // — translate sees nothing left behind.
+    #[test]
+    fn unmap_clears_a_present_mapping() {
+        let mut pml4 = PageTable::new();
+        let mut allocator: ArrayAllocator<8> = ArrayAllocator::new();
+        map_4k(&mut pml4, &mut allocator, 0x1000, 0x9000, true, false).unwrap();
+
+        assert_eq!(unmap_4k(&mut pml4, 0x1000), Ok(()));
+        assert_eq!(translate(&pml4, 0x1000), None);
+    }
+
+    // Unmapping something never mapped fails closed rather than silently
+    // succeeding as a no-op.
+    #[test]
+    fn unmap_of_an_unmapped_address_fails_closed() {
+        let mut pml4 = PageTable::new();
+        assert_eq!(unmap_4k(&mut pml4, 0x1000), Err(PagingError::NotMapped));
+    }
+
+    // An unaligned address is rejected before any table is walked.
+    #[test]
+    fn unmap_of_an_unaligned_address_is_rejected() {
+        let mut pml4 = PageTable::new();
+        assert_eq!(unmap_4k(&mut pml4, 0x1001), Err(PagingError::Misaligned));
+    }
+
+    // Unmapping one page leaves a sibling page (sharing the same
+    // intermediate levels) untouched.
+    #[test]
+    fn unmapping_one_page_leaves_a_sibling_page_mapped() {
+        let mut pml4 = PageTable::new();
+        let mut allocator: ArrayAllocator<8> = ArrayAllocator::new();
+        map_4k(&mut pml4, &mut allocator, 0x1000, 0x9000, true, false).unwrap();
+        map_4k(&mut pml4, &mut allocator, 0x2000, 0xa000, false, true).unwrap();
+
+        assert_eq!(unmap_4k(&mut pml4, 0x1000), Ok(()));
+        assert_eq!(translate(&pml4, 0x1000), None);
         assert_eq!(translate(&pml4, 0x2000).unwrap().phys, 0xa000);
     }
 }

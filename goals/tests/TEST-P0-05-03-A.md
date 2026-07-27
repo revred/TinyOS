@@ -3,6 +3,14 @@
 Status: **Verified**
 Story: [`STORY-P0-05-03`](../stories/STORY-P0-05-03.md)
 Tier: Mixed — host unit test for allowlist-membership logic, Tier 0 (QEMU x86_64) for capability-gated call implementations, per [Target Hardware & Test Matrix](../../README.md#target-hardware--test-matrix). This Test is explicitly adversarial, per `agent/CODING_STANDARDS.md`'s requirement for security-relevant subsystems ("actively try to violate the invariant," not just happy-path coverage).
+Assurance contract: [`goals/assurance/story-contracts.tsv`](../assurance/story-contracts.tsv)
+Performance domains: `D09`, `D10`, `D14`
+Security controls: `SEC-05`, `SEC-06`, `SEC-07`, `SEC-14`, `SEC-15`, `SEC-19`
+Containment classes: `C1`, `C3`
+Boundary tests: `BND-03`, `BND-04`, `BND-05`, `BND-09`, `BND-10`, `BND-11`, `BND-12`, `BND-19`, `BND-20`
+Protection Domain contracts: `PD-01`, `PD-02`, `PD-03`, `PD-04`, `PD-05`, `PD-06`, `PD-08`, `PD-11`, `PD-12`, `PD-13`, `PD-14`
+Code admission gates: `RCG-01`, `RCG-02`, `RCG-03`, `RCG-04`, `RCG-05`, `RCG-06`, `RCG-07`, `RCG-08`, `RCG-09`, `RCG-10`, `RCG-11`, `RCG-12`, `RCG-13`, `RCG-14`
+Assurance state: `baseline-debt`
 
 ## Specification
 

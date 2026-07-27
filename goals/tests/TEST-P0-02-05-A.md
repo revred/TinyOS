@@ -3,6 +3,14 @@
 Status: **Verified — passing locally, 2026-07-26**
 Story: [`STORY-P0-02-05`](../stories/STORY-P0-02-05.md)
 Tier: Host (`cargo test -p kernel --lib`), per [Target Hardware & Test Matrix](../../README.md#target-hardware--test-matrix) — `context_switch_asm` is pinned to `sysv64` explicitly (not `extern "C"`, which follows the host OS's own convention), so the exact assembly this Story's dispatch loop calls runs identically on the host toolchain and the real target, mirroring `STORY-P0-02-02`'s own precedent for why this is meaningful and not just a Tier-0 stand-in.
+Assurance contract: [`goals/assurance/story-contracts.tsv`](../assurance/story-contracts.tsv)
+Performance domains: `D05`
+Security controls: `SEC-03`, `SEC-05`, `SEC-20`
+Containment classes: `C1`, `C2`, `C3`, `C4`
+Boundary tests: `BND-04`, `BND-15`, `BND-16`, `BND-17`, `BND-20`
+Protection Domain contracts: `PD-01`, `PD-02`, `PD-07`, `PD-08`, `PD-09`, `PD-12`, `PD-13`
+Code admission gates: `RCG-10`, `RCG-12`, `RCG-13`, `RCG-14`
+Assurance state: `baseline-debt`
 
 ## Specification
 

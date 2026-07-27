@@ -3,6 +3,14 @@
 Status: **Verified — passing locally, 2026-07-26**
 Story: [`STORY-P0-01-03`](../stories/STORY-P0-01-03.md)
 Tier: CI / Tier 0
+Assurance contract: [`goals/assurance/story-contracts.tsv`](../assurance/story-contracts.tsv)
+Performance domains: `D01`, `D24`
+Security controls: `SEC-01`, `SEC-17`, `SEC-20`
+Containment classes: `C0`, `C1`
+Boundary tests: `BND-01`, `BND-02`, `BND-03`, `BND-17`, `BND-18`
+Protection Domain contracts: `PD-02`, `PD-12`, `PD-13`, `PD-14`
+Code admission gates: `RCG-05`, `RCG-06`, `RCG-07`, `RCG-12`, `RCG-14`
+Assurance state: `baseline-debt`
 
 ## Specification
 

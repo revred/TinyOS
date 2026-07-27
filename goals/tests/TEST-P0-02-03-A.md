@@ -3,6 +3,14 @@
 Status: **Verified — passing locally, 2026-07-26**
 Story: [`STORY-P0-02-03`](../stories/STORY-P0-02-03.md)
 Tier: Host (`cargo test -p kernel --lib`), per [Target Hardware & Test Matrix](../../README.md#target-hardware--test-matrix) — `kernel::lock`/`kernel::sched` are pure logic with no assembly, boot, or target-specific dependency, mirroring `STORY-P0-02-01`'s own host-only scope.
+Assurance contract: [`goals/assurance/story-contracts.tsv`](../assurance/story-contracts.tsv)
+Performance domains: `D06`
+Security controls: `SEC-03`, `SEC-05`, `SEC-20`
+Containment classes: `C1`, `C2`, `C3`, `C4`
+Boundary tests: `BND-04`, `BND-15`, `BND-16`, `BND-17`, `BND-20`
+Protection Domain contracts: `PD-01`, `PD-02`, `PD-07`, `PD-08`, `PD-09`, `PD-12`, `PD-13`
+Code admission gates: `RCG-10`, `RCG-12`, `RCG-13`, `RCG-14`
+Assurance state: `baseline-debt`
 
 ## Specification
 

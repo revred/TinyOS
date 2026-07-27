@@ -54,7 +54,15 @@ impl<const N: usize> SpoorJournal<N> {
     /// this module exposes beyond `&self` methods, which the borrow
     /// checker already serializes against a concurrent `&mut self` append)
     /// can observe a partially-written entry.
+    ///
+    /// A zero-capacity journal (`N == 0`) has no slot to write into at
+    /// all — `append` is a no-op rather than an out-of-bounds index/modulo-
+    /// by-zero panic, preserving this function's own "never panics"
+    /// contract even at the degenerate capacity.
     pub fn append(&mut self, spoor: Spoor) {
+        if N == 0 {
+            return;
+        }
         self.entries[self.next] = spoor.to_bits();
         self.next = (self.next + 1) % N;
         if self.len < N {
@@ -185,5 +193,19 @@ mod tests {
         journal.append(spoor(2));
         let targets: std::vec::Vec<u16> = journal.iter().map(|s| s.target()).collect();
         assert_eq!(targets, std::vec![2]);
+    }
+
+    // A zero-capacity journal has no slot to write into at all — `append`
+    // must be a no-op, never an out-of-bounds index or modulo-by-zero
+    // panic, preserving this module's own "never panics" contract even at
+    // this degenerate capacity.
+    #[test]
+    fn a_zero_capacity_journal_never_panics_on_append() {
+        let mut journal: SpoorJournal<0> = SpoorJournal::new();
+        journal.append(spoor(1));
+        journal.append(spoor(2));
+        assert!(journal.is_empty());
+        assert_eq!(journal.len(), 0);
+        assert_eq!(journal.iter().count(), 0);
     }
 }

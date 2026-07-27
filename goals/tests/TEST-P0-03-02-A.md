@@ -3,6 +3,14 @@
 Status: **Verified — passing locally, 2026-07-26**
 Story: [`STORY-P0-03-02`](../stories/STORY-P0-03-02.md)
 Tier: Host (`cargo test -p kernel --lib`, plus `cargo run -p xtask -- governance-fixture-test`), per [Target Hardware & Test Matrix](../../README.md#target-hardware--test-matrix) — `kernel::capacities` is pure `const` configuration with no target-specific dependency, and the build-time property this Test cares about (a violated budget fails compilation) is provable identically on the host toolchain.
+Assurance contract: [`goals/assurance/story-contracts.tsv`](../assurance/story-contracts.tsv)
+Performance domains: `D07`, `D25`
+Security controls: `SEC-19`, `SEC-20`
+Containment classes: `C1`, `C2`, `C3`, `C4`
+Boundary tests: `BND-04`, `BND-15`, `BND-20`
+Protection Domain contracts: `PD-01`, `PD-06`, `PD-08`, `PD-13`
+Code admission gates: `RCG-09`, `RCG-10`, `RCG-13`, `RCG-14`
+Assurance state: `baseline-debt`
 
 ## Specification
 

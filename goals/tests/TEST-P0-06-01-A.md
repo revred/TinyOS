@@ -3,6 +3,14 @@
 Status: **Verified — passing locally, 2026-07-26**
 Story: [`STORY-P0-06-01`](../stories/STORY-P0-06-01.md)
 Tier: Host (`cargo test -p kernel --lib`), per [Target Hardware & Test Matrix](../../README.md#target-hardware--test-matrix) — `kernel::spoor` is pure bit-packing logic with no target-specific dependency.
+Assurance contract: [`goals/assurance/story-contracts.tsv`](../assurance/story-contracts.tsv)
+Performance domains: `D11`
+Security controls: `SEC-06`, `SEC-14`, `SEC-16`, `SEC-19`
+Containment classes: `C0`, `C1`, `C2`, `C3`, `C4`
+Boundary tests: `BND-17`
+Protection Domain contracts: `PD-02`, `PD-08`, `PD-11`, `PD-13`
+Code admission gates: `RCG-02`, `RCG-08`, `RCG-12`, `RCG-13`, `RCG-14`
+Assurance state: `baseline-debt`
 
 ## Specification
 

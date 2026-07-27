@@ -30,6 +30,14 @@ The preemptive, priority-based scheduler with bounded interrupt latency and prio
 
 **All five Stories now Verified.** One structural gap remains, `STORY-P0-02-04`'s own: no live timer drives `kernel::wcet::record_tick`, and no real watchdog/failsafe subsystem exists to hand a detected overrun off to. `STORY-P0-02-03`'s equivalent gap (no dispatcher to behaviorally prove starvation prevention) is now closed by `STORY-P0-02-05`. `STORY-P0-02-05`'s own dispatch loop is cooperative, not preemptive — true involuntary preemption still needs a timer interrupt / IDT (`STORY-P0-05-02`'s named gap), which is also `STORY-P0-02-04`'s missing timer source. One remaining infrastructure gap, not two independent ones — restated here since it's easy to undercount once `-03`'s half closes.
 
+## Containment contract
+
+Canonical row: [`assurance/feature-contracts.tsv`](../assurance/feature-contracts.tsv) · implementation **C1** · subjects **C2/C3/C4** · boundary tests **BND-04, -15, -16, -17, -20**.
+
+That row also selects this Feature’s [`PD-*`](../security/protection-domain-contracts.tsv) and [`RCG-*`](../security/code-admission-gates.tsv) Security Charter obligations. Every Test repeats the exact selections and CI rejects drift.
+
+The scheduler treats containment class, capability authority, and scheduling criticality as independent fields. Creating or prioritizing a task grants no capability; a lower-trust class cannot starve admitted RT work; and every context switch must carry the complete active address-space and protection state needed to contain a compromised task. Required evidence includes all-class-pair memory denial, priority orthogonality, bounded hostile-load recovery, class-aware spoors, and single-seeded-defect containment.
+
 ## Exit criteria
 
 `STORY-P0-02-01` through `-04` all reach **Verified**. **Met**, as of 2026-07-26. (`STORY-P0-02-05` was added mid-Feature and is additionally Verified, beyond this Feature's original exit criteria's own 4-Story scope.)

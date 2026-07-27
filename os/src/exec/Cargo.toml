@@ -29,3 +29,28 @@ name = "win32-shim-fixture"
 path = "src/fixture_win32_shim_main.rs"
 test = false
 bench = false
+
+[[bin]]
+# `TEST-P0-05-04-A`'s Tier 0 QEMU fixture: the real `blue-sharc.exe`
+# artifact (repacked via `xtask pack-txe`, `STORY-P0-08-01`), following
+# `exec-fixture`'s own precedent above.
+name = "blue-sharc-fixture"
+path = "src/fixture_blue_sharc_main.rs"
+test = false
+bench = false
+
+[[bin]]
+# `TEST-P0-05-04-A` acceptance criterion 3's deliberately-corrupted-copy
+# fixture, mirroring `kernel`'s own `fixture-broken-boot` pattern.
+name = "blue-sharc-broken-fixture"
+path = "src/fixture_blue_sharc_broken_main.rs"
+test = false
+bench = false
+
+[[bin]]
+# `TEST-P0-07-02-A`'s Tier 0 QEMU fixture, following `exec-fixture`'s own
+# precedent above.
+name = "shared-memory-fixture"
+path = "src/fixture_shared_memory_main.rs"
+test = false
+bench = false
