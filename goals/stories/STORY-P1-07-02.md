@@ -1,6 +1,6 @@
 # STORY-P1-07-02 — AArch64 Exception Vectors: a Fault Prints a Decoded `ESR_EL1` Instead of Hanging
 
-Status: **Specified — not started; gated on `STORY-P1-07-01` and on `TEST-P1-07-02-A` Red first**
+Status: **In progress — host-testable half Green 2026-07-28 (115 host tests in `hal-arm64`, from 64); acceptance criterion 2 blocked on a board, and there is no version of this Story that passes without it. Not Verified.**
 Feature: [`FEAT-P1-07`](../features/FEAT-P1-07.md)
 Introduced in: [`session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md`](../../session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md) §5
 

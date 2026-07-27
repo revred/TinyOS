@@ -326,8 +326,25 @@ extern "C" fn continue_at_el1() -> ! {
 
     let _ = report_ready(&uart);
 
-    // Park. Not a halt loop out of laziness: with no fault reporting and no
-    // scheduler, a safe state is the only correct terminal state, and
+    // `STORY-P1-07-02`: the vector table, installed **after**
+    // `TEST-P1-07-01-A` clause 4's known byte sequence rather than before it.
+    //
+    // The order is deliberate and it is about evidence, not about correctness:
+    // clause 4's capture is `STORY-P1-07-01`'s Green, it has not been taken
+    // yet, and it must be produced by the same code path that was specified
+    // for it. Installing vectors first would put two new lines ahead of the
+    // sequence and make a pending piece of another Story's evidence depend on
+    // this one. Everything between `_start` and here therefore still runs with
+    // no fault reporting — which is exactly the state this Story exists to
+    // end, and cannot end for the code that precedes its own installation.
+    //
+    // SAFETY: `continue_at_el1` runs at `EL1` on the boot core with the stack
+    // `_start` established, and this is the only caller.
+    let (requested, readback) = unsafe { crate::fault::install() };
+    let _ = crate::fault::report_vbar(&uart, requested, readback);
+
+    // Park. Not a halt loop out of laziness: with no scheduler and no resume
+    // path, a safe state is the only correct terminal state, and
     // `agent/CODING_STANDARDS.md` resolves this as fail-safe over keep-trying.
     loop {
         // SAFETY: `wfe` is architecturally permitted at every exception level

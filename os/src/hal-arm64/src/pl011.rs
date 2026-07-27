@@ -301,9 +301,11 @@ impl<M: Mmio> Pl011<M> {
         self.mmio.write_u32(register::FBRD, u32::from(divisors.fractional()));
         self.mmio.write_u32(register::LCR_H, line_control::WLEN_8 | line_control::FEN);
 
-        // `STORY-P1-07-02` has not landed: there is no vector table on this
-        // board, so an interrupt that fires here jumps to whatever the firmware
-        // left in `VBAR_EL1`. Masked and cleared, not merely masked.
+        // No vector table is installed *yet* when this runs:
+        // `crate::fault::install` is called later in `crate::boot`, after the
+        // UART exists to report through. So an interrupt raised here still
+        // jumps to whatever the firmware left in `VBAR_EL1`. Masked and
+        // cleared, not merely masked.
         self.mmio.write_u32(register::IMSC, 0);
         self.mmio.write_u32(register::ICR, ALL_INTERRUPTS);
 
