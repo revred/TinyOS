@@ -3,7 +3,7 @@
 Status: **Functionally Verified (Tier 0 + Host), 2026-07-28** — assurance state `baseline-debt`
 Feature: [`FEAT-P0-01`](../features/FEAT-P0-01.md)
 Introduced in: [`session/hand-2026-07-28/16-next-session-mandate.md`](../../session/hand-2026-07-28/16-next-session-mandate.md)
-Implemented in: [`session/hand-2026-07-28/17-story-p0-01-04-harness-assurance.md`](../../session/hand-2026-07-28/17-story-p0-01-04-harness-assurance.md)
+Implemented in: [`session/hand-2026-07-28/18-story-p0-01-04-harness-assurance.md`](../../session/hand-2026-07-28/18-story-p0-01-04-harness-assurance.md)
 
 ## Description
 
