@@ -232,34 +232,42 @@ See [`docs/deploy-protocol.md`](docs/deploy-protocol.md) for the full spec, and 
 
 ## System Architecture (target)
 
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│                         TinyOS Shell (UX)                        │
-│   TINYCMD (DOS-style CLI)  │  Status/Monitor TUI  │  Web Console  │
-└──────────────────────────┬───────────────────────────────────────┘
-                            │  Command & Control API (versioned, audited)
-┌──────────────────────────▼──────────────────────────────────────┐
-│                     Agent Command Interface (ACI)                │
-│   Capability registry │ Policy engine │ Rate limits │ Audit log   │
-└───────┬───────────────────────┬──────────────────────┬──────────┘
-        │                       │                       │
-┌───────▼───────┐     ┌─────────▼─────────┐   ┌─────────▼─────────┐
-│  Local Agent   │     │   Human Operator   │   │  Remote / Fleet   │
-│ (Ollama / LLM) │     │   (shell / scripts)│   │ (host, bus, net)  │
-└───────┬───────┘     └─────────┬─────────┘   └─────────┬─────────┘
-        └───────────────────────┴───────────────────────┘
-                                 │
-┌────────────────────────────────▼────────────────────────────────┐
-│                      TinyOS Real-Time Kernel                     │
-│  Preemptive scheduler │ Priority inheritance │ Deterministic IPC  │
-│  Static memory pools  │ Deadline monitor      │ Watchdog/failsafe │
-└──────┬────────────┬────────────┬──────────────┬──────────────┬──┘
-       │             │            │              │              │
-  ┌──────▼──────┐ ┌──────▼──────┐ ┌──────▼──────┐ ┌──────▼──────┐ ┌──────▼──────┐
-  │     CAN     │ │     USB     │ │  Ethernet   │ │ Host Bridge │ │    HAL /    │
-  │     Bus     │ │    Stack    │ │  /TCP-IP    │ │ (Win/Lin)   │ │   Drivers   │
-  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘
+The shape of this diagram is the architecture's central claim: **every caller reaches the kernel through exactly one door.** The Agent Command Interface is not a convenience layer that some callers may skip — the local shell, an LLM agent, a human running scripts and a remote fleet peer are all the same kind of thing to it, and each one's authority comes from a capability grant rather than from what it happens to be.
+
+```mermaid
+%%{init: {"flowchart": {"wrappingWidth": 560, "curve": "basis"}}}%%
+flowchart TB
+    shell["<b>TinyOS Shell (UX)</b><br/>TINYCMD · Monitor TUI · Web Console"]
+    agent["<b>Local Agent</b><br/>Ollama / LLM"]
+    human["<b>Human Operator</b><br/>shell · scripts"]
+    remote["<b>Remote / Fleet</b><br/>host · bus · net"]
+
+    aci["<b>Agent Command Interface (ACI)</b><br/>one versioned, audited Command &amp; Control API<br/>Capability registry · Policy engine · Rate limits · Audit log"]
+
+    kernel["<b>TinyOS Real-Time Kernel</b><br/>Preemptive scheduler · Priority inheritance · Deterministic IPC<br/>Static memory pools · Deadline monitor · Watchdog / failsafe"]
+
+    can["CAN Bus"]
+    usb["USB Stack"]
+    eth["Ethernet<br/>TCP/IP"]
+    bridge["Host Bridge<br/>Windows / Linux"]
+    hal["HAL / Drivers"]
+
+    shell & agent & human & remote --> aci
+    aci ==>|"the only path to the kernel"| kernel
+    kernel --> can & usb & eth & bridge & hal
+
+    classDef caller fill:#e7eefb,stroke:#3f6bb0,stroke-width:1px,color:#10243e
+    classDef gate fill:#fbe9e7,stroke:#b04a3f,stroke-width:2px,color:#3e1410
+    classDef core fill:#e6f3ea,stroke:#3f8a5a,stroke-width:2px,color:#0f2a19
+    classDef edgehw fill:#f1ecfa,stroke:#6f52a8,stroke-width:1px,color:#241038
+
+    class shell,agent,human,remote caller
+    class aci gate
+    class kernel core
+    class can,usb,eth,bridge,hal edgehw
 ```
+
+The kernel is the only thing below the ACI, and the buses and drivers are the only things below the kernel — an RT task's timing is never at the mercy of a shell, an agent, or a network peer being alive. See [Design Pillar 5](#5-llm-as-a-supervised-operator-not-a-root-user) for the ACI's authority model, [Design Pillar 2](#2-uxui-strictly-separated-from-control) for why the shell sits above that gate rather than beside it, and [`docs/universal-driver-model.md`](docs/universal-driver-model.md) for how the bottom row gets populated on unfamiliar hardware.
 
 ---
 
