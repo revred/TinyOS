@@ -341,6 +341,15 @@ extern "C" fn tinyos_fault_entry(frame: *const hal_x86_64::fault::FaultFrame) ->
     > = kernel::spoor_journal::SpoorJournal::new();
     // SAFETY: single-CPU kernel, and this handler never returns — no
     // concurrent access to the journal static is possible.
+    //
+    // `&mut *(&raw mut STATIC)` is this workspace's established single-owner
+    // pattern for a `static mut` one caller owns for a whole kernel run, and
+    // it carries the same narrow allow every other user of it does
+    // (`fixture_fault`, `os`'s own `main.rs`, `hal_x86_64::interrupts::init`).
+    // Clippy's suggested simplification is `&mut STATIC`, which is exactly the
+    // `static_mut_refs` the raw-pointer form exists to avoid — taking the
+    // suggestion would make this worse, not better.
+    #[allow(clippy::deref_addrof)]
     let journal_len = unsafe {
         let journal = &mut *(&raw mut FAULT_JOURNAL);
         for spoor in kernel::fault::audit(&report, disposition) {
