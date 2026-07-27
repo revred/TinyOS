@@ -21,7 +21,33 @@ Read, in this order:
 2. [`13-story-p1-04-03-shipping-image-enforcement.md`](13-story-p1-04-03-shipping-image-enforcement.md) — the other Story in `main`.
 3. **[`goals/assurance/loose-ends.tsv`](../../goals/assurance/loose-ends.tsv) is now the canonical loose-ends register**, and the assurance spine validates against it. Handover 09's prose register is superseded; use the TSV.
 
-## Start here: push, and read the first CI run carefully
+## The push happened, CI is green, and `LE-23` is confirmed rather than ruled out
+
+**Read this before the section below, which was written before the run and is kept because its reasoning is what the run then tested.**
+
+`main` was pushed at `22c269f`. **CI run `30294647525` is green on every job** — the first fully green run in five sessions, and the timing gate passed on a Linux runner against a baseline recorded on a Windows dev box. That is the headline. The numbers underneath it are the more useful result, and they are not the comfortable ones.
+
+Reference: **572 cycles (Windows baseline) → 441 (CI)**, a runner 1.30x faster. Per-metric p50, baseline → observed:
+
+| Metric | ratio shift | absolute shift | verdict |
+|---|---|---|---|
+| `D05/dispatch_select_highest_priority_ready` | **+80%** | 112 → 155 | ok, limit +100% |
+| `D07/pool_u64x4_alloc_denied_exhausted` | +25% | 26 → 25 | ok |
+| `D04/context_switch_yield_roundtrip_2switches` | −23% | 332 → 207 | ok |
+| `D05/dispatch_run_once_cooperative_round` | −40% | 438 → 259 | ok |
+| `D02/fault_ud2_capture_terminate_kernel_context` | −46% | 1174 → 467 | ok |
+
+**Two findings, and both matter more than the green tick.**
+
+1. **The ratios shifted across hosts by as much as the absolutes did.** Ratio spread across metrics is **3.36x** (0.535 → 1.799); absolute spread is **3.45x** (0.40 → 1.38). On this datum, normalising bought **essentially nothing** for cross-host transfer. Everything `STORY-P1-01-04` demonstrated remains true and remains about **same-host load**, which is what it was scoped to after correction — but nobody should carry away the impression that a ratio baseline is portable. It is not, on this evidence.
+
+2. **`D05/dispatch_select` passed with 20 points of margin on unchanged code.** Had the tolerance been the 60% that was drafted before the quiet-to-loaded excursion was computed, **this push would have gone red** — the same failure mode, one turn later. The 100% constant is doing real work and should not be trimmed by anyone who thinks it looks loose.
+
+**One thing that got better, unexpectedly.** `D07/pool_u64x64_alloc_free_round_trip` measured **25 cycles on CI**, not 0. `LE-24` is a property of the *Windows host*, where the operation costs less than the calibrated `rdtsc` overhead — on the Linux runner it is measurable and would be gateable. The ungating is a consequence of where the baseline was recorded, which ties `LE-24` directly to `LE-23` and means both should be examined by the same Story.
+
+**Consequence for the agenda**: the `LE-23` Story is no longer "rule this out". It is "this is real, here are the numbers, choose a fix". The two candidate directions are unchanged and now have data behind them — re-record the baseline from a CI run, or add a **second reference of different composition** (memory-bound alongside the ALU-bound one) and normalise each metric against whichever it resembles. The second is more work and is the one the +80%/−46% split actually points at, since the sign of the shift tracks what the metric is made of.
+
+## Start here (written pre-push, retained): push, and read the first CI run carefully
 
 **This is a short first task with a specific trap, and it should be done before anything else is started.**
 
