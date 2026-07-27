@@ -61,6 +61,11 @@ pub enum Category {
     Memory,
     /// Boot-time initialization (ACPI topology discovery, etc.).
     Boot,
+    /// `kernel::fault` — captured CPU exceptions and their disposition
+    /// (`STORY-P1-02-01`). A new variant rather than a reuse of `Boot` or
+    /// `Scheduling`: a fault is neither, and an auditor filtering for faults
+    /// must never have to guess which other category one was folded into.
+    Fault,
 }
 
 impl Category {
@@ -73,6 +78,7 @@ impl Category {
             Category::Exec => 4,
             Category::Memory => 5,
             Category::Boot => 6,
+            Category::Fault => 7,
         }
     }
 
@@ -85,6 +91,7 @@ impl Category {
             4 => Ok(Category::Exec),
             5 => Ok(Category::Memory),
             6 => Ok(Category::Boot),
+            7 => Ok(Category::Fault),
             _ => Err(SpoorError::UnknownCategory),
         }
     }
@@ -138,6 +145,11 @@ pub enum Action {
     Overrun,
     /// A WCET budget window was reset (`wcet::reset_budget_window`).
     ResetBudget,
+    /// A CPU exception was captured (`kernel::fault`).
+    Fault,
+    /// A faulting task was terminated, or the system halted because the
+    /// fault could not be contained to one (`kernel::fault`).
+    Terminate,
 }
 
 impl Action {
@@ -150,6 +162,8 @@ impl Action {
             Action::Select => 4,
             Action::Overrun => 5,
             Action::ResetBudget => 6,
+            Action::Fault => 7,
+            Action::Terminate => 8,
         }
     }
 
@@ -162,6 +176,8 @@ impl Action {
             4 => Ok(Action::Select),
             5 => Ok(Action::Overrun),
             6 => Ok(Action::ResetBudget),
+            7 => Ok(Action::Fault),
+            8 => Ok(Action::Terminate),
             _ => Err(SpoorError::UnknownAction),
         }
     }
@@ -429,8 +445,9 @@ mod tests {
     // (STORY-P0-06-01 acceptance criterion 2).
     #[test]
     fn decode_rejects_an_unknown_category_nibble() {
-        // Category 0..=6 are valid; 7 is not yet assigned.
-        let bits = 7u64 << CAT_SHIFT;
+        // Category 0..=7 are valid (7 = `Fault`, added by `STORY-P1-02-01`);
+        // 8 is not yet assigned.
+        let bits = 8u64 << CAT_SHIFT;
         assert_eq!(Spoor::decode(bits), Err(SpoorError::UnknownCategory));
     }
 
@@ -444,8 +461,9 @@ mod tests {
 
     #[test]
     fn decode_rejects_an_unknown_action_nibble() {
-        // Action 0..=6 are valid; 7 is not yet assigned.
-        let bits = 7u64 << ACT_SHIFT;
+        // Action 0..=8 are valid (7 = `Fault`, 8 = `Terminate`, added by
+        // `STORY-P1-02-01`); 9 is not yet assigned.
+        let bits = 9u64 << ACT_SHIFT;
         assert_eq!(Spoor::decode(bits), Err(SpoorError::UnknownAction));
     }
 

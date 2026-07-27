@@ -25,11 +25,15 @@
 //! only two wired through a real save-everything/`iretq` assembly stub
 //! (`timer_isr_stub`/`spurious_isr_stub`) below.
 //!
-//! **Named, not silently solved:** this module stands up no TSS/Interrupt
-//! Stack Table, so a `#DF`/`#MC` whose own stack is already invalid can
-//! still fault a second time while the CPU pushes that vector's frame —
-//! see [`crate::idt::Idt`]'s own doc comment for the full statement of this
-//! gap. Local-APIC timer-tick delivery is armed by [`init`] but nothing
+//! **The double fault has a known-good stack; the machine check does not.**
+//! `STORY-P1-02-02` made both [`init_faults_only`] and [`init`] install a
+//! GDT and TSS ([`crate::gdt::install`]) before loading the IDT, and wire
+//! vector 8 through an IST-bearing gate. A fault raised while the CPU is
+//! delivering a fault therefore lands on a stack chosen by hardware and is
+//! reported, instead of triple-faulting silently. `#MC` (vector 18) keeps
+//! the shared fail-closed default and no IST — see [`crate::tss`]'s own doc
+//! comment for why a second IST slot is deliberately left unwired.
+//! Local-APIC timer-tick delivery is armed by [`init`] but nothing
 //! outside this module consumes a tick yet (no scheduler dispatch loop
 //! reads [`tick_count`]) — the same "primitive exists, no production
 //! consumer wired to it yet" honesty this codebase has applied to every
@@ -419,6 +423,80 @@ unsafe fn configure_timer(initial_count: u32) {
 /// storage alive for as long as a loaded page-table tree stays active.
 static mut IDT: Idt = Idt::new();
 
+/// Wires the three `STORY-P1-02-01` fault vectors into `idt`, leaving every
+/// other vector as the caller left it.
+///
+/// Split out of [`init`] so a fixture can have fault handling **without** an
+/// armed APIC timer: a tick arriving mid-fixture would switch contexts under
+/// a test whose whole subject is which context faulted.
+///
+/// # Safety
+/// `idt` must be the table about to be loaded, and the stub symbols must be
+/// linked into this image (they are — `crate::fault`'s `global_asm!`).
+#[cfg(not(target_os = "windows"))]
+unsafe fn set_fault_handlers(idt: &mut Idt) {
+    idt.set_handler(
+        crate::fault::FaultVector::INVALID_OPCODE as u8,
+        crate::fault::ud_fault_stub as *const () as u64,
+        CODE_SELECTOR,
+    );
+    idt.set_handler(
+        crate::fault::FaultVector::GENERAL_PROTECTION as u8,
+        crate::fault::gp_fault_stub as *const () as u64,
+        CODE_SELECTOR,
+    );
+    idt.set_handler(
+        crate::fault::FaultVector::PAGE_FAULT as u8,
+        crate::fault::pf_fault_stub as *const () as u64,
+        CODE_SELECTOR,
+    );
+    // `STORY-P1-02-02`: the only IST-bearing gate in this table. The CPU loads
+    // `RSP` from the TSS before pushing anything for this vector, which is what
+    // makes a fault raised *during* fault delivery reportable rather than a
+    // triple fault. Requires `crate::gdt::install` to have run first — both
+    // callers below do that before touching the IDT at all.
+    idt.set_handler_with_ist(
+        crate::fault::DOUBLE_FAULT_VECTOR as u8,
+        crate::fault::df_fault_stub as *const () as u64,
+        CODE_SELECTOR,
+        crate::tss::IstIndex::DOUBLE_FAULT,
+    );
+}
+
+/// Brings up **only** fault handling: every vector defaulted to
+/// [`unhandled_interrupt_handler`], the three `STORY-P1-02-01` fault vectors
+/// wired to their capture stubs, the table loaded, and the legacy PIC retired.
+///
+/// Deliberately does not touch the local APIC and never executes `sti`. A
+/// caller that wants ticks calls [`init`]; a caller that wants a quiet machine
+/// in which a deliberate `#UD`/`#GP`/`#PF` is the only event calls this.
+///
+/// # Safety
+/// Same contract as [`init`]: at most once, before anything depends on
+/// interrupts being masked.
+#[cfg(not(target_os = "windows"))]
+#[allow(static_mut_refs, clippy::deref_addrof)]
+pub unsafe fn init_faults_only() {
+    // SAFETY: see this function's own doc comment; `&raw mut IDT` follows the
+    // same single-owner pattern `init` uses.
+    unsafe {
+        // Before the IDT, always: the IST-bearing gate `set_fault_handlers`
+        // installs names a TSS slot, and a gate naming a slot the task register
+        // knows nothing about is worse than a gate naming none.
+        crate::gdt::install();
+        let idt = &mut *(&raw mut IDT);
+        let default_handler = unhandled_interrupt_handler as *const () as u64;
+        for vector in 0..=255u8 {
+            idt.set_handler(vector, default_handler, CODE_SELECTOR);
+        }
+        set_fault_handlers(idt);
+        debug_assert!(idt.every_entry_present());
+
+        load(idt);
+        remap_and_mask_pic();
+    }
+}
+
 /// Brings interrupt handling up end to end: builds this module's [`Idt`]
 /// (every vector defaulting to [`unhandled_interrupt_handler`],
 /// [`TIMER_VECTOR`] and [`SPURIOUS_VECTOR`] wired to their own stubs),
@@ -442,6 +520,10 @@ pub unsafe fn init(initial_count: u32) {
     // caller owns for a whole kernel run (e.g.
     // `exec::fixture_shared_memory_main`'s `GRANT_REGISTRY`).
     unsafe {
+        // `STORY-P1-02-02`, on the real boot path and not only in the fixture
+        // that tests it: a safety net wired only where it is measured is
+        // theater. See `init_faults_only` for why this precedes the IDT.
+        crate::gdt::install();
         let idt = &mut *(&raw mut IDT);
         let default_handler = unhandled_interrupt_handler as *const () as u64;
         for vector in 0..=255u8 {
@@ -449,6 +531,11 @@ pub unsafe fn init(initial_count: u32) {
         }
         idt.set_handler(TIMER_VECTOR, timer_isr_stub as *const () as u64, CODE_SELECTOR);
         idt.set_handler(SPURIOUS_VECTOR, spurious_isr_stub as *const () as u64, CODE_SELECTOR);
+        // `STORY-P1-02-01`: the three captured faults reach real handlers
+        // instead of the shared fail-closed default. Every *other* vector
+        // keeps that default — this narrows what is terminal for the whole
+        // system without widening what is silently ignored, which stays empty.
+        set_fault_handlers(idt);
         debug_assert!(idt.every_entry_present());
 
         load(idt);

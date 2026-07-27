@@ -8,7 +8,10 @@
 //! through. `idt`/`interrupts` (`STORY-P0-04-02`) are the IDT/local-APIC
 //! bring-up; `pci` (`STORY-P0-04-03`) is the read-only configuration-space
 //! bus enumeration recording into [`hal::device::DeviceTable`] —
-//! completing `FEAT-P0-04`'s x86_64 HAL backend.
+//! completing `FEAT-P0-04`'s x86_64 HAL backend. `fault`
+//! (`STORY-P1-02-01`) captures `#UD`/`#GP`/`#PF`; `tss`/`gdt`
+//! (`STORY-P1-02-02`) stand up the Interrupt Stack Table that makes a fault
+//! *inside* that path survivable rather than a silent triple fault.
 //!
 //! `#![no_std]` is suppressed under `cfg(test)` so `cargo test` links the
 //! host's `std` test harness, matching `kernel`'s `lib.rs` split. `boot` and
@@ -39,6 +42,8 @@
 pub mod acpi;
 #[cfg(not(target_os = "windows"))]
 pub mod boot;
+pub mod fault;
+pub mod gdt;
 pub mod idt;
 #[cfg(not(target_os = "windows"))]
 pub mod interrupts;
@@ -49,3 +54,4 @@ pub mod qemu_exit;
 #[cfg(not(target_os = "windows"))]
 pub mod serial;
 pub mod tsc;
+pub mod tss;

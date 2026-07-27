@@ -15,6 +15,14 @@ name = "hal"
 version = "0.1.0"
 
 [[package]]
+name = "hal-arm64"
+version = "0.1.0"
+dependencies = [
+ "hal",
+ "kernel",
+]
+
+[[package]]
 name = "hal-x86_64"
 version = "0.1.0"
 dependencies = [

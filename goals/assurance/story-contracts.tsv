@@ -25,9 +25,10 @@ STORY-P0-07-01	FEAT-P0-07	D12	SEC-04,SEC-05,SEC-14,SEC-16,SEC-20	C1,C2,C3,C4	bas
 STORY-P0-07-02	FEAT-P0-07	D13	SEC-03,SEC-04,SEC-18,SEC-20	C1,C2,C3,C4	baseline-debt	Shared pages require rights-sized revocable generation-safe cross-class grants
 STORY-P0-08-01	FEAT-P0-08	D09,D25	SEC-02,SEC-06,SEC-09,SEC-10,SEC-17,SEC-19	C3,C4	baseline-debt	TXE packaging cannot promote C4 content and must preserve deterministic provenance for later C3 verification
 STORY-P1-01-01	FEAT-P1-01	D04,D05,D07	SEC-19,SEC-20	C0,C1	baseline-debt	Cycle-calibrated bounded measurement must observe RT paths without perturbing or exhausting them
-STORY-P1-01-02	FEAT-P1-01	D04,D05,D07	SEC-19,SEC-20	C0,C1	specified	Timing baselines and the regression gate must fail closed on missing malformed or regressed evidence
-STORY-P1-02-01	FEAT-P1-02	D02	SEC-03,SEC-14,SEC-19	C0,C1	specified	Fault capture and terminate-versus-resume policy must contain the faulting task and audit every decision
-STORY-P1-02-02	FEAT-P1-02	D02	SEC-14,SEC-19	C0,C1	specified	Double-fault IST handling must survive a compromised primary fault path and report before halting
+STORY-P1-01-02	FEAT-P1-01	D04,D05,D07	SEC-19,SEC-20	C0,C1	baseline-debt	Timing baselines and the regression gate must fail closed on missing malformed or regressed evidence
+STORY-P1-01-03	FEAT-P1-01	D04,D05,D07	SEC-19,SEC-20	C0,C1	baseline-debt	A second cycle source implementor must satisfy the shared trait contract on the host before any board exists
+STORY-P1-02-01	FEAT-P1-02	D02	SEC-03,SEC-14,SEC-19	C0,C1	baseline-debt	Fault capture and terminate-versus-resume policy must contain the faulting task and audit every decision
+STORY-P1-02-02	FEAT-P1-02	D02	SEC-14,SEC-19	C0,C1	baseline-debt	Double-fault IST handling must survive a compromised primary fault path and report before halting
 STORY-P1-03-01	FEAT-P1-03	D04,D08	SEC-03,SEC-19	C0,C1,C3	specified	Per-task CR3 installation must isolate address spaces with cross-space probes faulting and contained
 STORY-P1-03-02	FEAT-P1-03	D08	SEC-03,SEC-14,SEC-19	C0,C1,C3	specified	W^X sealing and generation-safe teardown must hold adversarially in both directions before frame reuse
 STORY-P1-04-01	FEAT-P1-04	D03,D05,D06	SEC-19,SEC-20	C0,C1	specified	Timer-driven preemption and priority inheritance must bound latency without granting priority from class

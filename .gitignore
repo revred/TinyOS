@@ -12,3 +12,12 @@ Thumbs.db
 # Rust build output (os/ is the Cargo workspace root)
 os/target/
 **/target/
+
+# Throwaway QEMU serial captures from local fixture debugging. Real evidence
+# belongs in a Report under goals/reports/, quoted verbatim — not as a loose
+# log file whose provenance nobody can reconstruct later.
+os/tmp*.log
+
+# Claude Code local runtime state. Shared settings (.claude/settings.json) are
+# deliberately NOT ignored, so they can be committed if the project adopts any.
+.claude/scheduled_tasks.lock

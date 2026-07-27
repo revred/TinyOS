@@ -1,6 +1,6 @@
 # FEAT-P1-01 — Timing Measurement Harness & CI Timing-Regression Gate
 
-Status: **In Progress — `STORY-P1-01-01` functionally Verified (Tier 0 + Host) 2026-07-27; `STORY-P1-01-02` (baselines + gate) not started**
+Status: **All three Stories functionally Verified 2026-07-27 (assurance state `baseline-debt` throughout — Tier 0 only, no hardware-tier evidence)**
 Epic: [`EPIC-P1`](../epics/EPIC-P1.md)
 Introduced in: [`session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md`](../../session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md)
 
@@ -12,7 +12,7 @@ QEMU cycle counts calibrate the harness and the regression *mechanism*; they are
 
 ## Crate(s) involved
 
-`os/src/kernel/` (measurement fixtures), `os/src/hal-x86_64/` (serial/cycle primitives), `os/src/xtask/` (report parsing, baseline comparison, the new `check-timing-regression` command + CI wiring)
+`os/src/kernel/` (measurement fixtures), `os/src/hal-x86_64/` (serial/cycle primitives), `os/src/hal-arm64/` (the generic-timer cycle source and timebase — `STORY-P1-01-03`'s narrow, board-free slice of the ARM64 backend), `os/src/xtask/` (report parsing, baseline comparison, the new `check-timing-regression` command + CI wiring)
 
 ## Depends on
 
@@ -23,7 +23,8 @@ QEMU cycle counts calibrate the harness and the regression *mechanism*; they are
 | Story | Summary | Status |
 |---|---|---|
 | [`STORY-P1-01-01`](../stories/STORY-P1-01-01.md) | Reusable cycle-calibrated measurement harness (kernel side + xtask parser) | Verified (Tier 0 + Host; assurance `baseline-debt`) |
-| [`STORY-P1-01-02`](../stories/STORY-P1-01-02.md) | Committed baselines + `check-timing-regression` CI gate, proven able to fail | Specified |
+| [`STORY-P1-01-02`](../stories/STORY-P1-01-02.md) | Committed baselines + `check-timing-regression` CI gate, proven able to fail | Verified (Tier 0 + Host; assurance `baseline-debt`) |
+| [`STORY-P1-01-03`](../stories/STORY-P1-01-03.md) | AArch64 `CNTVCT_EL0`/`CNTFRQ_EL0` cycle source and timebase — the harness's arch seam, checked with a second implementor before any board exists | Verified (Host; assurance `baseline-debt`) |
 
 ## Containment contract
 
@@ -37,4 +38,4 @@ The harness measures; it grants nothing. Measurement fixtures run with the same 
 
 ## Exit criteria
 
-Both Stories **Verified**: the harness produces stable percentile evidence for D04/D05/D07 under Tier 0, baselines are committed, the CI gate runs on every PR, and a deliberately-introduced regression has been demonstrated to fail it.
+All three Stories **Verified**: the harness produces stable percentile evidence for D04/D05/D07 under Tier 0, baselines are committed, the CI gate runs on every PR, and a deliberately-introduced regression has been demonstrated to fail it. `STORY-P1-01-03` adds no hardware requirement to this Feature's exit: it is the arch-seam check, not the hardware tier, which stays `LE-09`'s debt.

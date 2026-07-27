@@ -578,6 +578,9 @@ pub fn run() -> bool {
         return false;
     };
 
-    let _ = writeln!(serial, "pool-bench metrics={metrics} overall_ok={ok}");
+    let _ = writeln!(serial, "pool-bench metrics={metrics}");
+    // See `fixture_measure`'s note: the verdict is a sentinel line so a board
+    // with no isa-debug-exit port can still report pass/fail.
+    let _ = kernel::measure::write_result(&mut serial, "pool-bench", ok);
     ok && metrics == METRICS
 }

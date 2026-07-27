@@ -63,7 +63,7 @@ Every entry below is an `os/src/<name>/` directory with its own `Cargo.toml`. Th
 | `kernel` | Scheduler, IPC, memory pools, deadline monitor | Yes | Permitted (HAL boundary calls only) | Phase 0 |
 | `hal` | Bus enumeration, ACPI/Device-Tree manifest normalization, arch-neutral HAL trait definitions | Yes | Permitted | Phase 0 |
 | `hal-x86_64` | x86_64-specific HAL backend | Yes | Permitted | Phase 0 |
-| `hal-arm64` | ARM64-specific HAL backend | Yes | Permitted | Phase 7 (Jetson bring-up); stubbed earlier if Tier 0 QEMU ARM64 testing needs it sooner |
+| `hal-arm64` | ARM64-specific HAL backend | Yes | Permitted | **Phase 1, narrowly** — `STORY-P1-01-03` created it holding only the generic-timer cycle source and timebase, so the measurement harness's arch seam has a second implementor to be checked against before any board exists. Boot, UART, MMU and device-tree remain Phase 7 (Jetson/Pi 5 bring-up) |
 | `aci` | Capability registry, policy engine, audit log | Yes | `#![forbid(unsafe_code)]` | Phase 5 |
 | `shell` | TINYCMD canonical verb core + DOS/POSIX front-ends | Yes | `#![forbid(unsafe_code)]` | Phase 2 |
 | `deploy-device` | On-device deploy/hot-swap/A-B-boot logic | Yes | Permitted (bootloader interaction) | Phase 1.5 |

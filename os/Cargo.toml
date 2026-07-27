@@ -4,6 +4,7 @@ members = [
     "src/kernel",
     "src/hal",
     "src/hal-x86_64",
+    "src/hal-arm64",
     "src/exec",
     "src/xtask",
 ]

@@ -251,6 +251,20 @@ fn phase_dispatch_select<S: CycleSource>(
     for index in 0..(WARMUP + SAMPLES) {
         let watch = Stopwatch::start(source);
         let selected = scheduler.highest_priority_ready();
+        // The deliberate regression (`fixture-measure-regression`, never
+        // enabled in a real image): seven extra selections inside the timed
+        // region, making this phase ~8x slower so the gate has something real
+        // to catch. A doctored baseline file would prove only that the
+        // comparison arithmetic works; this proves the whole path — build,
+        // boot, measure, compare, fail — does.
+        #[cfg(feature = "fixture-measure-regression")]
+        let selected = {
+            let mut last = selected;
+            for _ in 0..7 {
+                last = scheduler.highest_priority_ready();
+            }
+            last
+        };
         let cycles = watch.stop(calibration);
         // The highest-priority Ready task is the last one created (priority
         // 25, slot 3) and nothing below changes any task's state, so every
@@ -474,6 +488,12 @@ pub fn run() -> bool {
     let Some(metrics) = emit_all(&mut serial, &environment, &collected) else {
         return false;
     };
-    let _ = writeln!(serial, "fixture-measure metrics={metrics} overall_ok={ok}");
-    ok && metrics == METRICS
+    let _ = writeln!(serial, "fixture-measure metrics={metrics}");
+    // The verdict travels as its own sentinel line (`STORY-P1-01-02`), not as
+    // prose: on Tier 0 the host cross-checks it against the isa-debug-exit
+    // code, and on a Raspberry Pi 5 — which has no such port (`LE-09`) — it is
+    // the only pass/fail bit that exists.
+    let verdict = ok && metrics == METRICS;
+    let _ = kernel::measure::write_result(&mut serial, "measure", verdict);
+    verdict
 }

@@ -57,6 +57,24 @@ fixture-pool-bench = []
 # `xtask measure` / `xtask qemu-x86_64 --fixture=measure` and
 # `TEST-P1-01-01-A`, never enabled in a real boot image.
 fixture-measure = []
+# Raises a real #UD, #GP and #PF from inside scheduled tasks and proves each
+# terminates that task only, with the scheduler still dispatching work
+# afterwards (`TEST-P1-02-01-A`) — used only by
+# `xtask qemu-x86_64 --fixture=fault`, never enabled in a real boot image.
+fixture-fault = []
+# Destroys a task's stack so the resulting #PF cannot have its own frame pushed
+# either, escalating to a real #DF, and proves the IST-backed handler runs on
+# the known-good stack and reports instead of triple-faulting
+# (`TEST-P1-02-02-A`) — used only by
+# `xtask qemu-x86_64 --fixture=double-fault`, never enabled in a real boot
+# image.
+fixture-double-fault = []
+# The same measurement fixture with one measured phase deliberately made ~8x
+# slower, so `xtask check-timing-regression --inject-regression` can prove the
+# gate actually fails — `STORY-P1-01-02`'s "prove it can fail" criterion, and
+# the same discipline `fixture-broken-boot` established for the boot path.
+# Never enabled in a real image, and never by CI's own gate step.
+fixture-measure-regression = ["fixture-measure"]
 
 [[bin]]
 name = "kernel"

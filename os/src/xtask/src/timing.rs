@@ -183,6 +183,25 @@ pub enum TimingError {
         /// Human-readable description of the disagreement.
         detail: String,
     },
+    /// The stream carried no `TINYOS-RESULT/1` line: the fixture never said
+    /// whether it passed, so the run is not evidence (`STORY-P1-01-02`).
+    MissingResult,
+    /// More than one result line appeared, so the verdict is ambiguous.
+    RepeatedResult,
+    /// The result line was present but not well formed.
+    MalformedResult {
+        /// What was wrong with it.
+        detail: String,
+    },
+    /// The UART verdict and the QEMU `isa-debug-exit` code disagreed — the
+    /// Tier 0 cross-check that establishes the UART bit can be trusted on a
+    /// board where it is the only bit there is.
+    ResultDisagreesWithExitCode {
+        /// What the UART line said.
+        uart_ok: bool,
+        /// What the exit code said.
+        exit_ok: bool,
+    },
 }
 
 impl fmt::Display for TimingError {
@@ -246,8 +265,86 @@ impl fmt::Display for TimingError {
             TimingError::InconsistentRuns { detail } => {
                 write!(formatter, "measurement runs are not comparable: {detail}")
             }
+            TimingError::MissingResult => write!(
+                formatter,
+                "measurement stream carries no `{RESULT_SENTINEL}` line: the fixture never reported whether it passed"
+            ),
+            TimingError::RepeatedResult => write!(
+                formatter,
+                "measurement stream carries more than one `{RESULT_SENTINEL}` line, so its verdict is ambiguous"
+            ),
+            TimingError::MalformedResult { detail } => {
+                write!(formatter, "malformed `{RESULT_SENTINEL}` line: {detail}")
+            }
+            TimingError::ResultDisagreesWithExitCode { uart_ok, exit_ok } => write!(
+                formatter,
+                "the fixture's UART verdict (ok={uart_ok}) disagrees with its isa-debug-exit code (ok={exit_ok})"
+            ),
         }
     }
+}
+
+/// The sentinel every fixture's pass/fail line starts with.
+///
+/// Deliberately *not* the `TINYOS-MEAS` sentinel: the verdict is not a
+/// measurement, it survives independently of the envelope, and `parse_stream`
+/// must keep treating it as ordinary chatter rather than an unknown record
+/// kind. Its whole reason for existing is `LE-09` piece 4 — a Raspberry Pi 5
+/// has no `isa-debug-exit` port, so a gate that can only read a QEMU exit code
+/// can never gate a board.
+pub const RESULT_SENTINEL: &str = "TINYOS-RESULT/1";
+
+/// A fixture's own self-consistency verdict, as carried over the UART.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunResult {
+    /// Which fixture reported it.
+    pub fixture: String,
+    /// Whether every self-check in that fixture held.
+    pub ok: bool,
+}
+
+/// Parses the one result line out of a captured stream, failing closed.
+///
+/// Exactly one line must carry [`RESULT_SENTINEL`], with exactly the keys
+/// `fixture` and `ok`, and `ok` must be exactly `true` or `false`. Everything
+/// else — none, several, an extra key, a missing key, a truthy-looking value
+/// like `yes` or `1` — is an error, because a verdict this parser had to guess
+/// at is not a verdict.
+pub fn parse_result(text: &str) -> Result<RunResult, TimingError> {
+    let mut found: Option<RunResult> = None;
+    for raw_line in text.lines() {
+        let line = raw_line.trim();
+        if !line.starts_with(RESULT_SENTINEL) {
+            continue;
+        }
+        if found.is_some() {
+            return Err(TimingError::RepeatedResult);
+        }
+        let mut tokens = line.split_whitespace();
+        tokens.next();
+        let fields = parse_fields("RESULT", tokens)
+            .map_err(|error| TimingError::MalformedResult { detail: error.to_string() })?;
+        let keys: Vec<&str> = fields.iter().map(|(key, _)| key.as_str()).collect();
+        if keys != ["fixture", "ok"] {
+            return Err(TimingError::MalformedResult {
+                detail: format!(
+                    "expected exactly `fixture` then `ok`, found `{}`",
+                    keys.join("`, `")
+                ),
+            });
+        }
+        let ok = match fields[1].1.as_str() {
+            "true" => true,
+            "false" => false,
+            other => {
+                return Err(TimingError::MalformedResult {
+                    detail: format!("`ok={other}` is neither `true` nor `false`"),
+                })
+            }
+        };
+        found = Some(RunResult { fixture: fields[0].1.clone(), ok });
+    }
+    found.ok_or(TimingError::MissingResult)
 }
 
 /// `BEGIN`'s required keys, in the order the harness emits them.
@@ -580,6 +677,91 @@ mod tests {
             METRIC_D07,
             "TINYOS-MEAS/1 END metrics=1",
             "fixture-measure overall_ok=true",
+        ]);
+        assert_eq!(parse_stream(&text).expect("well formed").metrics.len(), 1);
+    }
+
+    // `TEST-P1-01-03-A` clause 5: the parser is arch-neutral too, or the
+    // measurement harness's arch seam is only half real. This is the exact
+    // envelope text `hal_arm64`'s own drop-in test asserts `kernel::measure`
+    // emits when driven by the `CNTVCT_EL0` cycle source — copied here as a
+    // literal because `xtask` is a host binary and cannot depend on the
+    // kernel. No parser code changed to accept it, which is the point.
+    #[test]
+    fn an_aarch64_envelope_parses_with_no_arch_specific_parser_change() {
+        let text = stream(&[
+            "TINYOS-MEAS/1 BEGIN tier=T1 arch=aarch64 cycle_source=cntvct_el0 overhead_cycles=0 cycles_per_us=54",
+            "TINYOS-MEAS/1 METRIC domain=D04 metric=context_switch n=8 dropped=0 warmup=0 min=10 p50=10 p99=10 p99_9=10 max=10 unit=cycles",
+            "TINYOS-MEAS/1 END metrics=1",
+        ]);
+        let envelope = parse_stream(&text).expect("an aarch64 stream is well formed");
+        assert_eq!(envelope.tier, "T1");
+        assert_eq!(envelope.arch, "aarch64");
+        assert_eq!(envelope.cycle_source, "cntvct_el0");
+        assert_eq!(envelope.cycles_per_us, Some(54));
+        assert_eq!(envelope.metric("D04/context_switch").map(|record| record.p50), Some(10));
+    }
+
+    // `TEST-P1-01-02-A` clause 1: the UART-borne pass/fail bit, which is what
+    // a board with no isa-debug-exit port will have instead of an exit code.
+    #[test]
+    fn a_fixtures_uart_verdict_parses_out_of_its_stream() {
+        let text = stream(&[
+            "fixture-measure phase 1/5 done",
+            BEGIN,
+            METRIC_D07,
+            "TINYOS-MEAS/1 END metrics=1",
+            "TINYOS-RESULT/1 fixture=measure ok=true",
+        ]);
+        assert_eq!(parse_result(&text), Ok(RunResult { fixture: "measure".to_string(), ok: true }));
+        let failed = text.replace("ok=true", "ok=false");
+        assert_eq!(parse_result(&failed).map(|result| result.ok), Ok(false));
+    }
+
+    #[test]
+    fn a_stream_with_no_verdict_is_not_evidence() {
+        let text = stream(&[BEGIN, METRIC_D07, "TINYOS-MEAS/1 END metrics=1"]);
+        assert_eq!(parse_result(&text), Err(TimingError::MissingResult));
+    }
+
+    #[test]
+    fn two_verdicts_are_ambiguous_and_therefore_an_error() {
+        let text = stream(&[
+            "TINYOS-RESULT/1 fixture=measure ok=true",
+            "TINYOS-RESULT/1 fixture=measure ok=false",
+        ]);
+        assert_eq!(parse_result(&text), Err(TimingError::RepeatedResult));
+    }
+
+    #[test]
+    fn a_malformed_verdict_is_an_error_rather_than_a_default() {
+        // A value that is neither `true` nor `false` — including one that
+        // looks truthy.
+        for line in [
+            "TINYOS-RESULT/1 fixture=measure ok=yes",
+            "TINYOS-RESULT/1 fixture=measure ok=1",
+            "TINYOS-RESULT/1 fixture=measure",
+            "TINYOS-RESULT/1 ok=true",
+            "TINYOS-RESULT/1 fixture=measure ok=true extra=1",
+            "TINYOS-RESULT/1 fixture=measure okay=true",
+        ] {
+            assert!(
+                matches!(parse_result(&stream(&[line])), Err(TimingError::MalformedResult { .. })),
+                "`{line}` must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn the_verdict_line_is_not_a_measurement_record_and_never_breaks_the_envelope() {
+        // `parse_stream` must keep treating it as chatter: it does not carry
+        // the `TINYOS-MEAS` sentinel, and inventing an unknown record kind
+        // here would break every existing capture.
+        let text = stream(&[
+            BEGIN,
+            METRIC_D07,
+            "TINYOS-MEAS/1 END metrics=1",
+            "TINYOS-RESULT/1 fixture=measure ok=true",
         ]);
         assert_eq!(parse_stream(&text).expect("well formed").metrics.len(), 1);
     }

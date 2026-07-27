@@ -36,14 +36,15 @@ The single-page cross-reference between Goals, the V&V hierarchy, and execution 
 
 ## EPIC-P1 (Determinism Proof) — fully decomposed, no Story started
 
-Decomposed 2026-07-27 in [`EPIC-P1.md`](epics/EPIC-P1.md): 6 Features, 10 Stories with valid contract rows. `STORY-P1-01-01` (measurement harness) is functionally Verified at Tier 0 + Host as of 2026-07-27 and carries assurance state `baseline-debt`; the other 9 remain `specified`. Tests are written when each Story starts, per the TDD workflow.
+Decomposed 2026-07-27 in [`EPIC-P1.md`](epics/EPIC-P1.md): 6 Features, now 11 Stories with valid contract rows. `FEAT-P1-01` is complete and `FEAT-P1-02` is in progress. All three of `FEAT-P1-01`'s Stories, plus **both** of `FEAT-P1-02`'s (`STORY-P1-02-01`, real `#PF`/`#GP`/`#UD` handling, and `STORY-P1-02-02`, TSS/IST double-fault survival), are functionally Verified as of 2026-07-27 and carry assurance state `baseline-debt` — `STORY-P1-01-01` (measurement harness, Tier 0 + Host), `STORY-P1-01-02` (committed baselines and the `check-timing-regression` CI gate, Tier 0 + Host) and `STORY-P1-01-03` (the AArch64 generic-timer cycle source and timebase, Host only, added as the carve-out of the `LE-09` decision); the other 6 remain `specified`. `FEAT-P1-02` stays in progress despite both its Stories being Verified, because its exit criteria also require a fault-latency baseline (`LE-17`). Tests are written when each Story starts, per the TDD workflow.
 
 | Goal | Epic | Feature | Story | Test | Report | Status |
 |---|---|---|---|---|---|---|
 | G-RT-3, G-DX-7 | `EPIC-P1` | `FEAT-P1-01` | `STORY-P1-01-01` | `TEST-P1-01-01-A` | `REPORT-2026-07-27-02` | Verified (Tier 0 + Host; assurance `baseline-debt`) |
-| G-RT-3, G-DX-7 | `EPIC-P1` | `FEAT-P1-01` | `STORY-P1-01-02` | — | — | Specified |
-| G-SEC-2, G-SEC-14 | `EPIC-P1` | `FEAT-P1-02` | `STORY-P1-02-01` | — | — | Specified |
-| G-SEC-2, G-SEC-14 | `EPIC-P1` | `FEAT-P1-02` | `STORY-P1-02-02` | — | — | Specified |
+| G-RT-3, G-DX-7 | `EPIC-P1` | `FEAT-P1-01` | `STORY-P1-01-02` | `TEST-P1-01-02-A` | `REPORT-2026-07-27-04` | Verified (Tier 0 + Host; assurance `baseline-debt`) |
+| G-RT-3, G-DX-7 | `EPIC-P1` | `FEAT-P1-01` | `STORY-P1-01-03` | `TEST-P1-01-03-A` | `REPORT-2026-07-27-03` | Verified (Host; assurance `baseline-debt`) |
+| G-SEC-2, G-SEC-14 | `EPIC-P1` | `FEAT-P1-02` | `STORY-P1-02-01` | `TEST-P1-02-01-A` | `REPORT-2026-07-27-05` | Verified (Tier 0 + Host; assurance `baseline-debt`) |
+| G-SEC-2, G-SEC-14 | `EPIC-P1` | `FEAT-P1-02` | `STORY-P1-02-02` | `TEST-P1-02-02-A` | `REPORT-2026-07-27-06` | Verified (Tier 0 + Host; assurance `baseline-debt`) |
 | G-SEC-2, G-RT-1 | `EPIC-P1` | `FEAT-P1-03` | `STORY-P1-03-01` | — | — | Specified |
 | G-SEC-2, G-SEC-8 (partial) | `EPIC-P1` | `FEAT-P1-03` | `STORY-P1-03-02` | — | — | Specified |
 | G-RT-1 | `EPIC-P1` | `FEAT-P1-04` | `STORY-P1-04-01` | — | — | Specified |

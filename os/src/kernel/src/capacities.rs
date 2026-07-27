@@ -46,6 +46,19 @@ pub const MAX_PCI_DEVICES: usize = 64;
 /// page-table frame allocator, as used by `exec`'s own Tier 0 fixtures.
 pub const EXEC_FRAME_POOL_CAPACITY: usize = 16;
 
+/// Static bytes the Interrupt Stack Table's known-good stacks commit
+/// (`STORY-P1-02-02`) — [`hal_x86_64::tss::IST_STACK_COUNT`] stacks of
+/// [`hal_x86_64::tss::IST_STACK_BYTES`] each.
+///
+/// Declared here rather than left implicit in `hal-x86_64` because it is real,
+/// permanently-reserved memory that nothing else can ever use, and this module
+/// is where this kernel's committed static memory is supposed to be countable
+/// in one place. The size's *rationale* stays next to the stack itself, where a
+/// reader changing it will see it; the *budget* lives here, where the ceiling
+/// is enforced.
+pub const IST_STACK_BYTES: usize =
+    hal_x86_64::tss::IST_STACK_COUNT * hal_x86_64::tss::IST_STACK_BYTES;
+
 /// The documented static-memory budget every capacity above must fit
 /// within, combined — chosen conservatively for this Roadmap Phase's
 /// QEMU/Tier 0 target (matching `G-DX-8`'s 8MB total-image ceiling as the
@@ -69,6 +82,7 @@ pub const fn committed_bytes() -> usize {
     MAX_CPUS * core::mem::size_of::<CpuDescriptor>()
         + MAX_PCI_DEVICES * core::mem::size_of::<DeviceDescriptor>()
         + EXEC_FRAME_POOL_CAPACITY * core::mem::size_of::<PageTable>()
+        + IST_STACK_BYTES
 }
 
 const _: () = assert!(
@@ -90,5 +104,16 @@ mod tests {
     #[test]
     fn committed_capacities_fit_within_the_documented_budget() {
         assert!(committed_bytes() <= STATIC_MEMORY_BUDGET_BYTES);
+    }
+
+    // `TEST-P1-02-02-A` clause 8: the IST stack is budgeted, not free. A
+    // known-good stack is memory permanently unavailable to everything else,
+    // and it has to show up in the same ceiling every other capacity passes.
+    #[test]
+    fn the_ist_stack_is_counted_against_the_budget() {
+        assert_eq!(IST_STACK_BYTES, 16 * 1024, "one 16KiB stack, for `#DF`");
+        assert_eq!(hal_x86_64::tss::IST_STACK_COUNT, 1, "`#MC` deliberately gets no IST");
+        let without_ist = committed_bytes() - IST_STACK_BYTES;
+        assert!(committed_bytes() > without_ist, "the IST stack must be inside the count");
     }
 }

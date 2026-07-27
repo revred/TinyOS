@@ -1,0 +1,6 @@
+domain	metric	tier	arch	profile	cycle_source	runs	min_cycles	p50_cycles	recorded_on
+D07	pool_u64x64_alloc_free_round_trip	T0	x86_64	release	rdtsc	5	66	70	2026-07-27
+D07	pool_u64x4_alloc_denied_exhausted	T0	x86_64	release	rdtsc	5	14	16	2026-07-27
+D04	context_switch_yield_roundtrip_2switches	T0	x86_64	release	rdtsc	5	216	226	2026-07-27
+D05	dispatch_select_highest_priority_ready	T0	x86_64	release	rdtsc	5	74	76	2026-07-27
+D05	dispatch_run_once_cooperative_round	T0	x86_64	release	rdtsc	5	420	446	2026-07-27

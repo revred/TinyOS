@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 mod assurance;
+mod gate;
 mod governance;
 mod performance_catalogue;
 mod timing;
@@ -37,7 +38,7 @@ fn main() -> ExitCode {
     let mut args = env::args().skip(1);
     let Some(command) = args.next() else {
         eprintln!(
-            "usage: cargo run -p xtask -- <qemu-x86_64|measure|check-assurance-spine|check-crate-sizes|check-image-size|check-performance-catalogue|governance-fixture-test|pack-txe> [options]"
+            "usage: cargo run -p xtask -- <qemu-x86_64|measure|check-timing-regression|check-assurance-spine|check-crate-sizes|check-image-size|check-performance-catalogue|governance-fixture-test|pack-txe> [options]"
         );
         return ExitCode::from(XtaskExit::HarnessError as u8);
     };
@@ -66,12 +67,14 @@ fn main() -> ExitCode {
                 Some("pci-enumeration") => ("kernel", "kernel", Some("fixture-pci-enumeration")),
                 Some("pool-bench") => ("kernel", "kernel", Some("fixture-pool-bench")),
                 Some("measure") => ("kernel", "kernel", Some("fixture-measure")),
+                Some("fault") => ("kernel", "kernel", Some("fixture-fault")),
+                Some("double-fault") => ("kernel", "kernel", Some("fixture-double-fault")),
                 Some(other) => {
                     eprintln!("xtask: unknown --fixture value '{other}'");
                     return ExitCode::from(XtaskExit::HarnessError as u8);
                 }
             };
-            match qemu_x86_64(package, binary, feature, None) {
+            match qemu_x86_64(package, binary, feature, None, Profile::Dev) {
                 Ok(code) => ExitCode::from(code as u8),
                 Err(message) => {
                     eprintln!("xtask: {message}");
@@ -201,7 +204,46 @@ fn main() -> ExitCode {
                     return ExitCode::from(XtaskExit::HarnessError as u8);
                 }
             };
-            match measure(feature, runs, keep.as_deref()) {
+            let profile =
+                match rest.iter().find_map(|a| a.strip_prefix("--profile=").map(str::to_string)) {
+                    Some(value) => match Profile::parse(&value) {
+                        Ok(profile) => profile,
+                        Err(message) => {
+                            eprintln!("xtask: {message}");
+                            return ExitCode::from(XtaskExit::HarnessError as u8);
+                        }
+                    },
+                    None => Profile::Dev,
+                };
+            match measure(feature, runs, keep.as_deref(), profile) {
+                Ok(code) => ExitCode::from(code as u8),
+                Err(message) => {
+                    eprintln!("xtask: {message}");
+                    ExitCode::from(XtaskExit::HarnessError as u8)
+                }
+            }
+        }
+        "check-timing-regression" => {
+            let rest: Vec<String> = args.collect();
+            let runs = rest
+                .iter()
+                .find_map(|a| a.strip_prefix("--runs=").map(str::to_string))
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(gate::MINIMUM_RUNS);
+            let baseline =
+                rest.iter().find_map(|a| a.strip_prefix("--baseline=").map(PathBuf::from));
+            let update = rest.iter().any(|a| a == "--update-baseline");
+            let date = rest.iter().find_map(|a| a.strip_prefix("--date=").map(str::to_string));
+            // `--inject-regression` builds the fixture with a deliberately
+            // slowed measured phase, so "prove the gate can fail" is a command
+            // anyone can re-run rather than a one-time screenshot — the
+            // discipline `fixture-broken-boot` established for boot.
+            let feature = if rest.iter().any(|a| a == "--inject-regression") {
+                "fixture-measure-regression"
+            } else {
+                "fixture-measure"
+            };
+            match check_timing_regression(runs, baseline, update, date, feature) {
                 Ok(code) => ExitCode::from(code as u8),
                 Err(message) => {
                     eprintln!("xtask: {message}");
@@ -226,6 +268,48 @@ fn main() -> ExitCode {
     }
 }
 
+/// Which Cargo profile a Tier 0 fixture is built with.
+///
+/// Exists because of `LE-13`: every measurement `STORY-P1-01-01` reported ran
+/// **dev-profile** binaries, so its absolute cycle counts were inflated by
+/// missing optimization as well as by emulation, and a baseline recorded that
+/// way would bake the dev profile into the gate forever. Baselines and the
+/// regression gate use [`Profile::Release`]; the `qemu-x86_64` boot fixtures
+/// keep using [`Profile::Dev`], which is what they have always been verified
+/// against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Profile {
+    Dev,
+    Release,
+}
+
+impl Profile {
+    /// The `--profile=` spelling, and the name written into a baseline row's
+    /// `profile` column.
+    fn name(self) -> &'static str {
+        match self {
+            Profile::Dev => "dev",
+            Profile::Release => "release",
+        }
+    }
+
+    /// Cargo's own target sub-directory for this profile.
+    fn target_dir(self) -> &'static str {
+        match self {
+            Profile::Dev => "debug",
+            Profile::Release => "release",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "dev" | "debug" => Ok(Profile::Dev),
+            "release" => Ok(Profile::Release),
+            other => Err(format!("unknown --profile={other} (expected `dev` or `release`)")),
+        }
+    }
+}
+
 /// Builds `package`'s `binary` bin target against the custom x86_64 target
 /// and boots it under QEMU, per `STORY-P0-01-01`/`STORY-P0-01-03`.
 /// `fixture_feature`, when given, builds with that Cargo feature enabled
@@ -239,6 +323,7 @@ fn qemu_x86_64(
     binary: &str,
     fixture_feature: Option<&str>,
     serial_capture: Option<&Path>,
+    profile: Profile,
 ) -> Result<XtaskExit, String> {
     let os_root = os_root()?;
     let target_spec = os_root.join("targets").join("x86_64-tinyos.json");
@@ -247,6 +332,7 @@ fn qemu_x86_64(
     build
         .current_dir(&os_root)
         .arg("build")
+        .args(if profile == Profile::Release { &["--release"][..] } else { &[][..] })
         .arg("-p")
         .arg(package)
         .arg("--target")
@@ -266,7 +352,8 @@ fn qemu_x86_64(
         return Err(format!("{package} build failed"));
     }
 
-    let kernel_elf = os_root.join("target").join("x86_64-tinyos").join("debug").join(binary);
+    let kernel_elf =
+        os_root.join("target").join("x86_64-tinyos").join(profile.target_dir()).join(binary);
     if !kernel_elf.exists() {
         return Err(format!(
             "expected {binary} binary at {} but it does not exist",
@@ -350,7 +437,25 @@ fn qemu_x86_64(
 /// `keep_dir`, when given, retains each run's raw capture there, so a Report
 /// can cite the actual bytes the numbers were parsed from rather than a
 /// summary of them.
-fn measure(feature: &str, runs: usize, keep_dir: Option<&Path>) -> Result<XtaskExit, String> {
+/// Every run's parsed evidence, plus whether every fixture said it passed.
+struct MeasuredRuns {
+    envelopes: Vec<timing::Envelope>,
+    fixture_ok: bool,
+}
+
+/// Builds the fixture once, boots it `runs` times, and parses each run's
+/// captured COM1 stream into an [`timing::Envelope`] plus its UART-borne
+/// verdict.
+///
+/// Shared by `measure` (which reports) and `check-timing-regression` (which
+/// gates), so the gate can never be looking at evidence gathered differently
+/// from the evidence a developer sees.
+fn run_measurements(
+    feature: &str,
+    runs: usize,
+    keep_dir: Option<&Path>,
+    profile: Profile,
+) -> Result<MeasuredRuns, String> {
     if runs == 0 {
         return Err("measure needs at least one run (--runs=N, default 3)".to_string());
     }
@@ -375,24 +480,40 @@ fn measure(feature: &str, runs: usize, keep_dir: Option<&Path>) -> Result<XtaskE
         // earlier run would be exactly the silent-wrong-evidence failure this
         // command exists to prevent.
         let _ = std::fs::remove_file(&capture);
-        let outcome = qemu_x86_64("kernel", "kernel", Some(feature), Some(capture.as_path()))?;
+        let outcome =
+            qemu_x86_64("kernel", "kernel", Some(feature), Some(capture.as_path()), profile)?;
         let text = std::fs::read_to_string(&capture).map_err(|e| {
             format!("run {run} produced no readable serial capture at {}: {e}", capture.display())
         })?;
         let envelope = timing::parse_stream(&text)
             .map_err(|error| format!("run {run} ({}): {error}", capture.display()))?;
-        match outcome {
-            XtaskExit::KernelBootSucceeded => {}
-            XtaskExit::KernelBootFailed => {
-                eprintln!(
-                    "xtask measure: run {run}'s fixture reported a self-consistency failure (see {})",
-                    capture.display()
-                );
-                fixture_failed = true;
-            }
+        // The UART-borne verdict (`STORY-P1-01-02`, `LE-09` piece 4). On Tier 0
+        // both signals exist, so they are cross-checked: that is what
+        // establishes the UART bit is trustworthy *before* reaching a board
+        // where it is the only bit there is.
+        let verdict = timing::parse_result(&text)
+            .map_err(|error| format!("run {run} ({}): {error}", capture.display()))?;
+        let exit_ok = match outcome {
+            XtaskExit::KernelBootSucceeded => true,
+            XtaskExit::KernelBootFailed => false,
             XtaskExit::HarnessError => {
                 return Err(format!("run {run} could not be executed"));
             }
+        };
+        if verdict.ok != exit_ok {
+            return Err(format!(
+                "run {run} ({}): {}",
+                capture.display(),
+                timing::TimingError::ResultDisagreesWithExitCode { uart_ok: verdict.ok, exit_ok }
+            ));
+        }
+        if !verdict.ok {
+            eprintln!(
+                "xtask measure: run {run}'s `{}` fixture reported a self-consistency failure (see {})",
+                verdict.fixture,
+                capture.display()
+            );
+            fixture_failed = true;
         }
         println!(
             "measure run {run}/{runs}: tier={} arch={} cycle_source={} overhead_cycles={} cycles_per_us={} metrics={}",
@@ -423,6 +544,20 @@ fn measure(feature: &str, runs: usize, keep_dir: Option<&Path>) -> Result<XtaskE
         envelopes.push(envelope);
     }
 
+    Ok(MeasuredRuns { envelopes, fixture_ok: !fixture_failed })
+}
+
+/// Reports Tier 0 measurements and their run-to-run variance —
+/// `STORY-P1-01-01`'s acceptance criteria 2 and 3.
+fn measure(
+    feature: &str,
+    runs: usize,
+    keep_dir: Option<&Path>,
+    profile: Profile,
+) -> Result<XtaskExit, String> {
+    let measured = run_measurements(feature, runs, keep_dir, profile)?;
+    let envelopes = measured.envelopes;
+
     if envelopes.len() >= 2 {
         let comparisons = timing::compare_runs(&envelopes).map_err(|error| format!("{error}"))?;
         println!("\nrun-to-run variance across {} runs:", envelopes.len());
@@ -443,11 +578,165 @@ fn measure(feature: &str, runs: usize, keep_dir: Option<&Path>) -> Result<XtaskE
          stays open until measured on the Raspberry Pi 5 (loose end LE-09)."
     );
 
-    if fixture_failed {
-        Ok(XtaskExit::KernelBootFailed)
-    } else {
+    if measured.fixture_ok {
         Ok(XtaskExit::KernelBootSucceeded)
+    } else {
+        Ok(XtaskExit::KernelBootFailed)
     }
+}
+
+/// Where the committed Tier 0 baseline lives, relative to the repository root.
+const BASELINE_RELATIVE: [&str; 3] = ["goals", "performance", "baselines"];
+/// The committed Tier 0 baseline's file name.
+const BASELINE_FILE: &str = "tier0-x86_64.tsv";
+
+/// `STORY-P1-01-02`'s gate: measure, compare against committed baselines, and
+/// fail the build on a timing regression exactly as a functional failure does.
+///
+/// Exit-code discipline, matching every other `xtask` command: **0** pass,
+/// **1** a timing regression (or a fixture whose own self-checks failed),
+/// **2** a harness error — a missing or malformed baseline, an unparseable
+/// stream, a metric on one side of the comparison and not the other. A missing
+/// baseline is deliberately *not* a skip: "no baseline yet, pass" is how a
+/// regression gate quietly becomes decoration.
+///
+/// Measurement is always **release-profile** (`LE-13`). A dev-profile number is
+/// not a noisier version of the same thing; it is a different binary.
+fn check_timing_regression(
+    runs: usize,
+    baseline_path: Option<PathBuf>,
+    update: bool,
+    date: Option<String>,
+    feature: &str,
+) -> Result<XtaskExit, String> {
+    let profile = Profile::Release;
+    if runs < gate::MINIMUM_RUNS {
+        return Err(format!(
+            "check-timing-regression needs at least {} runs to take a median (--runs=N)",
+            gate::MINIMUM_RUNS
+        ));
+    }
+    let os_root = os_root()?;
+    let repo_root = os_root
+        .parent()
+        .ok_or_else(|| format!("could not resolve repository root from {}", os_root.display()))?;
+    let path = baseline_path.unwrap_or_else(|| {
+        let mut path = repo_root.to_path_buf();
+        for part in BASELINE_RELATIVE {
+            path.push(part);
+        }
+        path.push(BASELINE_FILE);
+        path
+    });
+
+    let measured = run_measurements(feature, runs, None, profile)?;
+    if !measured.fixture_ok {
+        eprintln!(
+            "xtask check-timing-regression: a fixture reported a self-consistency failure, so its numbers are not evidence"
+        );
+        return Ok(XtaskExit::KernelBootFailed);
+    }
+
+    if update {
+        let recorded_on = date.ok_or_else(|| {
+            "--update-baseline needs --date=YYYY-MM-DD: the recorded date is committed data, not a wall clock this tool reads"
+                .to_string()
+        })?;
+        let rendered = gate::render_baseline(&measured.envelopes, profile.name(), &recorded_on)
+            .map_err(|error| format!("{error}"))?;
+        // Round-trip what is about to be written, so this tool can never emit
+        // a baseline its own gate would reject.
+        gate::parse_baseline(&rendered).map_err(|error| {
+            format!("refusing to write a baseline this parser rejects: {error}")
+        })?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("could not create {}: {e}", parent.display()))?;
+        }
+        std::fs::write(&path, &rendered)
+            .map_err(|e| format!("could not write {}: {e}", path.display()))?;
+        println!(
+            "check-timing-regression: wrote {} ({runs} runs, {} profile)",
+            path.display(),
+            profile.name()
+        );
+        print!("{rendered}");
+        return Ok(XtaskExit::KernelBootSucceeded);
+    }
+
+    let text = std::fs::read_to_string(&path).map_err(|e| {
+        format!(
+            "no committed baseline at {} ({e}) — a missing baseline is a gate failure, not a skip; record one with `--update-baseline --date=YYYY-MM-DD`",
+            path.display()
+        )
+    })?;
+    let baseline = gate::parse_baseline(&text)
+        .map_err(|error| format!("{} is not a usable baseline: {error}", path.display()))?;
+    let comparisons = gate::check_against_baseline(
+        &baseline,
+        &measured.envelopes,
+        profile.name(),
+        gate::TIER0_TOLERANCE,
+    )
+    .map_err(|error| format!("{error}"))?;
+
+    println!(
+        "\ntiming gate: {runs} runs, {} profile, tolerance = max({}%, {} cycles) applied to the median across runs",
+        profile.name(),
+        gate::TIER0_TOLERANCE.relative_percent,
+        gate::TIER0_TOLERANCE.absolute_cycles
+    );
+    let mut regressed = 0usize;
+    for comparison in &comparisons {
+        let verdict = match comparison.verdict {
+            gate::Verdict::Pass => "ok",
+            gate::Verdict::Regressed => {
+                regressed += 1;
+                "REGRESSED"
+            }
+            gate::Verdict::ImprovedBeyondTolerance => "improved (is the baseline stale?)",
+        };
+        println!(
+            "  {:<52} {:<4} baseline={:<7} observed={:<7} limit={:<7} {}",
+            comparison.key,
+            comparison.statistic,
+            comparison.baseline,
+            comparison.observed,
+            comparison.limit,
+            verdict
+        );
+    }
+
+    // The tails are printed and explicitly *not* gated: Tier 0 run-to-run p99
+    // variation was measured at 39–61% (`REPORT-2026-07-27-02`), so a tail
+    // threshold would fail green code. Printing them unlabelled would be worse
+    // than not printing them at all — a reader would assume they had passed
+    // something.
+    println!("\nreported but NOT gated (Tier 0 tail variance makes these unusable as thresholds):");
+    for record in &measured.envelopes[0].metrics {
+        println!(
+            "  {:<52} p99={:<7} p99.9={:<7} max={:<7} (run 1 of {runs})",
+            record.key(),
+            record.p99,
+            record.p99_9,
+            record.max
+        );
+    }
+    println!(
+        "\nTier 0 (QEMU/TCG) evidence only: this gate detects regressions in the mechanism it \
+         measures. It closes no PERF guardrail, and hardware-tier timing debt stays open until \
+         measured on the Raspberry Pi 5 (loose end LE-09)."
+    );
+
+    if regressed > 0 {
+        eprintln!("xtask: {regressed} gated statistic(s) regressed beyond tolerance");
+        return Ok(XtaskExit::KernelBootFailed);
+    }
+    println!(
+        "check-timing-regression: no regression across {} gated statistics",
+        comparisons.len()
+    );
+    Ok(XtaskExit::KernelBootSucceeded)
 }
 
 /// Reads `input`, re-layouts it via [`txe::pack`] (`STORY-P0-08-01`), and

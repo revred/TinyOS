@@ -88,3 +88,36 @@ jobs:
         run: cargo run -p xtask -- measure --runs=1
       - name: TEST-P1-01-01-A — pool-bench reports through the same harness
         run: cargo run -p xtask -- measure --runs=1 --fixture=pool-bench
+
+      # STORY-P1-02-01: three real CPU exceptions (#UD, #GP, #PF) raised from
+      # inside scheduled tasks, each contained to its own task, with the
+      # scheduler still dispatching work afterwards. The fixture reports its
+      # verdict through isa-debug-exit *and* the UART result line, so this step
+      # fails the build if any fault escapes its task — the containment
+      # FEAT-P1-03's per-task address spaces will depend on.
+      - name: TEST-P1-02-01-A — three real faults, each contained to one task
+        run: cargo run -p xtask -- qemu-x86_64 --fixture=fault
+
+      # STORY-P1-02-02: a task destroys its own stack, so the resulting #PF
+      # cannot have its frame pushed either and escalates to a real #DF. The
+      # fixture passes only if the handler proves it is running on the IST
+      # stack — a handler that merely produced output would look identical
+      # whether or not the IST did anything. Without the IST this same fixture
+      # triple-faults: QEMU resets and never reaches isa-debug-exit, so xtask
+      # reports a harness error rather than a kernel verdict, and this step
+      # fails either way. That is the point — LE-04 has been open since
+      # Handover 32 precisely because a triple fault is silent.
+      - name: TEST-P1-02-02-A — a fault inside the fault path lands on the IST stack
+        run: cargo run -p xtask -- qemu-x86_64 --fixture=double-fault
+
+      # STORY-P1-01-02's gate. Unlike the two steps above, this one *does*
+      # assert about the numbers — but only the stable statistics (min, p50),
+      # only over the median of three release-profile runs, and only against a
+      # tolerance derived from measured Tier 0 noise (60% + a 24-cycle floor;
+      # see os/src/xtask/src/gate.rs for the derivation and for what that
+      # loose a tolerance can and cannot catch). A missing or malformed
+      # baseline fails this step rather than skipping it. Exit 1 is a
+      # regression, exit 2 a harness error; either fails the build, exactly as
+      # a functional test failure does (README Phase 1).
+      - name: TEST-P1-01-02-A — timing-regression gate (D04/D05/D07 vs committed baselines)
+        run: cargo run -p xtask -- check-timing-regression --runs=3

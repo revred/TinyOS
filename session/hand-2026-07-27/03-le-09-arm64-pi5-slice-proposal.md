@@ -1,6 +1,6 @@
 # Handover 03 — `LE-09`: Minimal ARM64 / Raspberry Pi 5 Bring-Up Slice — Proposal and Decision
 
-Follows: [`02-story-p1-01-01-measurement-harness.md`](02-story-p1-01-01-measurement-harness.md). **DECIDED 2026-07-27 (user): Option B with the carve-out.** The decision section at the foot of this document records what that means concretely. This document exists to be **decided on, not implemented from** — Handover 37's directive 1 made the Pi 5 the only viable short-term hardware, and mandate item 3 asked this session to scope the minimal slice and present two sequencing options. Nothing below is started — the decision names what starts next.
+Follows: [`02-story-p1-01-01-measurement-harness.md`](02-story-p1-01-01-measurement-harness.md). **DECIDED 2026-07-27 (user): Option B with the carve-out**, and the carve-out is **delivered** — see [`04-story-p1-01-03-arm64-timebase.md`](04-story-p1-01-03-arm64-timebase.md). The decision section at the foot of this document records what that means concretely. This document exists to be **decided on, not implemented from** — Handover 37's directive 1 made the Pi 5 the only viable short-term hardware, and mandate item 3 asked this session to scope the minimal slice and present two sequencing options. Nothing below is started — the decision names what starts next.
 
 ## Why this is needed at all, in one paragraph
 
@@ -61,4 +61,4 @@ Recorded as governing for `EPIC-P1`'s sequencing. Concretely:
 
 ## Loose-ends register — carried forward
 
-Unchanged from [Handover 02's copy](02-story-p1-01-01-measurement-harness.md#loose-ends-register-canonical-as-of-this-handover); this document adds no new items and closes none. `LE-09` stays **open** — a sequencing decision is not evidence, and the item leaves the register only when a Pi 5 has actually produced a measurement. Its status line now reads "decided: Option B with the carve-out" rather than "decision needed".
+Unchanged from [Handover 02's copy](02-story-p1-01-01-measurement-harness.md#loose-ends-register-canonical-as-of-this-handover); this document adds no new items and closes none. `LE-09` stays **open** — a sequencing decision is not evidence, and neither is a host-tested backend; the item leaves the register only when a Pi 5 has actually produced a measurement. Its status line now reads "decided: Option B with the carve-out; carve-out delivered 2026-07-27 (`STORY-P1-01-03`)" rather than "decision needed". The canonical register moved to [Handover 04](04-story-p1-01-03-arm64-timebase.md#loose-ends-register-canonical-as-of-this-handover), which adds `LE-15`.

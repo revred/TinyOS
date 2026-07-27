@@ -1,6 +1,6 @@
 # FEAT-P1-02 — Real CPU Exception Handling & Fault Containment
 
-Status: **Specified — no Story started**
+Status: **In Progress — both Stories functionally Verified (Tier 0 + Host) 2026-07-27; the Feature cannot exit until `LE-17` (fault-latency baseline) lands**
 Epic: [`EPIC-P1`](../epics/EPIC-P1.md)
 Introduced in: [`session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md`](../../session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md)
 
@@ -22,8 +22,8 @@ This Feature is deliberately sequenced **before** active per-task address spaces
 
 | Story | Summary | Status |
 |---|---|---|
-| [`STORY-P1-02-01`](../stories/STORY-P1-02-01.md) | `#PF`/`#GP`/`#UD` handlers: context capture, terminate-vs-resume policy, spoor audit | Specified |
-| [`STORY-P1-02-02`](../stories/STORY-P1-02-02.md) | Double-fault safety: TSS/IST stack switching, fault-in-fault-path survival | Specified |
+| [`STORY-P1-02-01`](../stories/STORY-P1-02-01.md) | `#PF`/`#GP`/`#UD` handlers: context capture, terminate-vs-halt policy, spoor audit | Verified (Tier 0 + Host; assurance `baseline-debt`) |
+| [`STORY-P1-02-02`](../stories/STORY-P1-02-02.md) | Double-fault safety: TSS/IST stack switching, fault-in-fault-path survival | Verified (Tier 0 + Host; assurance `baseline-debt`) |
 
 ## Containment contract
 
@@ -33,4 +33,8 @@ A fault is a hostile input: fault frames, error codes, and faulting addresses co
 
 ## Exit criteria
 
-Both Stories **Verified** at Tier 0: deliberate `#PF`/`#GP`/`#UD` fixtures prove capture-terminate-continue and capture-resume paths; a deliberate kernel-stack-destroying fixture proves the IST path survives; fault latency has a `FEAT-P1-01` baseline.
+Both Stories **Verified** at Tier 0: deliberate `#PF`/`#GP`/`#UD` fixtures prove capture-terminate-continue (**done** — `STORY-P1-02-01`); a deliberate kernel-stack-destroying fixture proves the IST path survives (**done** — `STORY-P1-02-02`, with the no-IST triple fault recorded as the contrast); fault latency has a `FEAT-P1-01` baseline (**not done** — `LE-17`).
+
+Both Stories are now functionally Verified and this Feature still does not exit. That is the exit criteria working: `LE-17` is a single, small, named piece of measurement debt using machinery that already exists, and letting a Feature close over it would make the criterion decorative.
+
+Note one correction this Feature's first Story forced on its own exit criteria: there is no "capture-resume path" to prove, because no resume case exists to enumerate. `STORY-P1-02-01`'s policy has two arms — terminate the faulting task, or halt when the kernel itself faulted — and the resume arm was deliberately not built rather than built unreachable. See that Story's second acceptance criterion.

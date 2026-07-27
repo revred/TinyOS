@@ -13,6 +13,7 @@
 pub mod capacities;
 pub mod context;
 pub mod dispatch;
+pub mod fault;
 pub mod ipc;
 pub mod lock;
 pub mod measure;

@@ -1,0 +1,16 @@
+[package]
+name = "hal-arm64"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "AArch64 HAL backend. STORY-P1-01-03: generic-timer cycle source and timebase only — no boot path, no UART, no MMU."
+
+[dependencies]
+hal = { path = "../hal" }
+
+[dev-dependencies]
+# Host-only, and only for `TEST-P1-01-03-A` clause 5: the whole point of this
+# crate is that `kernel::measure` consumes it unmodified, which can only be
+# demonstrated by actually driving the harness with it.
+kernel = { path = "../kernel" }

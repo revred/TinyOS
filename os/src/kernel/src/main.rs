@@ -11,6 +11,10 @@
 
 #[cfg(feature = "fixture-context-switch")]
 mod context_switch_fixture;
+#[cfg(feature = "fixture-double-fault")]
+mod fixture_double_fault;
+#[cfg(feature = "fixture-fault")]
+mod fixture_fault;
 #[cfg(feature = "fixture-idt-apic-timer")]
 mod fixture_idt_apic_timer;
 #[cfg(feature = "fixture-idt-apic-unrouted")]
@@ -46,7 +50,9 @@ use hal_x86_64::qemu_exit::{exit_qemu, QemuExitCode};
         feature = "fixture-idt-apic-unrouted",
         feature = "fixture-pci-enumeration",
         feature = "fixture-pool-bench",
-        feature = "fixture-measure"
+        feature = "fixture-measure",
+        feature = "fixture-fault",
+        feature = "fixture-double-fault"
     ),
     allow(unused_imports)
 )]
@@ -70,7 +76,9 @@ use kernel::capacities::MAX_CPUS;
     feature = "fixture-idt-apic-unrouted",
     feature = "fixture-pci-enumeration",
     feature = "fixture-pool-bench",
-    feature = "fixture-measure"
+    feature = "fixture-measure",
+    feature = "fixture-fault",
+    feature = "fixture-double-fault"
 )))]
 const BOOT_TIMER_INITIAL_COUNT: u32 = 1_000_000;
 
@@ -96,7 +104,9 @@ extern "C" fn kernel_main(
             feature = "fixture-idt-apic-unrouted",
             feature = "fixture-pci-enumeration",
             feature = "fixture-pool-bench",
-            feature = "fixture-measure"
+            feature = "fixture-measure",
+            feature = "fixture-fault",
+            feature = "fixture-double-fault"
         ),
         allow(unused_variables)
     )]
@@ -158,6 +168,27 @@ extern "C" fn kernel_main(
         }
     }
 
+    #[cfg(feature = "fixture-fault")]
+    {
+        if fixture_fault::run() {
+            exit_qemu(QemuExitCode::Success)
+        } else {
+            exit_qemu(QemuExitCode::Failure)
+        }
+    }
+
+    #[cfg(feature = "fixture-double-fault")]
+    {
+        // A successful run never reaches this `if` at all — it ends inside the
+        // fixture's own `#DF` handler, which exits QEMU directly. Reaching here
+        // means `run` returned, i.e. the escalation did not happen.
+        if fixture_double_fault::run() {
+            exit_qemu(QemuExitCode::Success)
+        } else {
+            exit_qemu(QemuExitCode::Failure)
+        }
+    }
+
     #[cfg(not(any(
         feature = "fixture-broken-boot",
         feature = "fixture-context-switch",
@@ -165,7 +196,9 @@ extern "C" fn kernel_main(
         feature = "fixture-idt-apic-unrouted",
         feature = "fixture-pci-enumeration",
         feature = "fixture-pool-bench",
-        feature = "fixture-measure"
+        feature = "fixture-measure",
+        feature = "fixture-fault",
+        feature = "fixture-double-fault"
     )))]
     {
         // SAFETY: `start_info_paddr` is the physical address the PVH
@@ -209,6 +242,112 @@ extern "C" fn kernel_main(
 /// `agent/CODING_STANDARDS.md#real-time-discipline-kernel-and-driver-code`);
 /// this last-resort handler reports failure to the QEMU harness rather than
 /// looping silently, so a boot-time panic is distinguishable in CI.
+/// The default `#UD`/`#GP`/`#PF` entry point for every build except the
+/// fault fixture, which supplies its own (`STORY-P1-02-01`).
+///
+/// The `hal_x86_64::fault` stubs call this symbol the same way `boot.rs` calls
+/// `kernel_main`: the HAL declares it, the binary defines it, so the HAL needs
+/// no dependency on the kernel's fault policy.
+///
+/// On this path there is no task to contain a fault to — nothing here has
+/// switched into one — so `kernel::fault`'s policy returns `HaltSystem`, and
+/// this handler reports the frame over COM1 before exiting fail-closed. That
+/// report is the whole point: before this Story, the identical situation was a
+/// silent triple fault with no diagnostic at all, which cost
+/// `STORY-P1-01-01` two debugging cycles.
+///
+/// # Safety
+/// Called only by the fault stubs, with `frame` pointing at the `FaultFrame`
+/// they just built on the faulting stack.
+#[cfg(not(any(feature = "fixture-fault", feature = "fixture-double-fault")))]
+#[no_mangle]
+extern "C" fn tinyos_fault_entry(frame: *const hal_x86_64::fault::FaultFrame) -> ! {
+    use core::fmt::Write;
+    use kernel::fault::{Disposition, FaultReport, FaultingContext};
+
+    // SAFETY: the stubs pass a pointer to a fully-initialized `FaultFrame` on
+    // the current stack, live for this call.
+    let frame = unsafe { *frame };
+    // SAFETY: this handler never returns, so re-initializing COM1 here cannot
+    // race any other user of it; `init`'s own contract is satisfied by there
+    // being no concurrent execution on this single-CPU boot path.
+    let mut serial = unsafe { hal_x86_64::serial::SerialPort::init() };
+
+    let mnemonic = match frame.kind() {
+        Some(vector) => vector.mnemonic(),
+        // The IDT and `hal_x86_64::fault` disagree about which vectors are
+        // wired — reported as itself rather than decoded as one of the three.
+        None => "unwired-vector",
+    };
+    let _ = writeln!(
+        serial,
+        "tinyos fault {mnemonic} vector={} error_code={:#x} rip={:#x} rflags={:#x} rsp={:#x} cr2={:#x}",
+        frame.vector,
+        frame.error_code,
+        frame.rip,
+        frame.rflags,
+        frame.rsp,
+        // `0` rather than a stale `CR2` for anything that is not a `#PF`.
+        frame.faulting_address().unwrap_or(0)
+    );
+
+    let report = FaultReport { vector: frame.vector, context: FaultingContext::Kernel };
+    let disposition = Disposition::of(&report);
+    // Audited even here, where there is no journal to keep it in: the pair is
+    // computed on the same path the fixture's is, so a policy change can never
+    // apply to one and not the other.
+    let _ = kernel::fault::audit(&report, disposition);
+    let _ = writeln!(serial, "tinyos fault disposition={disposition:?} — halting");
+
+    exit_qemu(QemuExitCode::Failure)
+}
+
+/// The default `#DF` entry point for every build except the double-fault
+/// fixture, which supplies its own (`STORY-P1-02-02`).
+///
+/// Terminal but reporting, and terminal in a way no other handler in this
+/// kernel is: a double fault means the fault path itself failed while the CPU
+/// was delivering a fault, so there is no context left worth trusting and
+/// nothing to contain the fault *to*. `kernel::fault::Disposition` is
+/// deliberately not consulted — see `audit_double_fault` for why a double fault
+/// is not a disposition question.
+///
+/// Runs on the IST stack the TSS names, which is the whole reason this function
+/// can exist at all. Before `STORY-P1-02-02` this situation produced a silent
+/// QEMU reset with no output whatsoever.
+///
+/// # Safety
+/// Called only by `df_fault_stub`, with `frame` pointing at the `FaultFrame` it
+/// just built on the IST stack.
+#[cfg(not(feature = "fixture-double-fault"))]
+#[no_mangle]
+extern "C" fn tinyos_double_fault_entry(frame: *const hal_x86_64::fault::FaultFrame) -> ! {
+    use core::fmt::Write;
+
+    // SAFETY: the stub passes a pointer to a fully-initialized `FaultFrame` on
+    // the IST stack, live for this call.
+    let frame = unsafe { *frame };
+    // SAFETY: this handler never returns, so re-initializing COM1 here cannot
+    // race any other user of it on this single-CPU path.
+    let mut serial = unsafe { hal_x86_64::serial::SerialPort::init() };
+
+    let on_ist_stack = {
+        let probe = 0u64;
+        hal_x86_64::tss::double_fault_stack_contains(&probe as *const u64 as u64)
+    };
+    let _ = writeln!(
+        serial,
+        "tinyos double fault #DF vector={} error_code={:#x} rip={:#x} rflags={:#x} faulting_rsp={:#x} on_ist_stack={on_ist_stack}",
+        frame.vector, frame.error_code, frame.rip, frame.rflags, frame.rsp
+    );
+    // Audited on the same path the fixture's is, so an audit change can never
+    // apply to one and not the other. There is no journal here to keep it in.
+    let _ = kernel::fault::audit_double_fault(kernel::fault::FaultingContext::Kernel);
+    let _ = writeln!(serial, "tinyos double fault: the fault path itself failed — halting");
+
+    exit_qemu(QemuExitCode::Failure)
+}
+
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     exit_qemu(QemuExitCode::Failure)

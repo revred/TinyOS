@@ -12,10 +12,13 @@
 //! Long-mode interrupt/trap gate descriptors are 16 bytes: a 64-bit handler
 //! address split across three fields (`offset_low`/`offset_mid`/`offset_high`),
 //! the code-segment `selector` the CPU switches to before running the
-//! handler, an `ist` (Interrupt Stack Table) index (`0` here — this Story
-//! does not yet stand up a TSS/IST; see this module's own doc comment on
-//! [`Idt`] for what that leaves open), and `type_attr` (present bit, DPL,
-//! gate type).
+//! handler, an `ist` (Interrupt Stack Table) index — `0` for every gate
+//! except the double fault's, which `STORY-P1-02-02` wires to
+//! [`crate::tss::IstIndex::DOUBLE_FAULT`] so the CPU switches to a known-good
+//! stack before pushing anything — and `type_attr` (present bit, DPL, gate
+//! type).
+
+use crate::tss::IstIndex;
 
 /// Byte size of one x86_64 long-mode IDT gate descriptor — architecturally
 /// fixed by the CPU, not a caller-tunable capacity (the same "hardware
@@ -104,9 +107,22 @@ impl IdtEntry {
         low | (mid << 16) | (high << 32)
     }
 
+    /// The same, but with the CPU loading `RSP` from `ist`'s Interrupt Stack
+    /// Table slot before it pushes anything (`STORY-P1-02-02`).
+    fn new_with_ist(handler: u64, code_selector: u16, ist: IstIndex) -> Self {
+        IdtEntry { ist: ist.get(), ..IdtEntry::new(handler, code_selector) }
+    }
+
     /// The code-segment selector this entry encodes.
     pub const fn selector(&self) -> u16 {
         self.selector
+    }
+
+    /// The Interrupt Stack Table slot this gate uses, or `None` for `0` — "the
+    /// CPU keeps whatever stack is current", which is every gate except the
+    /// double fault's.
+    pub const fn ist(&self) -> Option<IstIndex> {
+        IstIndex::try_new(self.ist)
     }
 }
 
@@ -119,20 +135,24 @@ impl IdtEntry {
 /// (`align(4096)`) applying the identical "align the table to its own
 /// element boundary" discipline one level down.
 ///
-/// **What loading this table does not yet provide** (named explicitly per
-/// this project's "surface the gap, don't silently claim it's solved"
+/// **What loading this table does and does not provide** (named explicitly
+/// per this project's "surface the gap, don't silently claim it's solved"
 /// discipline): every entry [`Idt::set_handler`] never explicitly assigns
 /// is wired, by [`crate::interrupts::init`], to a single shared fail-closed
 /// handler that never resumes execution (see that module's own doc comment
 /// for why this is safe without per-vector assembly trampolines) — this
 /// correctly turns "an unrouted or spurious interrupt" into a reported,
-/// attributable failure instead of silent corruption, but it does **not**
-/// yet stand up a TSS/Interrupt Stack Table, so a genuine `#DF` (double
-/// fault) or `#MC` (machine check) whose own stack is itself invalid can
-/// still fault a second time while the CPU is trying to push that vector's
-/// interrupt frame — a real, general, and unresolved hardware limitation of
-/// any kernel without IST-backed known-good stacks for those two vectors
-/// specifically, tracked as a named follow-up rather than assumed solved.
+/// attributable failure instead of silent corruption.
+///
+/// `STORY-P1-02-02` closed the TSS/Interrupt Stack Table half of this gap
+/// for **`#DF` only**: vector 8 is wired through
+/// [`Idt::set_handler_with_ist`] to [`crate::tss::IstIndex::DOUBLE_FAULT`],
+/// so a fault whose own stack is invalid escalates onto a known-good stack
+/// and is reported instead of triple-faulting. `#MC` (vector 18) still has
+/// no IST and keeps the shared default — deliberately, since there is no
+/// Tier 0 way to raise a machine check and an unexercised gate in a fault
+/// path is the thing this project keeps refusing to build. That remainder
+/// is tracked as a named follow-up rather than assumed solved.
 #[repr(C, align(16))]
 pub struct Idt {
     entries: [IdtEntry; ENTRY_COUNT],
@@ -148,6 +168,22 @@ impl Idt {
     /// `code_selector` as the segment the CPU switches to before running it.
     pub fn set_handler(&mut self, vector: u8, handler: u64, code_selector: u16) {
         self.entries[vector as usize] = IdtEntry::new(handler, code_selector);
+    }
+
+    /// The same, but the CPU switches to `ist`'s Interrupt Stack Table stack
+    /// before pushing this vector's frame (`STORY-P1-02-02`).
+    ///
+    /// Only meaningful once [`crate::gdt::install`] has loaded a TSS whose
+    /// matching slot is populated — a gate naming a slot the task register
+    /// knows nothing about is strictly worse than a gate naming none.
+    pub fn set_handler_with_ist(
+        &mut self,
+        vector: u8,
+        handler: u64,
+        code_selector: u16,
+        ist: IstIndex,
+    ) {
+        self.entries[vector as usize] = IdtEntry::new_with_ist(handler, code_selector, ist);
     }
 
     /// The entry currently wired for `vector`.
@@ -238,6 +274,50 @@ mod tests {
         // bits, not just a value that happens to fit in the low 16 or 32.
         idt.set_handler(0, 0xdead_beef_1122_3344, 0x08);
         assert_eq!(idt.entry(0).handler_address(), 0xdead_beef_1122_3344);
+    }
+
+    // `TEST-P1-02-02-A` clause 3: the IST index has to reach the descriptor's
+    // own three-bit field, and every *other* gate has to stay on `0`. A Story
+    // that quietly moved another vector onto a shared known-good stack would
+    // be changing behavior nothing tested.
+    #[test]
+    fn an_ist_bearing_gate_records_its_slot_and_nothing_else_changes() {
+        let mut idt = Idt::new();
+        let slot = IstIndex::DOUBLE_FAULT;
+        idt.set_handler_with_ist(8, 0xffff_8000_1234_5678, 0x08, slot);
+        let entry = idt.entry(8);
+        assert!(entry.present());
+        assert_eq!(entry.handler_address(), 0xffff_8000_1234_5678);
+        assert_eq!(entry.selector(), 0x08);
+        assert_eq!(entry.ist(), Some(slot));
+    }
+
+    #[test]
+    fn every_gate_set_without_an_ist_uses_no_ist() {
+        let mut idt = Idt::new();
+        for vector in 0..=255u8 {
+            idt.set_handler(vector, 0x1000, 0x08);
+        }
+        for vector in 0..=255u8 {
+            assert_eq!(idt.entry(vector).ist(), None, "vector {vector} must not claim an IST");
+        }
+    }
+
+    #[test]
+    fn wiring_the_double_fault_gate_leaves_every_other_vectors_ist_alone() {
+        let mut idt = Idt::new();
+        for vector in 0..=255u8 {
+            idt.set_handler(vector, 0x1000, 0x08);
+        }
+        idt.set_handler_with_ist(8, 0x2000, 0x08, IstIndex::DOUBLE_FAULT);
+        assert_eq!(idt.entry(8).ist(), Some(IstIndex::DOUBLE_FAULT));
+        for vector in 0..=255u8 {
+            if vector == 8 {
+                continue;
+            }
+            assert_eq!(idt.entry(vector).ist(), None, "vector {vector} must not claim an IST");
+        }
+        assert!(idt.every_entry_present());
     }
 
     #[test]

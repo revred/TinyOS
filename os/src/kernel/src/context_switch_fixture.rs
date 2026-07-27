@@ -9,6 +9,13 @@
 //! Only reachable when the `fixture-context-switch` feature is enabled —
 //! never part of a real boot image.
 
+// See `fixture_fault`'s identical allow: the `&mut *(&raw mut STATIC)` form is
+// this workspace's single-owner `static mut` pattern, and clippy's suggested
+// simplification is the `static_mut_refs` it exists to avoid. Added by
+// `STORY-P1-02-02`, which lint-swept every fixture feature against the real
+// target for the first time — the work `LE-12` names.
+#![allow(static_mut_refs, clippy::deref_addrof)]
+
 use kernel::context::Context;
 
 const STACK_SIZE: usize = 4096;

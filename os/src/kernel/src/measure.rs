@@ -46,6 +46,28 @@ pub const ENVELOPE: &str = "TINYOS-MEAS/1";
 /// exist (see that trait's own doc comment).
 pub const UNIT: &str = "cycles";
 
+/// The sentinel a fixture's own pass/fail verdict travels on
+/// (`STORY-P1-01-02`).
+///
+/// Separate from [`ENVELOPE`] on purpose. A verdict is not a measurement: it
+/// must survive a run that produced no envelope at all, and a parser reading
+/// the envelope must keep treating this line as ordinary chatter. Its reason
+/// for existing is that the Raspberry Pi 5 has no `isa-debug-exit` port
+/// (`LE-09` piece 4) — the pass/fail bit that reaches the host today as a QEMU
+/// exit code has to be able to reach it over the UART instead, or no gate can
+/// ever gate a board.
+pub const RESULT_SENTINEL: &str = "TINYOS-RESULT/1";
+
+/// Writes a fixture's self-consistency verdict as the one line the host-side
+/// gate reads.
+///
+/// `ok=` is written as exactly `true` or `false` — the host parser rejects
+/// anything else rather than treating an unrecognized value as either, so a
+/// garbled UART cannot be read as a pass.
+pub fn write_result<W: Write>(sink: &mut W, fixture: &str, ok: bool) -> Result<(), fmt::Error> {
+    writeln!(sink, "{RESULT_SENTINEL} fixture={fixture} ok={ok}")
+}
+
 /// The measured cost of the harness's own paired cycle-source reads.
 ///
 /// Established as the *minimum* observed back-to-back read delta rather than
@@ -357,7 +379,27 @@ impl<'w, W: Write> Report<'w, W> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use core::cell::Cell;
+
+    // `TEST-P1-01-02-A` clause 1: the UART-borne verdict.
+    #[test]
+    fn a_fixture_verdict_is_one_line_with_exactly_true_or_false() {
+        let mut sink = String::new();
+        write_result(&mut sink, "measure", true).expect("write succeeds");
+        assert_eq!(
+            sink,
+            "TINYOS-RESULT/1 fixture=measure ok=true
+"
+        );
+        let mut failed = String::new();
+        write_result(&mut failed, "pool-bench", false).expect("write succeeds");
+        assert_eq!(
+            failed,
+            "TINYOS-RESULT/1 fixture=pool-bench ok=false
+"
+        );
+    }
 
     /// Advances by a scripted sequence of deltas, cycling once exhausted, so
     /// a test can dictate exactly what a timed region "costs".
