@@ -44,9 +44,24 @@
 //! fixed integer computation touching no kernel subsystem, so no scheduler,
 //! pool, address-space or fault change can move it; the realistic shape of the
 //! hazard is a toolchain or codegen-flag change, and [`REFERENCE_TOLERANCE`]
-//! is the wide structural band that watches for it. `LE-16` is not closed by
-//! this Story — the gate's sensitivity is restated in units that mean
-//! something, not eliminated.
+//! is the wide structural band that watches for it.
+//!
+//! **A real 50% regression on a gated path passes.** `LE-16` is not closed by
+//! this Story — sensitivity went from a nominal 1.6x to roughly 2x, and the
+//! trade was worth making only because the 1.6x applied to a quantity measured
+//! swinging +318% on unchanged code. Something was still given up, no Tier 0
+//! work recovers it, and it is `LE-09`-gated.
+//!
+//! **Scale-invariance is proven against host *load*, not against host
+//! *identity*** (`LE-23`). The demonstration in `REPORT-2026-07-28-06` varies
+//! load on one machine, and load largely scales all work by a common factor.
+//! A different microarchitecture need not: this reference is a dependent
+//! integer-multiply chain and is ALU-bound, while
+//! `D05/dispatch_select_highest_priority_ready` walks a ready queue and is
+//! memory- and branch-bound, so a host that scales ALU throughput and memory
+//! latency differently shifts that ratio with no regression present. **If this
+//! gate fires on a machine it has not run on before, that is the first thing
+//! to rule out, not the last.**
 //!
 //! # What did not change
 //!

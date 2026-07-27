@@ -21,7 +21,11 @@ Read [`goals/tests/TEST-P1-01-04-A.md`](../../goals/tests/TEST-P1-01-04-A.md) fo
 | quiet | `--inject-regression` | 678 | exit 1, names `D05/dispatch_select` |
 | **loaded** | `--inject-regression` | **1230 (2.15x)** | **exit 1, names `D05/dispatch_select`** |
 
-Row 2 is the failure `main` has carried since `91c95c1`. **Rows 3 and 4 are the ones that matter more**, because a gate made noise-tolerant is worthless if it has also been made blind: the injected regression's observed ratio under load (2,205,314 ppm) is within **1%** of its value measured quiet (2,223,255 ppm), against a limit of 395,522 — while the same statistic's absolute cycle count moved 936 → 1826 between those two runs. The ratio recovered the same signal under both conditions, which is the entire claim.
+Row 2 is the failure `main` has carried since `91c95c1`. **Rows 3 and 4 are the ones that matter more**, because a gate made noise-tolerant is worthless if it has also been made blind: the injected regression's observed ratio under load (2,205,314 ppm) is within **1%** of its value measured quiet (2,223,255 ppm), against a limit of 395,522 — while the same statistic's absolute cycle count moved 936 → 1826 between those two runs. The ratio recovered the same signal under both conditions.
+
+**Read the scope of this table precisely, because it is easy to over-read and I did.** All four rows vary **load on one machine**. They establish invariance to *host load*; they establish nothing about *host identity*. Load largely scales all work by a common factor, which is exactly the condition ratio invariance needs. **A different microarchitecture need not**: this reference is a dependent integer-multiply chain and is ALU-bound, while `D05/dispatch_select_highest_priority_ready` walks a ready queue and is memory- and branch-bound, so a host that scales ALU throughput and memory latency differently shifts that ratio with no regression present. That is `LE-23`, it has a named mechanism, and it is the outcome to **rule out** rather than the surprise case.
+
+**And the residual, stated sharply**: sensitivity went from a nominal 1.6x to roughly 2x, so **a real 50% regression on a gated path passes this gate**. The trade is right — that 1.6x applied to a quantity measured swinging +318% on unchanged code, which is noise with a number on it — but something was given up, no Tier 0 work recovers it, and it is `LE-09`-gated.
 
 ## The pre-committed bound failed, and that is in the record
 

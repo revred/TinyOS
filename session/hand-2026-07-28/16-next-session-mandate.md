@@ -39,13 +39,22 @@ Two distinguishable outcomes, and they need different responses:
 - **Everything moves together and the reference moves with it** → the design is working and something else is wrong. Read the ratios.
 - **The ratios themselves shift systematically between hosts** → `LE-23` is real, the baseline needs re-recording from a CI run, and that is a Story. Do **not** reach for `--update-baseline` locally to make it green; that reproduces exactly the mistake Handover 05 recorded, on a gate that has only just stopped making it.
 
+**Expect the second one. Do not treat it as the surprise case.** Handover 15's four-quadrant table varies **load on one machine** and therefore does not test `LE-23` at all, and there is a named mechanism for cross-host failure: the reference is a dependent integer-multiply chain and is ALU-bound, while `D05/dispatch_select_highest_priority_ready` walks a ready queue and is memory- and branch-bound. A runner that scales ALU throughput and memory latency differently shifts that ratio with **no regression present**. The metrics closest to the reference in magnitude and composition — `D05/dispatch_run_once`, `D04/context_switch` — are the least exposed; the small and the fault-path metrics are the most.
+
+So the `LE-23` Story should be **pre-scoped on the assumption that a systematic cross-host shift is what will be found**, and its job is to rule that out or to re-record from CI with the evidence attached. Candidate directions if it is real: record the baseline from a CI run rather than a dev box; or measure a *second* reference of a different composition (a memory-touching one alongside the ALU one) and normalise each metric against whichever it resembles. Neither should be chosen before the first run's data exists.
+
 `--inject-regression` is the check that the gate is still awake, and it is cheap.
+
+**Also fold into this push**: `CLAUDE.md` was untracked, which meant it did nothing for anyone who cloned — an entry point that looks solved locally and is absent everywhere else. It is now committed.
 
 ### After it, in order
 
-- **The concurrent work needs a Story.** `xtask`'s `FIXTURES` table and `list-fixtures` command, and `goals/assurance/loose-ends.tsv` with its spine check, are both in `2da1ccd` and **neither has a `TEST-*` document**. Both are genuine improvements — the register in particular is better as validated data than as Handover 09's prose — and both currently sit outside the assurance discipline everything else in this repository is held to. This is the cheapest item on the list and the one most likely to be forgotten.
+- **The assurance-debt Story for `2da1ccd`'s tooling. Higher stakes than "cheapest item".** `xtask`'s `FIXTURES` table and `list-fixtures` command, and `goals/assurance/loose-ends.tsv` with its spine check, are both in `2da1ccd` and **neither has a `TEST-*` document**. Both are genuine improvements — the register in particular is far better as validated data than as Handover 09's prose. But shipping them this way **bypassed rule 3 (test-driven, no exceptions) and rule 8 (nothing bypasses the spine)**, and a bypass left standing licenses the next one. That is the actual cost, not the missing paperwork.
+
+  Its Test document should assert the **deliberate-violation cases that already exist in the code**: register gaps, a loose end closed without evidence, an out-of-vocabulary status value, `Complete` not matching `Completely`, and the CI-drift guard that caught `--fixture=` having become two namespaces. Those checks were written and are unproven; a checker nobody has seen fail is `TEST-P1-04-02-A`'s lesson waiting to happen.
+
+  **Bundle `broken-boot` and `idt-apic-unrouted`'s exit-code hole into this Story** — same `xtask`/CI shape, and it has now been deferred three times. Their documented pass condition is a failure exit code that any other failure also produces; `--serial-capture=` plus a grep, per the `wcet-trip` and `os-runaway` steps.
 - **`LE-22`** — degrade and priority inheritance are unreconciled. `PriorityInheritingLock` restores a holder's pre-boost priority on unlock, so a degrade applied to a boosted holder is **silently undone**; and degrading a boosted task discards a boost a high-priority waiter depends on, reintroducing the inversion `STORY-P0-02-03` exists to prevent. More pressing than it looks, because the shipping image's own workload declares `Degrade`.
-- **`broken-boot` and `idt-apic-unrouted`** — both still have the exit-code hole `wcet-trip` closed: their documented pass condition is a failure exit code that any other failure also produces. `--serial-capture=` plus a grep, per the `wcet-trip` and `os-runaway` CI steps. Cheap, and now deferred three times.
 - **`FEAT-P1-05` / `FEAT-P1-06`** — the two proof Features, and `-06` is the Epic's flagship exit.
 - **`FEAT-P9-01`'s two Stories** — the dump-scan audit and the staging-arena wipe. No hardware precondition. Pick these up whenever `EPIC-P1` stalls.
 
@@ -57,7 +66,27 @@ The question asked was: *for real-time systems we need to reduce variance — ho
 2. **The gate deliberately does not gate tails**, and for an RT system the tail *is* the product. `p99`/`p99.9`/`max` are printed and explicitly ungated because Tier 0 tail variance is 39–61%. That is a statement about QEMU, not about TinyOS, and it means **no evidence about this system's jitter exists yet** — which is a sharper argument for `LE-09`'s board than any latency number.
 3. **The measurable variance sources in this codebase are already partly addressed and partly untouched.** Fixed-capacity `Pool` with no general heap, and a `Disposition`/`OverrunPolicy` decision table that reads exactly one declared input, are both variance-reducing by construction. Untouched: `dispatch::run_once_in_space` reloads `CR3` on every dispatch, and `STORY-P1-03-03` already measured that at ~276 cycles same-space against ~7,452 cross-space — a 27x jitter source on the dispatch path, currently ungated and attributed to TCG's TLB-flush emulation. Whether PCID/ASID removes it is a hardware question nobody can answer at Tier 0.
 
-**Recommended shape**: a Feature under a new or existing Epic whose exit criterion is a *jitter* metric — `p99.9/p50`, or `max − min` — gated the way latency now is, plus an audit of the RT paths for data-dependent control flow. It should not start before `LE-09`, because gating a tail at Tier 0 gates QEMU.
+**Recommended shape, and it splits rather than blocking whole on `LE-09`** — the same separation `EPIC-P9` already uses, decomposing early precisely so the unblocked slice is separable from the gated one:
+
+- **The gating half — a jitter metric (`p99.9/p50`, or `max − min`) gated the way latency now is — waits for the board.** Gating a tail at Tier 0 gates QEMU. No reservation about this.
+- **The audit half — RT paths reviewed for data-dependent control flow — needs no hardware and can start now.** Error paths that cost differently from success paths, loops whose trip count depends on data, alternate flows taken only under contention.
+
+**One concrete item for the audit half, verified in the source rather than inferred.** [`dispatch::switch_plan`](../../os/src/kernel/src/dispatch.rs#L63) takes only the target's address space:
+
+```rust
+pub const fn switch_plan(address_space: Option<u64>) -> SwitchPlan {
+    match address_space {
+        None => SwitchPlan::Plain,
+        Some(cr3) => SwitchPlan::InstallAddressSpace(cr3),
+    }
+}
+```
+
+It has no knowledge of the currently-loaded `CR3`, so **any task with an address space gets `InstallAddressSpace` unconditionally** — a full TLB flush even when that same space is already live. Threading the current `CR3` in and returning `Plain` when unchanged is a small, host-testable, pure-function change, independent of PCID and independent of whether TCG's emulation reflects real silicon.
+
+**The caveat is stronger than "depends on the dispatch pattern", and it is the reason this is a Story rather than a patch.** [`os/src/os/src/main.rs:934`](../../os/src/os/src/main.rs#L934) writes `SUPERVISOR_PML4` **unconditionally after every dispatch round**. So on the shipping path `CR3` provably alternates task → supervisor → task, the current-`CR3` check would hit **zero** times, and the pure-function change alone is **inert there**. It would pay only for callers that do not reinstate — the `FEAT-P1-04` fixtures dispatching the same task repeatedly — until the reinstatement is *also* made conditional.
+
+And that reinstatement is not incidental: `TEST-P1-04-03-A` clause 4 asserts it, and Handover 13 records that removing it leaves the supervisor making its next scheduling decision under the workload's address space, survivable only because the image space attaches the shared kernel directories. **So the real item is a containment-versus-jitter trade on the dispatch path, not a free win.** Scope it as one. The ~276-vs-~7,452-cycle figure `STORY-P1-03-03` measured is the size of the prize and is itself Tier 0, so it is an argument for the board as much as for the change.
 
 ## CI
 
