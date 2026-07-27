@@ -517,6 +517,65 @@
 <h2>EPIC-P1 — Determinism Proof <span class="badge progress">IN PROGRESS — FEAT-P1-01 STARTED</span></h2>
 <p><a href="epics/EPIC-P1.md">Decomposed 2026-07-27</a> now that every EPIC-P0 Story is functionally Verified: 6 Features, 10 Stories, with valid assurance-contract rows (35/35 Stories mapped by CI). <strong>Work started the same day</strong>: <a href="stories/STORY-P1-01-01.md">STORY-P1-01-01</a> (the cycle-calibrated measurement harness) is functionally Verified at Tier 0 + Host — see <a href="reports/REPORT-2026-07-27-02.md">REPORT-2026-07-27-02</a>, which also records the two on-target bugs it uncovered (a production scheduler function that <code>#UD</code>-triple-faulted for want of SSE enablement, fixed per <a href="../docs/adr/0003-enable-sse-in-the-boot-path.md">ADR 0003</a>; and interrupts enabled against an absent IDT) and the finding that Tier 0 run-to-run p99 variation of 39–61% rules out gating tail percentiles under emulation. Ordering: measurement first (<a href="features/FEAT-P1-01.md">FEAT-P1-01</a>, the timing-regression CI gate), then faults before address spaces (<a href="features/FEAT-P1-02.md">FEAT-P1-02</a> → <a href="features/FEAT-P1-03.md">FEAT-P1-03</a>, per Handover 32/33/35's standing CR3 reasoning), preemption/deadline enforcement (<a href="features/FEAT-P1-04.md">FEAT-P1-04</a>), then the two proof Features — hostile load (<a href="features/FEAT-P1-05.md">FEAT-P1-05</a>) and the G-PA-1 decision-to-actuation bound (<a href="features/FEAT-P1-06.md">FEAT-P1-06</a>). This Epic is where <code>baseline-debt</code> first converts to <code>verified</code>.</p>
 <p><strong>Hardware direction (user, 2026-07-27):</strong> the <strong>Raspberry Pi 5</strong> is the only viable hardware in the short term. It is ARM64 and TinyOS has an x86_64 HAL only, so Tier 0 (QEMU) proves every mechanism while a minimal ARM64 bring-up slice + deploy path is scoped as loose end <code>LE-09</code> — until Pi 5 measurement exists, every timing claim carries named, dated hardware-tier debt. See <a href="epics/EPIC-P1.md">the Epic's hardware ladder</a>.</p>
+<p><strong>ARM64 sequencing decided (user, 2026-07-27): Option B with a carve-out</strong> — <a href="../session/hand-2026-07-27/03-le-09-arm64-pi5-slice-proposal.md">Handover 03</a>. The ARM64 <code>CNTVCT_EL0</code>/<code>CNTFRQ_EL0</code> cycle source and timebase are written now (no board needed, and the only thing that tests the harness's arch-neutrality claim — with its own Story contract row and Test document first, per the spine); UART-borne pass/fail folds into <code>STORY-P1-01-02</code>; AArch64 boot, the PL011 driver and the SD-card run path wait for <code>FEAT-P1-02</code>, after which a fault on that board reports itself instead of hanging silently. <code>LE-09</code> stays open until a Pi 5 has actually produced a measurement — a decision is not evidence.</p>
+<table>
+<thead><tr><th>Feature</th><th>Status</th><th>Stories</th></tr></thead>
+<tbody>
+<tr>
+  <td><a href="features/FEAT-P1-01.md">FEAT-P1-01</a> — Timing measurement harness &amp; CI timing-regression gate</td>
+  <td><span class="badge progress">IN PROGRESS (1 of 2 Stories)</span></td>
+  <td>
+    <a href="stories/STORY-P1-01-01.md">STORY-P1-01-01</a> <span class="badge verified">VERIFIED (Tier 0 + Host)</span> — reusable cycle-calibrated harness (kernel side + xtask parser) · Test: <a href="tests/TEST-P1-01-01-A.md">TEST-P1-01-01-A</a> · <a href="reports/REPORT-2026-07-27-02.md">Report</a> · assurance <code>baseline-debt</code><br>
+    <a href="stories/STORY-P1-01-02.md">STORY-P1-01-02</a> <span class="badge planned">SPECIFIED</span> — committed baselines + <code>check-timing-regression</code> CI gate, proven able to fail · Test written when the Story starts<br>
+    <span class="muted">Constraint from <code>-01-01</code>'s measurements: Tier 0 run-to-run p99 CV is 39–61% on small operations, so <code>-01-02</code> must gate <code>min</code>/<code>p50</code> over medians of repeated runs, not tails. Also open: measurement runs dev-profile binaries (<code>LE-13</code>).</span>
+  </td>
+</tr>
+<tr>
+  <td><a href="features/FEAT-P1-02.md">FEAT-P1-02</a> — Real CPU exception handling &amp; fault containment</td>
+  <td><span class="badge planned">SPECIFIED — NEXT AFTER FEAT-P1-01</span></td>
+  <td>
+    <a href="stories/STORY-P1-02-01.md">STORY-P1-02-01</a> <span class="badge planned">SPECIFIED</span> — <code>#PF</code>/<code>#GP</code>/<code>#UD</code> handlers: context capture, terminate-vs-resume policy, spoor audit<br>
+    <a href="stories/STORY-P1-02-02.md">STORY-P1-02-02</a> <span class="badge planned">SPECIFIED</span> — double-fault safety: TSS/IST stack switching, fault-in-fault-path survival<br>
+    <span class="muted">Owns <code>LE-03</code> (no real fault handling — a <code>#UD</code> cost this project a silent triple fault on 2026-07-27, so <code>#XF</code> vector 19 joins the list), <code>LE-04</code> (no TSS/IST) and <code>LE-11</code> (<code>IF</code> set with no IDT installed).</span>
+  </td>
+</tr>
+<tr>
+  <td><a href="features/FEAT-P1-03.md">FEAT-P1-03</a> — Active per-task address spaces, W^X &amp; teardown</td>
+  <td><span class="badge planned">SPECIFIED</span></td>
+  <td>
+    <a href="stories/STORY-P1-03-01.md">STORY-P1-03-01</a> <span class="badge planned">SPECIFIED</span> — per-task <code>CR3</code> switching wired into the context switch<br>
+    <a href="stories/STORY-P1-03-02.md">STORY-P1-03-02</a> <span class="badge planned">SPECIFIED</span> — W^X/NX kernel + task mappings; generation-safe address-space teardown<br>
+    <span class="muted">Owns <code>LE-05</code> (<code>exec::AddressSpace</code> built but never installed; the system still runs all-RWX identity-mapped). Deliberately after FEAT-P1-02: a live CR3 switch with no real fault handler behind it is more dangerous than the current identity map.</span>
+  </td>
+</tr>
+<tr>
+  <td><a href="features/FEAT-P1-04.md">FEAT-P1-04</a> — Timer-driven preemption, deadline monitor &amp; WCET watchdog</td>
+  <td><span class="badge planned">SPECIFIED</span></td>
+  <td>
+    <a href="stories/STORY-P1-04-01.md">STORY-P1-04-01</a> <span class="badge planned">SPECIFIED</span> — timer-driven preemption: tick → interrupt-driven dispatch, priority inheritance under real preemption<br>
+    <a href="stories/STORY-P1-04-02.md">STORY-P1-04-02</a> <span class="badge planned">SPECIFIED</span> — deadline monitor &amp; WCET watchdog on the real timer; overrun → declared fault policy<br>
+    <span class="muted">Owns <code>LE-01</code> (priority-inheritance behavioral proof), <code>LE-02</code> (WCET has no timer/watchdog behind it) and <code>LE-14</code> (<code>context::switch</code> saves no SSE/x87 state — safe today, unsound under preemption).</span>
+  </td>
+</tr>
+<tr>
+  <td><a href="features/FEAT-P1-05.md">FEAT-P1-05</a> — Hostile-load &amp; exhaustion-containment proof</td>
+  <td><span class="badge planned">SPECIFIED</span></td>
+  <td>
+    <a href="stories/STORY-P1-05-01.md">STORY-P1-05-01</a> <span class="badge planned">SPECIFIED</span> — hostile-load campaign: saturation, RT-reserve preservation, bounded recovery, attributable denial<br>
+    <span class="muted">Proof Feature — consumes -01 through -04. Property-based tests enter the project here; adversarial tests mandatory.</span>
+  </td>
+</tr>
+<tr>
+  <td><a href="features/FEAT-P1-06.md">FEAT-P1-06</a> — Deterministic actuation proof (G-PA-1 flagship path)</td>
+  <td><span class="badge planned">SPECIFIED</span></td>
+  <td>
+    <a href="stories/STORY-P1-06-01.md">STORY-P1-06-01</a> <span class="badge planned">SPECIFIED</span> — bounded decision-to-actuation path: declared budget, enforced deadline, measured distribution, demonstrated failure behaviour<br>
+    <span class="muted">The Epic's exit: the first end-to-end, scheduler-enforced decision-to-actuation bound. Re-check <code>LE-08</code> (no I/O APIC device-IRQ route) when this Feature picks its output primitive.</span>
+  </td>
+</tr>
+</tbody>
+</table>
+
 <p><strong>Expected artifacts per Story</strong> (TDD enforced — Red before Green, Test docs written when each Story starts, never pre-written):
 a failing-first <code>TEST-P1-*-A</code> doc whose metadata exactly mirrors the Story's contract row · host tests and/or a Tier 0 fixture (adversarial for FEAT-P1-02/-03/-05, property-based entering with -05) · a dated <code>REPORT-*</code> with raw evidence (timing Stories: percentile distributions + committed baselines; the regression gate demonstrated to fail on a planted regression) · Story/Feature/matrix/dashboard status updates in the same change · spine counts advancing (Tests 24 → 34, Reports 29 → 39+ as Stories land).
 <strong>Epic exit:</strong> all 6 Features Verified at Tier 0, the timing gate live in CI and proven able to fail, first <code>baseline-debt → verified</code> conversions (at least SEC-03/SEC-19/SEC-20 each on one Story), and the Security Charter runtime-evidence list shrunk by active address spaces, fault containment/teardown, and W^X sealing.</p>

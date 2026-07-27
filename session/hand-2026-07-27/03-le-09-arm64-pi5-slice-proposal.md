@@ -1,6 +1,6 @@
-# Handover 03 — `LE-09` Proposal: Minimal ARM64 / Raspberry Pi 5 Bring-Up Slice (decision needed)
+# Handover 03 — `LE-09`: Minimal ARM64 / Raspberry Pi 5 Bring-Up Slice — Proposal and Decision
 
-Follows: [`02-story-p1-01-01-measurement-harness.md`](02-story-p1-01-01-measurement-harness.md). This document exists to be **decided on, not implemented from** — Handover 37's directive 1 made the Pi 5 the only viable short-term hardware, and mandate item 3 asked this session to scope the minimal slice and present two sequencing options. Nothing below is started.
+Follows: [`02-story-p1-01-01-measurement-harness.md`](02-story-p1-01-01-measurement-harness.md). **DECIDED 2026-07-27 (user): Option B with the carve-out.** The decision section at the foot of this document records what that means concretely. This document exists to be **decided on, not implemented from** — Handover 37's directive 1 made the Pi 5 the only viable short-term hardware, and mandate item 3 asked this session to scope the minimal slice and present two sequencing options. Nothing below is started — the decision names what starts next.
 
 ## Why this is needed at all, in one paragraph
 
@@ -44,8 +44,21 @@ Finish the timing gate and real fault handling on x86_64 first; start the slice 
 
 The reasoning is specific rather than a split-the-difference: piece 3 is under a session's work, needs no board to write, and is the *only* piece that tests the claim this Story just made — that a second `CycleSource`/`Timebase` implementor drops in without touching the harness. Writing it against the shared conformance suite either validates the seam or exposes it while it is still free to fix. Piece 4 belongs to the gate Story anyway (a gate that can only read a QEMU exit code cannot ever gate hardware). Everything requiring the physical board waits for `FEAT-P1-02`, by which time a fault on that board produces a message instead of a hang — and by which time the board can be bought without the schedule pretending it already exists.
 
-**Decision requested:** A, B, or B-with-carve-out. If A, the first question back is whether a Pi 5 is in hand, because that answer changes the first session's work entirely.
+## Decision (user, 2026-07-27): **Option B with the carve-out**
+
+Recorded as governing for `EPIC-P1`'s sequencing. Concretely:
+
+**Starts now, needs no board:**
+
+- **Piece 3 — the ARM64 cycle source and timebase.** An `hal::time::CycleSource` implementor reading `CNTVCT_EL0` and a `Timebase` implementor deriving cycles-per-microsecond from `CNTFRQ_EL0` (one register read ÷ 1,000,000 — no PIT-style calibration needed, unlike x86). Its purpose is to test the claim `STORY-P1-01-01` just made: that a second implementor drops into the harness untouched, checked against the shared `hal::time::conformance` suite. The register reads are `cfg(target_arch = "aarch64")`; the arithmetic is unconditional and host-unit-tested, so this compiles and tests on the x86_64 dev machine and on CI today.
+- **Piece 4 — UART-borne pass/fail**, folded into `STORY-P1-01-02`. There is no `isa-debug-exit` on hardware, so a gate that can only read a QEMU exit code can never gate a board. It benefits Tier 0 immediately regardless.
+
+**Waits for `FEAT-P1-02` (real exception handling):** pieces 1, 2 and 5 — AArch64 boot + target spec, the PL011 UART driver, and the host-side SD-card/serial run path. Rationale, restated because it is the whole point of choosing B: on a Pi 5 with no `isa-debug-exit` and no fault handling, a fault is a silent hang with **no output at all** — this session lost two debugging cycles to exactly that failure shape under QEMU, where at least `-d int,cpu_reset` existed to ask. After `FEAT-P1-02`, a fault on that board is a reportable event over the UART.
+
+**Process note the carve-out must respect:** the assurance spine blocks unmapped implementation — before the ARM64 cycle source is written, it needs its own Story with a `story-contracts.tsv` row and a Test document written first (TDD), the same as every other Story. It is a `FEAT-P1-01` addition (it extends the measurement harness) rather than an `EPIC-P7` pull-forward, since nothing about it is a HAL port. Whoever starts it decides Story numbering as part of that step; the spine's Test/Report counts rebase in the same change.
+
+**Not decided by this, and deliberately still open:** whether a Pi 5, SD card and USB-TTL cable are in hand. That question becomes live when `FEAT-P1-02` exits, not before — which is one of the practical advantages of B.
 
 ## Loose-ends register — carried forward
 
-Unchanged from [Handover 02's copy](02-story-p1-01-01-measurement-harness.md#loose-ends-register-canonical-as-of-this-handover); this document adds no new items and closes none. `LE-09` remains **open — decision needed**, and this proposal is the input to that decision.
+Unchanged from [Handover 02's copy](02-story-p1-01-01-measurement-harness.md#loose-ends-register-canonical-as-of-this-handover); this document adds no new items and closes none. `LE-09` stays **open** — a sequencing decision is not evidence, and the item leaves the register only when a Pi 5 has actually produced a measurement. Its status line now reads "decided: Option B with the carve-out" rather than "decision needed".
