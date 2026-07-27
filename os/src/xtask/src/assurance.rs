@@ -2311,19 +2311,18 @@ mod tests {
         assert!(error.contains("D26"));
     }
 
+    /// The closed catalogues, asserted exactly.
+    ///
+    /// Each of these is fixed by a charter document rather than by how much work
+    /// has landed: five containment classes, twenty boundary tests, twenty
+    /// security controls, fourteen Protection Domain contracts, fourteen
+    /// code-admission gates, the complete 5x5 class matrix, nineteen
+    /// application/platform targets, nine landing zones. Changing one is a
+    /// deliberate charter amendment, and this test **should** fail when it
+    /// happens — that is the whole point of pinning them.
     #[test]
-    fn committed_assurance_spine_is_complete() {
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let repo_root = manifest_dir
-            .parent()
-            .and_then(Path::parent)
-            .and_then(Path::parent)
-            .expect("xtask manifest lives at os/src/xtask")
-            .to_path_buf();
-        let summary =
-            check_assurance_spine(&repo_root).expect("committed assurance spine must be valid");
-        assert_eq!(summary.feature_count, 23);
-        assert_eq!(summary.story_count, 56);
+    fn committed_assurance_spine_catalogues_are_exact() {
+        let summary = committed_summary();
         assert_eq!(summary.containment_class_count, 5);
         assert_eq!(summary.boundary_test_count, 20);
         assert_eq!(summary.security_control_count, 20);
@@ -2332,12 +2331,53 @@ mod tests {
         assert_eq!(summary.class_communication_pair_count, 25);
         assert_eq!(summary.application_platform_count, 19);
         assert_eq!(summary.landing_zone_count, 9);
-        assert_eq!(summary.test_count, 39);
-        assert_eq!(summary.report_count, 44);
         assert!(summary.selected_performance_contracts >= 625);
         assert!(summary.selected_application_performance_contracts >= 625);
-        assert_eq!(summary.loose_end_count, 27);
-        assert_eq!(summary.open_loose_end_count, 17);
+    }
+
+    /// How much work has landed, asserted as **floors and relationships** — never
+    /// as totals.
+    ///
+    /// These counts grow with every Story, so an exact total is a number that
+    /// must be re-synced by every change that adds a document, including changes
+    /// made concurrently in another working tree. That churned five times in the
+    /// session of 2026-07-28 and broke `main` once, because the symptom was
+    /// treated each time and the pattern was not named. It is named here: **a
+    /// population count is a floor, not a total.**
+    ///
+    /// The floors still catch the failure that matters — documents are added,
+    /// never deleted, so a shrinking count means an artifact was lost or a
+    /// contract row was dropped. Raise a floor deliberately when a milestone is
+    /// worth pinning; do not raise it reflexively to match today's tree.
+    #[test]
+    fn committed_assurance_spine_population_never_shrinks() {
+        let summary = committed_summary();
+
+        // Floors as of 2026-07-28 (FEAT-P1-07 specified, STORY-P0-01-04 Verified).
+        assert!(summary.feature_count >= 23, "features: {}", summary.feature_count);
+        assert!(summary.story_count >= 56, "stories: {}", summary.story_count);
+        assert!(summary.test_count >= 43, "tests: {}", summary.test_count);
+        assert!(summary.report_count >= 44, "reports: {}", summary.report_count);
+        assert!(summary.loose_end_count >= 27, "loose ends: {}", summary.loose_end_count);
+
+        // Relationships that must hold at any size. Every Feature is decomposed
+        // into at least one Story, and a loose end cannot be open unless it
+        // exists — the second is trivially true of the register's own parser and
+        // is asserted so that a future change to how open-ness is counted cannot
+        // quietly invert it.
+        assert!(summary.story_count >= summary.feature_count);
+        assert!(summary.open_loose_end_count <= summary.loose_end_count);
+    }
+
+    fn committed_summary() -> AssuranceSummary {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = manifest_dir
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+            .expect("xtask manifest lives at os/src/xtask")
+            .to_path_buf();
+        check_assurance_spine(&repo_root).expect("committed assurance spine must be valid")
     }
 
     fn loose_end_fixture() -> String {
