@@ -4,10 +4,9 @@ New session folder per the naming convention (all handovers from one calendar da
 
 ## Where the project stands this morning
 
-- **`EPIC-P0` — functionally complete, and the dashboard now says so** (the stale `IN PROGRESS` badge was corrected today). All 25 Stories Verified, 24/24 Test docs passing locally, 30 Reports filed. Three things stand between "functionally complete" and *done*, per the Epic's own exit criteria — none of them functional scope:
-  1. **A CI run observed green** (`LE-07`) — every claim is local-only; 30 handovers old.
-  2. **Assurance evidence** — every Story is `baseline-debt`; conversion is `EPIC-P1`'s charge.
-  3. **Hardware-tier validation** — nothing has run on a physical board; the Pi 5 direction (`LE-09`) is the path.
+- **`EPIC-P0` — functionally complete, and the dashboard now says so** (the stale `IN PROGRESS` badge was corrected today). All 25 Stories Verified, 24/24 Test docs passing, 30 Reports filed, **and CI is now observed fully green** (run `30226663769` on `f1d7c90` — QEMU boot jobs plus the fmt/clippy/size/assurance/catalogue gate; `LE-07` closed same day, see mandate item 1). Two things stand between "functionally complete" and *done*, per the Epic's own exit criteria — neither of them functional scope:
+  1. **Assurance evidence** — every Story is `baseline-debt`; conversion is `EPIC-P1`'s charge.
+  2. **Hardware-tier validation** — nothing has run on a physical board; the Pi 5 direction (`LE-09`) is the path.
 - **`EPIC-P1` — decomposed and mandated**: 6 Features, 10 `specified` Stories ([`EPIC-P1.md`](../../goals/epics/EPIC-P1.md)), governed by the four directives and the loose-ends register `LE-01`–`LE-10` in [`Handover 37`](../hand-2026-07-26/37-epic-p1-mandate-hardware-direction-and-loose-ends.md) — which every EPIC-P1 handover in this folder must carry forward, updating per-item status.
 
 ## This session's mandate (from Handover 37, unchanged)
