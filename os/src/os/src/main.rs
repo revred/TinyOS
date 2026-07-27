@@ -1137,6 +1137,6 @@ extern "C" fn kernel_main(start_info_paddr: u64) -> ! {
 }
 
 #[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    exit_qemu(QemuExitCode::Failure)
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    hal_x86_64::qemu_exit::panic_report(info)
 }

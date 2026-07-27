@@ -49,3 +49,57 @@ pub fn exit_qemu(code: QemuExitCode) -> ! {
         unsafe { core::arch::asm!("hlt", options(nomem, nostack)) };
     }
 }
+
+/// The sentinel a panicking TinyOS binary emits on COM1 before it stops.
+///
+/// Versioned like every other machine-read line this system produces
+/// (`TINYOS-MEAS/1`, `TINYOS-RESULT/1`), because a host-side assertion that
+/// greps for it is a consumer with a contract, not a debugging convenience.
+pub const PANIC_SENTINEL: &str = "TINYOS-PANIC/1";
+
+/// Reports a panic on COM1, then stops the machine fail-closed
+/// (`TEST-P0-01-04-A` clause 1).
+///
+/// **Why this exists at all.** Every `#[panic_handler]` in this workspace was
+/// a bare `exit_qemu(QemuExitCode::Failure)`, so a TinyOS binary that panicked
+/// died in complete silence — and `fixture-broken-boot`, whose entire purpose
+/// is to panic, produced an *empty* serial capture. Its CI step could
+/// therefore only assert "exit code 1", which every other failure also
+/// produces. The gap in the test harness was hiding a gap in the system: a
+/// kernel that cannot say why it stopped is not diagnosable on a board either,
+/// where there is no exit code at all (`LE-09`).
+///
+/// **Fail-closed ordering is load-bearing.** The sentinel is written *before*
+/// the exit port is touched, because the exit port stops the machine and
+/// anything after it is not evidence. Every write is `let _ =` — a UART that
+/// will not accept bytes must not be able to prevent termination, which would
+/// turn a panic into a hang.
+///
+/// Best-effort by construction: this runs from a context that may hold
+/// arbitrary broken state, so it takes no lock, allocates nothing, and calls
+/// back into no subsystem.
+pub fn panic_report(info: &core::panic::PanicInfo) -> ! {
+    use core::fmt::Write;
+    // SAFETY: single-CPU fail-closed path with nothing else able to run.
+    // Re-initializing the UART is idempotent (it reprograms the divisor and
+    // FIFO), which is what makes this safe to call from a panic that may have
+    // interrupted another `SerialPort` user mid-write.
+    let mut serial = unsafe { crate::serial::SerialPort::init() };
+    // The message first, because it is what an assertion should key on: a
+    // location is a line number, and a CI step that greps for one breaks the
+    // next time anything above it moves.
+    let _ = write!(serial, "{PANIC_SENTINEL} message={} ", info.message());
+    match info.location() {
+        Some(location) => {
+            let _ = write!(serial, "file={} line={}", location.file(), location.line());
+        }
+        // `PanicInfo::location` is `None` only for panics raised outside any
+        // tracked source position; the sentinel still has to be emitted, or
+        // the assertion that greps for it fails for the wrong reason.
+        None => {
+            let _ = write!(serial, "location=unknown");
+        }
+    }
+    let _ = writeln!(serial);
+    exit_qemu(QemuExitCode::Failure)
+}
