@@ -1,6 +1,6 @@
 # STORY-P1-07-01 — AArch64 Target Spec, Boot Stub, `EL2 → EL1`, and the First Byte on the Wire
 
-Status: **Specified — not started; needs the board, a serial adapter, and `TEST-P1-07-01-A` Red first**
+Status: **In progress — host-testable half Green 2026-07-28 (64 host tests); acceptance criteria 3 and 4 blocked on a board and a loopback-tested serial adapter. Not Verified.**
 Feature: [`FEAT-P1-07`](../features/FEAT-P1-07.md)
 Introduced in: [`session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md`](../../session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md) §5, piece 1 and piece 2 of the `LE-09` slice
 
@@ -29,6 +29,32 @@ The deliverable is the smallest thing that proves the board is running TinyOS's 
 - **`SEC-01` is selected and cannot be closed.** The Pi 5 firmware chain gives TinyOS no measured-boot evidence, so `BND-01` ("only authentic measured boot state reaches C1") is stated debt for the whole Feature. Naming it here is the point; a boot Story that omitted the control would read as though the question had not come up.
 - **`LE-09` stays open.** A byte on a serial line is not a measurement.
 - The firmware handoff register state and the device-tree blob pointer are read and reported, never retained as authority (`PD-14`, `BND-02`). No DT parsing (`BND-03`).
+
+## Progress, 2026-07-28
+
+The Story was deliberately split along the line the board draws, the way
+`STORY-P1-01-03` split the timer. **The half that needs no hardware is done and
+Green on the x86_64 dev machine; the half that needs a board is untouched, and
+this Story is not Verified.**
+
+| Criterion | State |
+|---|---|
+| 1 — named target spec builds `hal-arm64` | **Green.** `os/targets/aarch64-tinyos.json` + `aarch64-tinyos.ld`. Built in CI on every push, so the spec cannot rot between hardware sessions. |
+| 2 — stack, `.bss` zeroing, conditional `EL2 → EL1` drop | **Written, not executed.** `hal_arm64::boot`. The layout is confirmed by a link (`_start` at `0x80000`, first byte of the flat image); the *behaviour* is not. |
+| 3 — `CurrentEL` printed before anything else | **Half.** The decode, the ordering and the wire text are host-tested against a double. The register read and the capture need the board. |
+| 4 — a known byte sequence reaches the host | **Blocked.** Needs the board and the adapter. This is the Green. |
+| 5 — everything host-testable is host-tested | **Green.** 64 host tests; `pl011::VolatileMmio` is the only `cfg(target_arch = "aarch64")` item and the only `unsafe` in the driver. |
+
+**What is deliberately not here.** No `kernel8.img` is produced by this
+workspace: that needs an AArch64 binary crate and an SD-image build, which is
+`STORY-P1-07-05`, and pulling it forward is the scope creep `FEAT-P1-07` §6 and
+Handover 17 §10's last risk row both name. The link that validated the linker
+script was done outside the workspace and its recipe is recorded in
+[`session/hand-2026-07-28/23-bcm2712-divergence-record.md`](../../session/hand-2026-07-28/23-bcm2712-divergence-record.md).
+
+**No measurement was taken and none may be.** Until `STORY-P1-07-03` lands the
+MMU every access on that board is Device-nGnRnE, and `TEST-P1-07-01-A` §7 says
+what any number obtained here would be worth.
 
 ## Tests
 

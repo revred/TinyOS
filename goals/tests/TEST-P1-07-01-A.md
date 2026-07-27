@@ -1,6 +1,6 @@
 # TEST-P1-07-01-A — The Board Says Which Exception Level It Woke Up At
 
-Status: **Specified — written before implementation, per the TDD mandate**
+Status: **Partially Verified (Host), 2026-07-28** — clause 5 Green, clause 2 Green for the build, clause 3 Green for the decode and the ordering; clauses 1 and 4 are untouched and need hardware. **Specification unchanged since it was written before implementation** — see "What was and was not run", below.
 Story: [`STORY-P1-07-01`](../stories/STORY-P1-07-01.md)
 Tier: Host unit tests (PL011 register encoding, flag polling, `CurrentEL` decoding, linker/target-spec shape) **plus** a Tier 1 hardware run on a Raspberry Pi 5, captured over the debug UART, per [Target Hardware & Test Matrix](../../README.md#target-hardware--test-matrix)
 Assurance contract: [`goals/assurance/story-contracts.tsv`](../assurance/story-contracts.tsv)
@@ -83,6 +83,72 @@ Host unit tests (`#[cfg(test)]` in `os/src/hal-arm64/src/`) plus a Tier 1 hardwa
 
 - `os/src/hal-arm64/` — target spec, boot stub, linker script, PL011 driver, `CurrentEL` read and the `EL2 → EL1` drop.
 
+## What was and was not run, 2026-07-28
+
+**No clause was edited to fit what happened.** The specification above is the
+one written before implementation; this section is added below it, per the
+precedent `TEST-P1-01-04-A` clause 4 set.
+
+| Clause | State | Evidence |
+|---|---|---|
+| 1 — adapter proven before the board is blamed | **Not run.** No adapter has been loopback-tested. | — |
+| 2 — the target spec builds, reproducibly | **Green for the build.** `cargo build -p hal-arm64 --target targets/aarch64-tinyos.json` succeeds from a clean checkout and now runs in CI. **Not Green for "the image artifacts the boot firmware expects"** — no `kernel8.img` is produced by this workspace; see below. | CI job `governance-gates`, step "AArch64 target spec builds hal-arm64" |
+| 3 — `CurrentEL` is read, not assumed | **Green for the decode and the ordering.** `ExceptionLevel::decode` is total over the register, ignores `RES0`, and only `EL2` asks for a drop; a host test asserts the level is the first content on the wire. **The register read and the drop have never executed.** | `hal_arm64::exception_level`, `hal_arm64::boot` host tests |
+| 4 — a known byte sequence reaches the host | **Not run.** This is the Green, and it needs the board. | — |
+| 5 — everything except the volatile writes is host-tested | **Green.** 64 host tests across `board`, `exception_level`, `pl011` and `boot`. | `cargo test -p hal-arm64` |
+| 6 — the firmware handoff confers nothing | **Green for the reporting; unexercised on hardware.** `x0`–`x3` and the DTB pointer are reported and dropped; the wire carries `parsed=no`. No device-tree parser exists. Addresses are hardcoded-and-verified with the documentation revision recorded in `hal_arm64::board`. | `hal_arm64::boot` host tests |
+
+### Clause 5's "only `cfg(target_arch)` item, only `unsafe`" is read as scoped to the driver
+
+Stated in the open rather than quietly satisfied. Clause 5 opens *"Given the
+PL011 driver"*, and it is honoured exactly within that module:
+`pl011::VolatileMmio` is the only `cfg(target_arch = "aarch64")` item and the
+only `unsafe` in `pl011.rs`.
+
+It is **not** true of the Story as a whole, and cannot be: clause 4 of this same
+document requires "a stack, a zeroed `.bss`, and an initialised PL011", and
+neither a stack nor `.bss` zeroing can be established without assembly.
+`hal_arm64::boot` therefore contains a `global_asm!` reset vector, a `CurrentEL`
+read and the `EL2 → EL1` drop, all `cfg(target_arch = "aarch64")` and all
+`unsafe`. `agent/CODING_STANDARDS.md`'s language policy admits precisely this
+case ("the earliest boot stub … may be written in a small amount of
+hand-written assembly, wrapped by a Rust `extern "C"` boundary as thin as
+possible").
+
+The whole-Story reading is not merely inconvenient, it is unsatisfiable, so the
+driver-scoped reading is the only coherent one. Recorded here so that a later
+reader finds the interpretation rather than inferring that the clause was
+ignored.
+
+### What clause 2 does not cover, and why nothing was added to cover it
+
+Clause 2 asks for "the image artifacts the boot firmware expects". This
+workspace does not build one: there is no AArch64 binary crate, so nothing
+links `hal-arm64` into an image. That is `STORY-P1-07-05` ("host-side run path:
+SD image build"), and adding it here is exactly the growth `FEAT-P1-07` §6 and
+Handover 17 §10's last risk row forbid.
+
+The linker script was instead validated by linking a throwaway binary outside
+the workspace. It produced `_start` at `0x80000` as the first byte of the flat
+image, `.bss` and `.stack` 16-byte aligned, and a 62 KiB debug image. **That is
+a layout check, not clause 2's evidence**, and the recipe — including the
+`-Z build-std=core,compiler_builtins -Z build-std-features=compiler-builtins-mem`
+that a `build-std=core` alone gets wrong — is recorded in
+[`session/hand-2026-07-28/23-bcm2712-divergence-record.md`](../../session/hand-2026-07-28/23-bcm2712-divergence-record.md).
+
+### One defect this specification's own tests found
+
+A first implementation spelled its line endings `"\r\n"` inside
+`Pl011::write_str`, which frames `\n` as `\r\n` — putting `\r\r\n` on the wire.
+It is invisible on most terminals, so it would have survived review and landed
+inside a *quoted serial capture* offered as evidence. The framer owns the CR;
+the report supplies `\n` only, and
+`no_reported_line_contains_a_carriage_return_the_framer_would_double` now pins
+it. Recorded because the failure mode — a capture that is subtly not what the
+source says — is the one this Feature's evidence rests on.
+
 ## Reports
 
-To be filed when the Story goes Green.
+To be filed when the Story goes Green. **Nothing here closes a `PERF-*`
+guardrail and `LE-09` remains open**: a byte on a serial line is not a
+measurement, and no byte has reached one yet.

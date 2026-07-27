@@ -22,4 +22,8 @@
 #![cfg_attr(not(test), no_std)]
 #![deny(missing_docs)]
 
+pub mod board;
+pub mod boot;
+pub mod exception_level;
+pub mod pl011;
 pub mod timer;

@@ -41,6 +41,32 @@ jobs:
         env:
           RUSTDOCFLAGS: "-D missing-docs"
 
+      # TEST-P1-07-01-A clause 2. The AArch64 target spec is only meaningful if
+      # something builds against it, and nothing in this workspace links an
+      # AArch64 binary yet (that is STORY-P1-07-05's image build). Without this
+      # step the spec, the boot stub's inline assembly and the `VolatileMmio`
+      # seam would compile nowhere and rot silently between hardware sessions —
+      # which is the state `timer::SystemRegisters` was in for three Features.
+      #
+      # `compiler_builtins` with `compiler-builtins-mem` is not optional: a
+      # `build-std=core` alone leaves memcpy/memcmp undefined at link time.
+      - name: AArch64 target spec builds hal-arm64 (STORY-P1-07-01)
+        run: >
+          cargo build -p hal-arm64
+          --target targets/aarch64-tinyos.json
+          -Z build-std=core,compiler_builtins
+          -Z build-std-features=compiler-builtins-mem
+          -Z json-target-spec
+
+      - name: clippy on the AArch64 build (-D warnings)
+        run: >
+          cargo clippy -p hal-arm64
+          --target targets/aarch64-tinyos.json
+          -Z build-std=core,compiler_builtins
+          -Z build-std-features=compiler-builtins-mem
+          -Z json-target-spec
+          -- -D warnings
+
   governance-fixture-smoke-test:
     name: TEST-P0-01-02-A — fixtures actually catch what they claim to
     runs-on: ubuntu-latest
