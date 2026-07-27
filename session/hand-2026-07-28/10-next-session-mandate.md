@@ -52,15 +52,20 @@ Two smaller notes. `wcet::record_tick` takes `&mut Scheduler`, and calling it fr
 
 **The timing gate is flaky on the GitHub runner, and there is now evidence rather than suspicion.** `D05/dispatch_select_highest_priority_ready` sits almost exactly on its own tolerance boundary under CI conditions. Three consecutive runs, same baseline and same limit throughout:
 
-| Run | Commit | observed | limit | Verdict |
+| Run | Commit | observed p50 | limit | Verdict |
 |---|---|---|---|---|
 | `30257003163` | `91c95c1` (before any of this work) | 123 | 121 | REGRESSED |
 | `30273423631` | `c72a1b6` (the merge) | 123 | 121 | REGRESSED |
 | `30274004446` | `f58dd8d` | **90** | 121 | ok |
+| `30274317558` | `9ffdf44` — **a markdown-only commit** | **182** | 121 | REGRESSED (`min` too) |
 
-The baseline is 76 and the tolerance is `max(60%, 24 cycles)`, so the limit is 121 and the metric lands within a few cycles of it depending on how loaded the runner is. **This is `LE-16` meeting `LE-18`**: a gate that can only detect ~1.6x-or-worse regressions, evaluated against a baseline recorded on different hardware, will flip on a metric whose true value *is* about 1.6x.
+The last row is the one that settles it. `9ffdf44` changed a single documentation file and **not one byte of code**, so its binaries are identical to `f58dd8d`'s — and the same measurement moved from 90 to 182. A 2x swing on identical code. The final run also tripped `min`, which should be the *most* stable statistic of the three (`min` baseline=74, observed=182).
 
-So: if this step fails, read the `observed` value before believing it. If it is near 121 the run is noise; if it is materially higher, it is real. **Do not "fix" this by widening the tolerance or re-recording the baseline** — that is precisely the move Handover 05 recorded as a mistake, and it would permanently weaken the one gate this project has against timing regressions in exchange for suppressing a symptom. `LE-18` is unowned and needs a Story that decides what these baselines are *of*; that Story is the fix.
+The baseline is 76 and the tolerance is `max(60%, 24 cycles)`, so the limit is 121 and the true value under CI conditions wanders across it. **This is `LE-16` meeting `LE-18`**: a gate that can only detect ~1.6x-or-worse regressions, evaluated against a baseline recorded on different hardware, applied to a metric whose CI value *is* around 1.6x and swings by 2x on its own.
+
+**Practical consequence: this step's verdict currently carries no information about the code.** Read the `observed` value, and compare it against the 90–182 range recorded above before concluding anything. A genuine regression would have to clear that band to be visible at all, which is a fair statement of how weak this gate is on this runner.
+
+**Do not "fix" it by widening the tolerance or re-recording the baseline.** That is precisely the move Handover 05 recorded as a mistake — it looks harmless, is hard to argue against later, and would permanently destroy the only gate this project has against timing regressions in exchange for suppressing a symptom. `LE-18` is unowned and needs a Story that decides what these baselines are *of* — per-runner baselines, a noise-floor calibration step, or moving the gate off shared CI hardware entirely. **That Story is the fix, and it is now the highest-value unowned item in the register.**
 
 **A Windows development machine cannot reproduce CI's lint job.** CI runs `cargo clippy --workspace --all-targets`. On Windows that command fails outright — every `no_std` binary needs `hal_x86_64::{boot,interrupts,qemu_exit,serial}`, all gated `not(target_os = "windows")`. The command used throughout this session, `--workspace --lib --tests`, never lints a binary at all, and that is how a `deref_addrof` break reached `main`. What does work locally:
 
