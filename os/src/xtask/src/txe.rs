@@ -194,7 +194,7 @@ mod tests {
         file
     }
 
-    fn section_header<'a>(packed: &'a [u8], index: usize) -> &'a [u8] {
+    fn section_header(packed: &[u8], index: usize) -> &[u8] {
         let e_lfanew = u32_at(packed, 0x3c).unwrap() as usize;
         let coff = e_lfanew + 4;
         let num_sections = u16_at(packed, coff + 2).unwrap() as usize;
