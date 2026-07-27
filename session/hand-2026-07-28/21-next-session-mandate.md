@@ -19,7 +19,7 @@ Read, in this order:
 
 ## First, two minutes of setup
 
-```
+```sh
 git config core.hooksPath .githooks
 ```
 
@@ -36,7 +36,14 @@ Per-clone, so a fresh clone does not have it. It runs the spine, catalogue and c
 
 So the honest sequencing is: **build the host-testable half now, and let the adapter gate the Green.** Do not wait for hardware to start, and do not claim the Story Verified without the capture.
 
-**If no board time is available at all**, the named fallback is `LE-23`: re-record the timing baseline from a CI run to remove the consistently-signed 23–53% Windows-vs-Linux offset. It is small, it needs no hardware, and `LE-24` may come free with it — `pool_u64x64` measured 25 cycles on the Linux runner and 0 on the Windows dev box, so the ungating is a property of where the baseline was recorded rather than of the metric. **One fix, two loose ends.** Do not take this instead of the board work if the board work is possible; take it instead of idling.
+**If no board time is available at all**, there are two fallbacks, and [Handover 22](22-the-zero-is-real-but-its-reason-is-wrong.md) added the better one after this document was first written:
+
+- **`LE-31` — the audit (preferred).** Every Report attributes zero assurance-`verified` Stories to `LE-09`, and that is wrong for nine of them: they select only domains whose catalogue tier names no `T1` or `T2`. Eight of those need HIL, which this project also lacks. **`STORY-P0-05-01` needs neither** — it selects `D09` alone, whose 23 release gates are every one of them `Host+T0`. It is the only Story in the repository whose entire release-gate set is reachable on hardware already present, and therefore the only visible way to move the verified count off zero without buying anything. Audit it honestly first: `G08` wants counters QEMU TCG cannot produce and `G22` is a 72-hour soak, so this is a candidate, not a plan.
+- **`LE-23` — the re-baseline.** Re-record the timing baseline from a CI run to remove the consistently-signed 23–53% Windows-vs-Linux offset. Small, needs no hardware, and `LE-24` may come free with it — `pool_u64x64` measured 25 cycles on the Linux runner and 0 on the Windows dev box, so the ungating is a property of where the baseline was recorded rather than of the metric. **One fix, two loose ends.**
+
+Do not take either instead of the board work if the board work is possible; take them instead of idling.
+
+**And do not confuse `FEAT-P1-07` with assurance progress.** It closes `LE-09`. It closes **no** `PERF-*` guardrail — `TEST-P1-07-06-A` clause 8 says so, and Handover 22 explains why: a Story reaches `verified` only when every applicable release gate closes, which includes a 72-hour soak and ≥1,000,000 operations per tail measurement. **The first `verified` Story is a measurement campaign, not a boot.**
 
 ## Traps, named up front
 
@@ -70,7 +77,7 @@ An unbounded wait on the PL011 transmit-FIFO-full flag is a hang indistinguishab
 
 ## State at the close
 
-```
+```text
 main                    92fc889, pushed, CI green on every job
 assurance spine         23 Features, 56 Stories, 43 Tests, 44 Reports
                         30 loose ends (20 open), 82 status headers
