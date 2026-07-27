@@ -37,11 +37,22 @@ Reference: **572 cycles (Windows baseline) → 441 (CI)**, a runner 1.30x faster
 | `D05/dispatch_run_once_cooperative_round` | −40% | 438 → 259 | ok |
 | `D02/fault_ud2_capture_terminate_kernel_context` | −46% | 1174 → 467 | ok |
 
+**A second CI run (`30294872213`, on `0e0fd50`, reference p50 = 510) changed the reading of this, and the two together say something more precise than either alone.** Do not draw conclusions from one run — that is the mistake this whole Story is about, and it was very nearly repeated here:
+
+| Metric | run 1 ratio shift | run 2 ratio shift |
+|---|---|---|
+| `D05/dispatch_select_highest_priority_ready` | **+80%** | **+4.4%** |
+| `D04/context_switch_yield_roundtrip_2switches` | −23% | −37% |
+| `D05/dispatch_run_once_cooperative_round` | −40% | −53% |
+| `D02/fault_ud2_capture_terminate_kernel_context` | −46% | −50% |
+
 **Two findings, and both matter more than the green tick.**
 
-1. **The ratios shifted across hosts by as much as the absolutes did.** Ratio spread across metrics is **3.36x** (0.535 → 1.799); absolute spread is **3.45x** (0.40 → 1.38). On this datum, normalising bought **essentially nothing** for cross-host transfer. Everything `STORY-P1-01-04` demonstrated remains true and remains about **same-host load**, which is what it was scoped to after correction — but nobody should carry away the impression that a ratio baseline is portable. It is not, on this evidence.
+1. **There is a real, consistently-signed systematic cross-host offset.** `D04`, `D05/dispatch_run_once` and `D02` came in **23–53% below** their Windows baseline in *both* runs, and in run 2 two of them tripped `improved (is the baseline stale?)` — which is the gate correctly reporting that its baseline came from the wrong machine. **The Windows-recorded baseline reads systematically high on the Linux runner.** That is `LE-23`, it is confirmed, and the fix is to re-record from a CI run.
 
-2. **`D05/dispatch_select` passed with 20 points of margin on unchanged code.** Had the tolerance been the 60% that was drafted before the quiet-to-loaded excursion was computed, **this push would have gone red** — the same failure mode, one turn later. The 100% constant is doing real work and should not be trimmed by anyone who thinks it looks loose.
+2. **`D05/dispatch_select` is separately unstable run-to-run on CI**, swinging +80% → +4.4% between two runs of unchanged code. That is `LE-18`'s failure mode surviving *inside the ratio* at smaller amplitude, on the same metric that has always been this gate's least-headroom one. It is a different problem from finding 1 and should not be fixed by re-recording. **The 100% tolerance is what absorbed it**, and at the 60% first drafted, run 1 would have gone red. Nobody should trim that constant because it looks loose.
+
+**Correction to a claim made before run 2 existed**, retained because the error is instructive: run 1 alone was read as showing that ratios shift across hosts as much as absolutes do (spread 3.36x vs 3.45x). Run 2 shows most of that spread was finding 2, not finding 1. The systematic component is real but smaller and one-directional; the rest was noise on a single metric.
 
 **One thing that got better, unexpectedly.** `D07/pool_u64x64_alloc_free_round_trip` measured **25 cycles on CI**, not 0. `LE-24` is a property of the *Windows host*, where the operation costs less than the calibrated `rdtsc` overhead — on the Linux runner it is measurable and would be gateable. The ungating is a consequence of where the baseline was recorded, which ties `LE-24` directly to `LE-23` and means both should be examined by the same Story.
 
