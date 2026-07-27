@@ -67,7 +67,7 @@ Neither defect was in the kernel. Both were in the evidence, and both would have
 
 ## State of the tree
 
-Everything committed on `feat/p1-04-02-wcet-enforcement` and merged to `main` with `--no-ff`.
+Everything committed on `feat/p1-04-02-wcet-enforcement` and merged to `main` with `--no-ff`, so the branch stays visible as a unit. **Not pushed** — two commits are ahead of `origin/main`. Push them before relying on CI for anything, including the timing-gate diagnosis in Handover 10.
 
 Verification at the close, all green: 395 host tests (383 before; 12 added), `cargo fmt --all -- --check`, `cargo clippy --workspace --lib --tests -- -D warnings`, the per-binary target clippy for `kernel`/`exec`/`os`, **and** that command again with each of the three new fixture features. `check-assurance-spine` (22 Features / 47 Stories / 34 Tests / **41** Reports), `check-crate-sizes`, `check-image-size` (`os`, 74,568 bytes — unchanged), `check-performance-catalogue`.
 
