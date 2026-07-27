@@ -166,7 +166,7 @@ pub unsafe fn run_once_in_space<const N: usize>(
 mod tests {
     use super::*;
     use crate::lock::PriorityInheritingLock;
-    use crate::sched::{Priority, WcetBudgetTicks};
+    use crate::sched::{OverrunPolicy, Priority, WcetBudgetTicks};
     use crate::spoor_journal::SpoorJournal;
 
     const STACK_SIZE: usize = 4096;
@@ -227,9 +227,30 @@ mod tests {
     #[allow(static_mut_refs, clippy::deref_addrof)]
     fn dispatcher_runs_the_boosted_holder_ahead_of_an_uninvolved_ready_task_after_contention() {
         let mut sched: Scheduler<N> = Scheduler::new();
-        let low = sched.create_task(priority(5), WcetBudgetTicks(1000), low_entry).unwrap();
-        let medium = sched.create_task(priority(15), WcetBudgetTicks(1000), medium_entry).unwrap();
-        let high = sched.create_task(priority(25), WcetBudgetTicks(1000), low_entry).unwrap();
+        let low = sched
+            .create_task(
+                priority(5),
+                WcetBudgetTicks(1000),
+                OverrunPolicy::TripToSafeState,
+                low_entry,
+            )
+            .unwrap();
+        let medium = sched
+            .create_task(
+                priority(15),
+                WcetBudgetTicks(1000),
+                OverrunPolicy::TripToSafeState,
+                medium_entry,
+            )
+            .unwrap();
+        let high = sched
+            .create_task(
+                priority(25),
+                WcetBudgetTicks(1000),
+                OverrunPolicy::TripToSafeState,
+                low_entry,
+            )
+            .unwrap();
         assert_eq!(low.index(), 0, "Pool::alloc's first-free-slot order underpins this test");
         assert_eq!(medium.index(), 1);
         // `high` never actually runs in this test (no `Context` of its own
@@ -308,8 +329,22 @@ mod tests {
     #[test]
     fn address_space_of_distinguishes_none_some_and_unknown() {
         let mut sched: Scheduler<N> = Scheduler::new();
-        let plain = sched.create_task(priority(3), WcetBudgetTicks(100), low_entry).unwrap();
-        let spaced = sched.create_task(priority(3), WcetBudgetTicks(100), low_entry).unwrap();
+        let plain = sched
+            .create_task(
+                priority(3),
+                WcetBudgetTicks(100),
+                OverrunPolicy::TripToSafeState,
+                low_entry,
+            )
+            .unwrap();
+        let spaced = sched
+            .create_task(
+                priority(3),
+                WcetBudgetTicks(100),
+                OverrunPolicy::TripToSafeState,
+                low_entry,
+            )
+            .unwrap();
         sched.set_address_space(spaced, 0x9000).unwrap();
 
         assert_eq!(sched.address_space_of(plain), Some(None));

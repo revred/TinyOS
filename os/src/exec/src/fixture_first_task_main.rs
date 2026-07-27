@@ -82,7 +82,7 @@ use kernel::dispatch;
 use kernel::fault::{Disposition, FaultReport, FaultingContext};
 use kernel::measure::write_result;
 use kernel::mem::Pool;
-use kernel::sched::{Priority, Scheduler, TaskId, TaskState, WcetBudgetTicks};
+use kernel::sched::{OverrunPolicy, Priority, Scheduler, TaskId, TaskState, WcetBudgetTicks};
 use kernel::spoor::{Action, Actor, Category, Outcome, Spoor};
 use kernel::spoor_journal::SpoorJournal;
 
@@ -544,7 +544,12 @@ fn run(start_info_paddr: u64) -> bool {
         let entry: kernel::sched::TaskEntry = core::mem::transmute(entry_virt as usize);
         let scheduler = &mut *(&raw mut SCHEDULER);
         let Ok(priority) = Priority::try_new(8) else { return false };
-        let Ok(task) = scheduler.create_task(priority, WcetBudgetTicks(1_000), entry) else {
+        let Ok(task) = scheduler.create_task(
+            priority,
+            WcetBudgetTicks(1_000),
+            OverrunPolicy::TripToSafeState,
+            entry,
+        ) else {
             return false;
         };
         if scheduler.set_address_space(task, cr3_image).is_none() {

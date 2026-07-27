@@ -119,6 +119,45 @@ pub enum PriorityError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WcetBudgetTicks(pub u32);
 
+/// What a task declared must happen to it if it exceeds its
+/// [`WcetBudgetTicks`] (`STORY-P1-04-02`).
+///
+/// Declared by whoever creates the task, at the same moment as the budget it
+/// governs, and never defaulted — see [`Scheduler::create_task`]. The
+/// enforcement half lives in [`crate::wcet`], which re-exports this type as
+/// `wcet::OverrunPolicy`; it is *defined* here because it is task-declaration
+/// state that a [`Tcb`] holds and because [`OverrunPolicy::Degrade`] carries
+/// a [`Priority`], and this module deliberately depends on nothing (compare
+/// the `sched` → `context` non-dependency this file's own `TaskId::index`
+/// doc records).
+///
+/// There is no `Ignore` arm, and adding one would be a change to this
+/// enumeration rather than an omission in a `match` — which is the whole
+/// reason the choice is an enumeration at all. See
+/// [`crate::wcet::disposition_for`] for the decision table and
+/// `TEST-P1-04-02-A` clause 2 for why it is *not* `crate::fault::Disposition`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverrunPolicy {
+    /// Re-initialize the task to its entry point, reset its budget window,
+    /// and return it to [`TaskState::Ready`]: it runs again from the
+    /// beginning, having lost whatever it had accumulated.
+    Restart,
+    /// Drop the task's priority to this declared floor and reset its budget
+    /// window. It keeps running, but can no longer preempt anything above
+    /// the floor.
+    ///
+    /// The floor must not exceed the task's own creation priority —
+    /// [`Scheduler::create_task`] rejects that with
+    /// [`TaskCreateError::DegradeFloorAbovePriority`] rather than clamping,
+    /// because an overrun that *raised* a task's priority would turn a
+    /// missed budget into a privilege escalation.
+    Degrade(Priority),
+    /// Finish the task and enter the system's declared safe state. At Tier 0
+    /// that is a reported, fail-closed stop — the precedent
+    /// `crate::fault::Disposition::HaltSystem` already set.
+    TripToSafeState,
+}
+
 /// A task's entry point: the function the scheduler transfers control to
 /// when the task first runs.
 ///
@@ -137,6 +176,12 @@ pub type TaskEntry = extern "C" fn() -> !;
 pub struct Tcb {
     priority: Priority,
     wcet_budget: WcetBudgetTicks,
+    /// What this task declared should happen to it if it exceeds
+    /// `wcet_budget` — `STORY-P1-04-02`. Supplied at creation alongside the
+    /// budget it governs, with no default, so a task can never hold a budget
+    /// whose consequence was decided by whoever wrote the enforcement path
+    /// rather than by whoever declared the task.
+    overrun_policy: OverrunPolicy,
     entry: TaskEntry,
     /// Ticks attributed to this task since its last budget-window reset —
     /// `STORY-P0-02-04`'s enforcement bookkeeping (`crate::wcet`). Starts
@@ -168,6 +213,12 @@ impl Tcb {
         self.wcet_budget
     }
 
+    /// What this task declared should happen if it exceeds
+    /// [`Tcb::wcet_budget`] (`STORY-P1-04-02`).
+    pub const fn overrun_policy(&self) -> OverrunPolicy {
+        self.overrun_policy
+    }
+
     /// The task's current dispatch state.
     pub const fn state(&self) -> TaskState {
         self.state
@@ -196,6 +247,14 @@ impl Tcb {
 pub enum TaskCreateError {
     /// Every task slot is occupied; no side effects occurred.
     Exhausted,
+    /// The task declared [`OverrunPolicy::Degrade`] with a floor *above* its
+    /// own creation priority; no side effects occurred (`STORY-P1-04-02`).
+    ///
+    /// Rejected rather than clamped, for the same reason
+    /// [`Priority::try_new`] rejects rather than clamps: a degrade that
+    /// raised a task's priority would make exceeding a deadline a route to
+    /// running at a criticality level nobody granted. Degrade means degrade.
+    DegradeFloorAbovePriority,
 }
 
 impl From<PoolError> for TaskCreateError {
@@ -229,21 +288,38 @@ impl<const N: usize> Scheduler<N> {
         Scheduler { tasks: Pool::new() }
     }
 
-    /// Creates a task with the given `priority`, `wcet_budget`, and `entry`
-    /// point, returning a [`TaskId`] that identifies it.
+    /// Creates a task with the given `priority`, `wcet_budget`,
+    /// `overrun_policy`, and `entry` point, returning a [`TaskId`] that
+    /// identifies it.
+    ///
+    /// `overrun_policy` is a parameter rather than a defaulted field
+    /// (`STORY-P1-04-02` acceptance criterion 2): a task that held a budget
+    /// with no declared consequence would be a task whose overrun behaviour
+    /// was decided by whoever wrote the enforcement path. Every call site in
+    /// this workspace therefore states the consequence it wants, out loud, at
+    /// the point the budget is declared.
     ///
     /// Fails closed with [`TaskCreateError::Exhausted`] and no side effects
     /// if every task slot is occupied — never panics, mirroring
-    /// `Pool::alloc`'s exhaustion contract (`STORY-P0-03-03`).
+    /// `Pool::alloc`'s exhaustion contract (`STORY-P0-03-03`) — and with
+    /// [`TaskCreateError::DegradeFloorAbovePriority`], checked *before* any
+    /// slot is claimed, if the declared degrade floor outranks `priority`.
     pub fn create_task(
         &mut self,
         priority: Priority,
         wcet_budget: WcetBudgetTicks,
+        overrun_policy: OverrunPolicy,
         entry: TaskEntry,
     ) -> Result<TaskId, TaskCreateError> {
+        if let OverrunPolicy::Degrade(floor) = overrun_policy {
+            if floor > priority {
+                return Err(TaskCreateError::DegradeFloorAbovePriority);
+            }
+        }
         let tcb = Tcb {
             priority,
             wcet_budget,
+            overrun_policy,
             entry,
             ticks_consumed: 0,
             state: TaskState::Ready,
@@ -342,6 +418,19 @@ impl<const N: usize> Scheduler<N> {
             .map(|(_, tcb)| tcb.priority())
     }
 
+    /// The [`OverrunPolicy`] `task` declared at creation, or `None` if `task`
+    /// doesn't identify a currently live task (`STORY-P1-04-02`).
+    ///
+    /// This is the *only* input `crate::wcet::disposition_for` consumes, and
+    /// it is immutable for a task's whole life: there is no setter, so an
+    /// overrunning task cannot influence what happens to it by overrunning.
+    pub fn overrun_policy_of(&self, task: TaskId) -> Option<OverrunPolicy> {
+        self.tasks
+            .iter_occupied()
+            .find(|(handle, _)| *handle == task.0)
+            .map(|(_, tcb)| tcb.overrun_policy)
+    }
+
     /// `task`'s current dispatch state, or `None` if `task` doesn't
     /// identify a currently live task.
     pub fn state_of(&self, task: TaskId) -> Option<TaskState> {
@@ -408,8 +497,12 @@ mod tests {
     #[test]
     fn create_task_returns_distinguishable_task_ids() {
         let mut sched: Scheduler<4> = Scheduler::new();
-        let a = sched.create_task(low_priority(), BUDGET, dummy_entry).expect("slot available");
-        let b = sched.create_task(low_priority(), BUDGET, dummy_entry).expect("slot available");
+        let a = sched
+            .create_task(low_priority(), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .expect("slot available");
+        let b = sched
+            .create_task(low_priority(), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .expect("slot available");
         assert_ne!(a, b);
     }
 
@@ -420,23 +513,28 @@ mod tests {
     #[test]
     fn exhausted_scheduler_fails_closed_and_recovers_after_free() {
         let mut sched: Scheduler<2> = Scheduler::new();
-        let a = sched.create_task(low_priority(), BUDGET, dummy_entry).unwrap();
-        let _b = sched.create_task(low_priority(), BUDGET, dummy_entry).unwrap();
+        let a = sched
+            .create_task(low_priority(), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
+        let _b = sched
+            .create_task(low_priority(), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
 
         assert_eq!(
-            sched.create_task(low_priority(), BUDGET, dummy_entry),
+            sched.create_task(low_priority(), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry),
             Err(TaskCreateError::Exhausted)
         );
         // Repeated exhaustion fails the same way every time, not just once.
         assert_eq!(
-            sched.create_task(low_priority(), BUDGET, dummy_entry),
+            sched.create_task(low_priority(), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry),
             Err(TaskCreateError::Exhausted)
         );
 
         // Freeing the underlying pool slot proves exhaustion was transient
         // occupancy state, not a poisoned/latched scheduler.
         sched.tasks.free(a.0).expect("a was a valid, occupied handle");
-        let c = sched.create_task(low_priority(), BUDGET, dummy_entry);
+        let c =
+            sched.create_task(low_priority(), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry);
         assert!(c.is_ok(), "a freed slot should be allocatable again");
     }
 
@@ -467,7 +565,9 @@ mod tests {
         let mut sched: Scheduler<1> = Scheduler::new();
         let priority = Priority::try_new(17).unwrap();
         let budget = WcetBudgetTicks(2500);
-        let id = sched.create_task(priority, budget, dummy_entry).unwrap();
+        let id = sched
+            .create_task(priority, budget, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
         let tcb = sched.tasks.free(id.0).expect("just-created task should be present");
         assert_eq!(tcb.priority(), priority);
         assert_eq!(tcb.wcet_budget(), budget);
@@ -479,7 +579,9 @@ mod tests {
     #[test]
     fn newly_created_task_starts_ready_and_is_selectable() {
         let mut sched: Scheduler<2> = Scheduler::new();
-        let task = sched.create_task(low_priority(), BUDGET, dummy_entry).unwrap();
+        let task = sched
+            .create_task(low_priority(), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
         assert_eq!(sched.state_of(task), Some(TaskState::Ready));
         assert_eq!(sched.highest_priority_ready(), Some(task));
     }
@@ -489,10 +591,30 @@ mod tests {
     #[test]
     fn highest_priority_ready_selects_the_highest_priority_among_several() {
         let mut sched: Scheduler<4> = Scheduler::new();
-        let low = sched.create_task(Priority::try_new(5).unwrap(), BUDGET, dummy_entry).unwrap();
-        let high = sched.create_task(Priority::try_new(25).unwrap(), BUDGET, dummy_entry).unwrap();
-        let medium =
-            sched.create_task(Priority::try_new(15).unwrap(), BUDGET, dummy_entry).unwrap();
+        let low = sched
+            .create_task(
+                Priority::try_new(5).unwrap(),
+                BUDGET,
+                OverrunPolicy::TripToSafeState,
+                dummy_entry,
+            )
+            .unwrap();
+        let high = sched
+            .create_task(
+                Priority::try_new(25).unwrap(),
+                BUDGET,
+                OverrunPolicy::TripToSafeState,
+                dummy_entry,
+            )
+            .unwrap();
+        let medium = sched
+            .create_task(
+                Priority::try_new(15).unwrap(),
+                BUDGET,
+                OverrunPolicy::TripToSafeState,
+                dummy_entry,
+            )
+            .unwrap();
         let _ = (low, medium);
 
         assert_eq!(sched.highest_priority_ready(), Some(high));
@@ -503,12 +625,30 @@ mod tests {
     #[test]
     fn blocked_and_finished_tasks_are_never_selected() {
         let mut sched: Scheduler<4> = Scheduler::new();
-        let blocked_high =
-            sched.create_task(Priority::try_new(31).unwrap(), BUDGET, dummy_entry).unwrap();
-        let finished_high =
-            sched.create_task(Priority::try_new(30).unwrap(), BUDGET, dummy_entry).unwrap();
-        let ready_low =
-            sched.create_task(Priority::try_new(1).unwrap(), BUDGET, dummy_entry).unwrap();
+        let blocked_high = sched
+            .create_task(
+                Priority::try_new(31).unwrap(),
+                BUDGET,
+                OverrunPolicy::TripToSafeState,
+                dummy_entry,
+            )
+            .unwrap();
+        let finished_high = sched
+            .create_task(
+                Priority::try_new(30).unwrap(),
+                BUDGET,
+                OverrunPolicy::TripToSafeState,
+                dummy_entry,
+            )
+            .unwrap();
+        let ready_low = sched
+            .create_task(
+                Priority::try_new(1).unwrap(),
+                BUDGET,
+                OverrunPolicy::TripToSafeState,
+                dummy_entry,
+            )
+            .unwrap();
 
         sched.set_state(blocked_high, TaskState::Blocked).unwrap();
         sched.set_state(finished_high, TaskState::Finished).unwrap();
@@ -524,7 +664,9 @@ mod tests {
         assert_eq!(sched.highest_priority_ready(), None);
 
         let mut sched: Scheduler<2> = Scheduler::new();
-        let only = sched.create_task(low_priority(), BUDGET, dummy_entry).unwrap();
+        let only = sched
+            .create_task(low_priority(), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
         sched.set_state(only, TaskState::Blocked).unwrap();
         assert_eq!(sched.highest_priority_ready(), None);
     }
@@ -533,7 +675,9 @@ mod tests {
     #[test]
     fn state_of_and_set_state_against_an_unknown_task_fail_closed() {
         let mut sched: Scheduler<1> = Scheduler::new();
-        let task = sched.create_task(low_priority(), BUDGET, dummy_entry).unwrap();
+        let task = sched
+            .create_task(low_priority(), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
         sched.free_task_for_test(task);
 
         assert_eq!(sched.state_of(task), None);
@@ -545,7 +689,9 @@ mod tests {
     #[test]
     fn a_newly_created_task_has_no_address_space_by_default() {
         let mut sched: Scheduler<1> = Scheduler::new();
-        let task = sched.create_task(low_priority(), BUDGET, dummy_entry).unwrap();
+        let task = sched
+            .create_task(low_priority(), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
         let tcb = sched.tasks.free(task.0).expect("just-created task should be present");
         assert_eq!(tcb.address_space(), None);
     }
@@ -555,7 +701,9 @@ mod tests {
     #[test]
     fn set_address_space_attaches_a_cr3_value_to_a_task() {
         let mut sched: Scheduler<1> = Scheduler::new();
-        let task = sched.create_task(low_priority(), BUDGET, dummy_entry).unwrap();
+        let task = sched
+            .create_task(low_priority(), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
         assert_eq!(sched.set_address_space(task, 0x1234_5000), Some(()));
         let tcb = sched.tasks.free(task.0).expect("just-created task should be present");
         assert_eq!(tcb.address_space(), Some(0x1234_5000));
@@ -565,7 +713,9 @@ mod tests {
     #[test]
     fn set_address_space_against_an_unknown_task_fails_closed() {
         let mut sched: Scheduler<1> = Scheduler::new();
-        let task = sched.create_task(low_priority(), BUDGET, dummy_entry).unwrap();
+        let task = sched
+            .create_task(low_priority(), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
         sched.free_task_for_test(task);
         assert_eq!(sched.set_address_space(task, 0x1000), None);
     }

@@ -1,6 +1,6 @@
 # STORY-P1-04-02 — Deadline Monitor & WCET Watchdog on the Real Timer
 
-Status: **In progress — acceptance criteria finalized 2026-07-28, Test document written**
+Status: **Verified** (Tier 0 + Host, 2026-07-28, [`REPORT-2026-07-28-04`](../reports/REPORT-2026-07-28-04.md); assurance `baseline-debt`)
 Feature: [`FEAT-P1-04`](../features/FEAT-P1-04.md)
 Introduced in: [`session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md`](../../session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md)
 Started: 2026-07-28

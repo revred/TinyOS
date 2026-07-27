@@ -59,7 +59,7 @@ use kernel::context::{self, Context};
 use kernel::dispatch;
 use kernel::measure::{write_result, Calibration, Environment, Metric, Report, Samples, Stopwatch};
 use kernel::mem::Pool;
-use kernel::sched::{Priority, Scheduler, TaskState, WcetBudgetTicks};
+use kernel::sched::{OverrunPolicy, Priority, Scheduler, TaskState, WcetBudgetTicks};
 
 unsafe extern "C" {
     static __kernel_exec_start: u8;
@@ -184,7 +184,12 @@ fn phase_dispatch(
 ) -> bool {
     let mut scheduler: Scheduler<TASKS> = Scheduler::new();
     let Ok(priority) = Priority::try_new(11) else { return false };
-    let Ok(task) = scheduler.create_task(priority, WcetBudgetTicks(1_000), yield_forever) else {
+    let Ok(task) = scheduler.create_task(
+        priority,
+        WcetBudgetTicks(1_000),
+        OverrunPolicy::TripToSafeState,
+        yield_forever,
+    ) else {
         return false;
     };
     if task.index() != 0 || scheduler.set_address_space(task, task_cr3).is_none() {

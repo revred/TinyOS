@@ -187,7 +187,7 @@ impl Default for PriorityInheritingLock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sched::WcetBudgetTicks;
+    use crate::sched::{OverrunPolicy, WcetBudgetTicks};
 
     #[allow(clippy::empty_loop)]
     extern "C" fn dummy_entry() -> ! {
@@ -214,9 +214,15 @@ mod tests {
     fn contention_boosts_the_holder_above_the_medium_priority_task() {
         let mut sched: Scheduler<4> = Scheduler::new();
         let mut journal: SpoorJournal<4> = SpoorJournal::new();
-        let low = sched.create_task(priority(5), BUDGET, dummy_entry).unwrap();
-        let medium = sched.create_task(priority(15), BUDGET, dummy_entry).unwrap();
-        let high = sched.create_task(priority(25), BUDGET, dummy_entry).unwrap();
+        let low = sched
+            .create_task(priority(5), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
+        let medium = sched
+            .create_task(priority(15), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
+        let high = sched
+            .create_task(priority(25), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
 
         let mut lock = PriorityInheritingLock::new();
         assert_eq!(lock.try_lock(&mut sched, &mut journal, low, priority(5)), Ok(()));
@@ -259,8 +265,12 @@ mod tests {
     fn unlock_restores_the_holders_original_priority() {
         let mut sched: Scheduler<4> = Scheduler::new();
         let mut journal: SpoorJournal<4> = SpoorJournal::new();
-        let low = sched.create_task(priority(5), BUDGET, dummy_entry).unwrap();
-        let high = sched.create_task(priority(25), BUDGET, dummy_entry).unwrap();
+        let low = sched
+            .create_task(priority(5), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
+        let high = sched
+            .create_task(priority(25), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
 
         let mut lock = PriorityInheritingLock::new();
         lock.try_lock(&mut sched, &mut journal, low, priority(5)).unwrap();
@@ -286,7 +296,9 @@ mod tests {
     fn unlock_without_contention_leaves_priority_unchanged() {
         let mut sched: Scheduler<2> = Scheduler::new();
         let mut journal: SpoorJournal<4> = SpoorJournal::new();
-        let low = sched.create_task(priority(5), BUDGET, dummy_entry).unwrap();
+        let low = sched
+            .create_task(priority(5), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
 
         let mut lock = PriorityInheritingLock::new();
         lock.try_lock(&mut sched, &mut journal, low, priority(5)).unwrap();
@@ -304,8 +316,12 @@ mod tests {
     fn a_lower_priority_contender_does_not_change_the_holders_priority() {
         let mut sched: Scheduler<4> = Scheduler::new();
         let mut journal: SpoorJournal<4> = SpoorJournal::new();
-        let holder = sched.create_task(priority(20), BUDGET, dummy_entry).unwrap();
-        let low_contender = sched.create_task(priority(5), BUDGET, dummy_entry).unwrap();
+        let holder = sched
+            .create_task(priority(20), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
+        let low_contender = sched
+            .create_task(priority(5), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
 
         let mut lock = PriorityInheritingLock::new();
         lock.try_lock(&mut sched, &mut journal, holder, priority(20)).unwrap();
@@ -330,9 +346,15 @@ mod tests {
     fn repeated_boosts_still_restore_the_original_priority_on_unlock() {
         let mut sched: Scheduler<4> = Scheduler::new();
         let mut journal: SpoorJournal<4> = SpoorJournal::new();
-        let low = sched.create_task(priority(5), BUDGET, dummy_entry).unwrap();
-        let mid_waiter = sched.create_task(priority(15), BUDGET, dummy_entry).unwrap();
-        let high_waiter = sched.create_task(priority(25), BUDGET, dummy_entry).unwrap();
+        let low = sched
+            .create_task(priority(5), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
+        let mid_waiter = sched
+            .create_task(priority(15), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
+        let high_waiter = sched
+            .create_task(priority(25), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
 
         let mut lock = PriorityInheritingLock::new();
         lock.try_lock(&mut sched, &mut journal, low, priority(5)).unwrap();
@@ -364,8 +386,12 @@ mod tests {
     fn unlock_by_a_non_holder_is_rejected() {
         let mut sched: Scheduler<2> = Scheduler::new();
         let mut journal: SpoorJournal<4> = SpoorJournal::new();
-        let holder = sched.create_task(priority(10), BUDGET, dummy_entry).unwrap();
-        let impostor = sched.create_task(priority(10), BUDGET, dummy_entry).unwrap();
+        let holder = sched
+            .create_task(priority(10), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
+        let impostor = sched
+            .create_task(priority(10), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
 
         let mut lock = PriorityInheritingLock::new();
         lock.try_lock(&mut sched, &mut journal, holder, priority(10)).unwrap();
@@ -381,7 +407,9 @@ mod tests {
     fn reentrant_lock_attempt_by_the_holder_is_rejected() {
         let mut sched: Scheduler<2> = Scheduler::new();
         let mut journal: SpoorJournal<4> = SpoorJournal::new();
-        let holder = sched.create_task(priority(10), BUDGET, dummy_entry).unwrap();
+        let holder = sched
+            .create_task(priority(10), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
 
         let mut lock = PriorityInheritingLock::new();
         lock.try_lock(&mut sched, &mut journal, holder, priority(10)).unwrap();

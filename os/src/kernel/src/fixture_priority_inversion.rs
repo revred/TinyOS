@@ -47,7 +47,7 @@ use kernel::dispatch;
 use kernel::lock::{LockError, PriorityInheritingLock};
 use kernel::measure::write_result;
 use kernel::preempt;
-use kernel::sched::{Priority, Scheduler, TaskId, TaskState, WcetBudgetTicks};
+use kernel::sched::{OverrunPolicy, Priority, Scheduler, TaskId, TaskState, WcetBudgetTicks};
 use kernel::spoor_journal::SpoorJournal;
 
 const TASKS: usize = 3;
@@ -309,7 +309,12 @@ unsafe fn create(slot: usize, priority_value: u8, entry: extern "C" fn() -> !) -
     unsafe {
         let scheduler = &mut *(&raw mut SCHEDULER);
         let task = scheduler
-            .create_task(priority(priority_value)?, WcetBudgetTicks(1_000_000), entry)
+            .create_task(
+                priority(priority_value)?,
+                WcetBudgetTicks(1_000_000),
+                OverrunPolicy::TripToSafeState,
+                entry,
+            )
             .ok()?;
         if task.index() != slot {
             return None;

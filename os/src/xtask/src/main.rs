@@ -90,7 +90,19 @@ fn main() -> ExitCode {
 
     match command.as_str() {
         "qemu-x86_64" => {
-            let fixture = args.find_map(|a| a.strip_prefix("--fixture=").map(str::to_string));
+            // Collected once rather than consumed by successive `find_map`s:
+            // `args` is a by-value iterator, so a second search would only
+            // ever see what the first one left behind.
+            let rest: Vec<String> = args.collect();
+            let fixture =
+                rest.iter().find_map(|a| a.strip_prefix("--fixture=").map(str::to_string));
+            // `STORY-P1-04-02`: fixtures otherwise run with `-serial none`
+            // and report a single pass/fail bit through isa-debug-exit, which
+            // is all CI needs but leaves a fixture's own diagnostic lines
+            // unreadable — so no Test document could quote a capture without
+            // hand-driving QEMU. Opt-in, so CI's steps are unchanged.
+            let serial_capture =
+                rest.iter().find_map(|a| a.strip_prefix("--serial-capture=").map(PathBuf::from));
             // `address-space` (`TEST-P0-05-02-A`) boots a different binary
             // package (`exec`'s `exec-fixture`, not `kernel`) entirely —
             // see `exec/Cargo.toml`'s `[[bin]]` comment for why `exec`'s
@@ -128,12 +140,19 @@ fn main() -> ExitCode {
                 Some("priority-inversion") => {
                     ("kernel", "kernel", Some("fixture-priority-inversion"))
                 }
+                Some("wcet-restart") => ("kernel", "kernel", Some("fixture-wcet-restart")),
+                Some("wcet-degrade") => ("kernel", "kernel", Some("fixture-wcet-degrade")),
+                // `wcet-trip`'s correct outcome is exit 1: the system enters
+                // its declared safe state, which at Tier 0 is a fail-closed
+                // stop. Its CI step expects failure, as `broken-boot` and
+                // `idt-apic-unrouted` already do.
+                Some("wcet-trip") => ("kernel", "kernel", Some("fixture-wcet-trip")),
                 Some(other) => {
                     eprintln!("xtask: unknown --fixture value '{other}'");
                     return ExitCode::from(XtaskExit::HarnessError as u8);
                 }
             };
-            match qemu_x86_64(package, binary, feature, None, Profile::Dev) {
+            match qemu_x86_64(package, binary, feature, serial_capture.as_deref(), Profile::Dev) {
                 Ok(code) => ExitCode::from(code as u8),
                 Err(message) => {
                     eprintln!("xtask: {message}");

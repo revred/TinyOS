@@ -38,7 +38,7 @@ use hal_x86_64::serial::SerialPort;
 use kernel::context::{self, Context};
 use kernel::fault::{Disposition, FaultReport, FaultingContext};
 use kernel::measure::write_result;
-use kernel::sched::{Priority, Scheduler, TaskState, WcetBudgetTicks};
+use kernel::sched::{OverrunPolicy, Priority, Scheduler, TaskState, WcetBudgetTicks};
 use kernel::spoor_journal::SpoorJournal;
 
 /// Scheduler capacity: three victims plus one survivor.
@@ -275,7 +275,12 @@ unsafe fn run_victim(
         let Ok(priority) = Priority::try_new(8) else {
             return false;
         };
-        let Ok(task) = scheduler.create_task(priority, WcetBudgetTicks(1_000), entry) else {
+        let Ok(task) = scheduler.create_task(
+            priority,
+            WcetBudgetTicks(1_000),
+            OverrunPolicy::TripToSafeState,
+            entry,
+        ) else {
             return false;
         };
         if task.index() != slot {
@@ -332,7 +337,12 @@ pub fn run() -> bool {
         let Ok(priority) = Priority::try_new(9) else {
             return false;
         };
-        let Ok(task) = scheduler.create_task(priority, WcetBudgetTicks(1_000), survivor) else {
+        let Ok(task) = scheduler.create_task(
+            priority,
+            WcetBudgetTicks(1_000),
+            OverrunPolicy::TripToSafeState,
+            survivor,
+        ) else {
             return false;
         };
         let stack =

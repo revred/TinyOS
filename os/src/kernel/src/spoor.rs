@@ -148,8 +148,16 @@ pub enum Action {
     /// A CPU exception was captured (`kernel::fault`).
     Fault,
     /// A faulting task was terminated, or the system halted because the
-    /// fault could not be contained to one (`kernel::fault`).
+    /// fault could not be contained to one (`kernel::fault`). Also the verb
+    /// for a WCET overrun whose declared policy was `TripToSafeState`, where
+    /// the outcome really is termination (`STORY-P1-04-02`).
     Terminate,
+    /// A task that overran its WCET budget was rewound to its entry point
+    /// under the `Restart` policy it declared (`kernel::wcet`).
+    Restart,
+    /// A task that overran its WCET budget had its priority lowered to its
+    /// declared floor under the `Degrade` policy (`kernel::wcet`).
+    Degrade,
 }
 
 impl Action {
@@ -164,6 +172,8 @@ impl Action {
             Action::ResetBudget => 6,
             Action::Fault => 7,
             Action::Terminate => 8,
+            Action::Restart => 9,
+            Action::Degrade => 10,
         }
     }
 
@@ -178,6 +188,8 @@ impl Action {
             6 => Ok(Action::ResetBudget),
             7 => Ok(Action::Fault),
             8 => Ok(Action::Terminate),
+            9 => Ok(Action::Restart),
+            10 => Ok(Action::Degrade),
             _ => Err(SpoorError::UnknownAction),
         }
     }
@@ -461,9 +473,12 @@ mod tests {
 
     #[test]
     fn decode_rejects_an_unknown_action_nibble() {
-        // Action 0..=8 are valid (7 = `Fault`, 8 = `Terminate`, added by
-        // `STORY-P1-02-01`); 9 is not yet assigned.
-        let bits = 9u64 << ACT_SHIFT;
+        // Action 0..=10 are valid (7 = `Fault`, 8 = `Terminate`, added by
+        // `STORY-P1-02-01`; 9 = `Restart`, 10 = `Degrade`, added by
+        // `STORY-P1-04-02`); 11 is not yet assigned. The nibble's remaining
+        // range is 11..=15, so the vocabulary has five verbs of headroom
+        // before the `ACT` field itself has to widen.
+        let bits = 11u64 << ACT_SHIFT;
         assert_eq!(Spoor::decode(bits), Err(SpoorError::UnknownAction));
     }
 

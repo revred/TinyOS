@@ -42,7 +42,7 @@ use hal_x86_64::qemu_exit::{exit_qemu, QemuExitCode};
 use hal_x86_64::serial::SerialPort;
 use kernel::fault::{audit_double_fault, FaultingContext};
 use kernel::measure::write_result;
-use kernel::sched::{Priority, Scheduler, WcetBudgetTicks};
+use kernel::sched::{OverrunPolicy, Priority, Scheduler, WcetBudgetTicks};
 use kernel::spoor_journal::SpoorJournal;
 
 /// One task: the stack destroyer. Nothing survives a double fault, so there is
@@ -261,9 +261,12 @@ pub fn run() -> bool {
         let Ok(priority) = Priority::try_new(8) else {
             return false;
         };
-        let Ok(task) =
-            scheduler.create_task(priority, WcetBudgetTicks(1_000), victim_stack_destroyer)
-        else {
+        let Ok(task) = scheduler.create_task(
+            priority,
+            WcetBudgetTicks(1_000),
+            OverrunPolicy::TripToSafeState,
+            victim_stack_destroyer,
+        ) else {
             return false;
         };
         if task.index() != 0 {

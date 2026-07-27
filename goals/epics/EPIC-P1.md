@@ -1,6 +1,6 @@
 # EPIC-P1 — Determinism Proof
 
-Status: **In progress — `FEAT-P1-01`/`FEAT-P1-02`/`FEAT-P1-03` complete (all exit criteria met; assurance `baseline-debt`, Tier 0 evidence only), `FEAT-P1-04` half done (`STORY-P1-04-01` Verified 2026-07-28), `FEAT-P1-05`/`FEAT-P1-06` still specified**
+Status: **In progress — `FEAT-P1-01`/`FEAT-P1-02`/`FEAT-P1-03`/`FEAT-P1-04` complete (all exit criteria met; assurance `baseline-debt`, Tier 0 evidence only), `FEAT-P1-05`/`FEAT-P1-06` still specified**
 Roadmap phase: [Phase 1 — Determinism proof](../../README.md#roadmap)
 Introduced in: [`session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md`](../../session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md)
 Depends on: [`EPIC-P0`](EPIC-P0.md) (functionally complete — all 25 Stories Verified; its assurance debt is exactly what this Epic starts paying down)
@@ -38,7 +38,7 @@ New test types this phase introduces (per `SeedMVP.md` §7): **timing regression
 | [`FEAT-P1-01`](../features/FEAT-P1-01.md) | Timing measurement harness & CI timing-regression gate | Complete (all 3 Stories Verified 2026-07-27) |
 | [`FEAT-P1-02`](../features/FEAT-P1-02.md) | Real CPU exception handling & fault containment | Functionally complete (both Stories Verified 2026-07-27; `LE-17` fault-latency baseline closed the same day) |
 | [`FEAT-P1-03`](../features/FEAT-P1-03.md) | Active per-task address spaces, W^X & teardown | Complete — `STORY-P1-03-01` (CR3 switching mechanism) Verified 2026-07-27; `STORY-P1-03-02` (W^X, sealing, teardown, first real scheduled task) and `STORY-P1-03-03` (IAT resolution, the `os` system image, the D04 switch cost) Verified 2026-07-28. Every exit criterion met |
-| [`FEAT-P1-04`](../features/FEAT-P1-04.md) | Timer-driven preemption, deadline monitor & WCET watchdog | In Progress — `STORY-P1-04-01` (timer-driven preemption, extended state, inversion avoidance under real preemption) Verified 2026-07-28, closing `LE-01` and `LE-14`; `STORY-P1-04-02` (WCET watchdog on the real timer, `LE-02`) not started, so the Feature does not exit |
+| [`FEAT-P1-04`](../features/FEAT-P1-04.md) | Timer-driven preemption, deadline monitor & WCET watchdog | Complete — `STORY-P1-04-01` (preemption, extended state, inversion avoidance) Verified 2026-07-28, closing `LE-01`/`LE-14`; `STORY-P1-04-02` (WCET enforcement on the real timer) Verified 2026-07-28, closing `LE-02`. Exits with two things named rather than blurred: the Feature title's *deadline monitor* is not delivered (a deadline is a different quantity from an execution budget), and neither preemption nor enforcement runs on the shipping `os` image (`LE-20`) |
 | [`FEAT-P1-05`](../features/FEAT-P1-05.md) | Hostile-load & exhaustion-containment proof | Specified |
 | [`FEAT-P1-06`](../features/FEAT-P1-06.md) | Deterministic actuation proof (G-PA-1 flagship path) | Specified |
 

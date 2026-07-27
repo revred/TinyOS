@@ -23,7 +23,7 @@ use hal_x86_64::boot as _;
 use hal_x86_64::paging::{PageTable, PAGE_SIZE};
 use hal_x86_64::qemu_exit::{exit_qemu, QemuExitCode};
 use kernel::mem::Pool;
-use kernel::sched::{Priority, Scheduler, TaskId, WcetBudgetTicks};
+use kernel::sched::{OverrunPolicy, Priority, Scheduler, TaskId, WcetBudgetTicks};
 
 const FRAMES: usize = 8;
 const RW: Permissions = Permissions { read: true, write: true, execute: false };
@@ -61,8 +61,12 @@ fn dummy_tasks() -> (TaskId, TaskId) {
     }
     let mut sched: Scheduler<4> = Scheduler::new();
     let priority = Priority::try_new(1).expect("1 is in range");
-    let owner = sched.create_task(priority, WcetBudgetTicks(1000), dummy_entry).unwrap();
-    let sharee = sched.create_task(priority, WcetBudgetTicks(1000), dummy_entry).unwrap();
+    let owner = sched
+        .create_task(priority, WcetBudgetTicks(1000), OverrunPolicy::TripToSafeState, dummy_entry)
+        .unwrap();
+    let sharee = sched
+        .create_task(priority, WcetBudgetTicks(1000), OverrunPolicy::TripToSafeState, dummy_entry)
+        .unwrap();
     (owner, sharee)
 }
 
