@@ -9,6 +9,9 @@ description = "PE64 executable loading and process compatibility (FEAT-P0-05). P
 [dependencies]
 kernel = { path = "../kernel" }
 hal-x86_64 = { path = "../hal-x86_64" }
+# `first-task-fixture` reproduces the real boot path's PCI enumeration,
+# which builds a `hal::device::DeviceTable` (`STORY-P1-03-02`).
+hal = { path = "../hal" }
 
 [[bin]]
 # `TEST-P0-05-02-A`'s Tier 0 QEMU fixture. A separate `no_std`/`no_main`
@@ -52,5 +55,40 @@ bench = false
 # precedent above.
 name = "shared-memory-fixture"
 path = "src/fixture_shared_memory_main.rs"
+test = false
+bench = false
+
+[[bin]]
+# `STORY-P1-03-01`'s Tier 0 QEMU fixture: two tasks, each with its own real
+# `AddressSpace`/`CR3`, switched between via `kernel::context::switch_address_space`.
+name = "address-space-switch-fixture"
+path = "src/fixture_address_space_switch_main.rs"
+test = false
+bench = false
+
+[[bin]]
+# `TEST-P1-03-02-A` clauses A1-A4: W^X in both directions with the
+# enforcement bits on, shared kernel page directories, loader-alias
+# sealing, and generation-safe teardown proven by a stale-mapping probe.
+name = "wx-seal-fixture"
+path = "src/fixture_wx_seal_main.rs"
+test = false
+bench = false
+
+[[bin]]
+# `TEST-P1-03-02-A` clauses I1-I5: the first real task — the reproduced
+# real boot path scheduling `blue-sharc.exe` in its own W^X address space
+# through the CR3-aware dispatcher, contained and audited.
+name = "first-task-fixture"
+path = "src/fixture_first_task_main.rs"
+test = false
+bench = false
+
+[[bin]]
+# `STORY-P1-03-03`: the D04 same-space vs cross-space dispatch measurement
+# `FEAT-P1-03`'s exit criteria have asked for since `STORY-P1-03-01`.
+# Reports through the same TINYOS-MEAS/1 envelope `xtask measure` parses.
+name = "dispatch-measure-fixture"
+path = "src/fixture_dispatch_measure_main.rs"
 test = false
 bench = false

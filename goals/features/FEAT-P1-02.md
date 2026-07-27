@@ -1,6 +1,6 @@
 # FEAT-P1-02 — Real CPU Exception Handling & Fault Containment
 
-Status: **In Progress — both Stories functionally Verified (Tier 0 + Host) 2026-07-27; the Feature cannot exit until `LE-17` (fault-latency baseline) lands**
+Status: **Functionally complete — both Stories functionally Verified (Tier 0 + Host) 2026-07-27, and the fault-latency baseline (`LE-17`) landed the same day; assurance state remains `baseline-debt`, not `verified`, until hardware-tier evidence (`LE-09`) exists**
 Epic: [`EPIC-P1`](../epics/EPIC-P1.md)
 Introduced in: [`session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md`](../../session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md)
 
@@ -33,8 +33,8 @@ A fault is a hostile input: fault frames, error codes, and faulting addresses co
 
 ## Exit criteria
 
-Both Stories **Verified** at Tier 0: deliberate `#PF`/`#GP`/`#UD` fixtures prove capture-terminate-continue (**done** — `STORY-P1-02-01`); a deliberate kernel-stack-destroying fixture proves the IST path survives (**done** — `STORY-P1-02-02`, with the no-IST triple fault recorded as the contrast); fault latency has a `FEAT-P1-01` baseline (**not done** — `LE-17`).
+Both Stories **Verified** at Tier 0: deliberate `#PF`/`#GP`/`#UD` fixtures prove capture-terminate-continue (**done** — `STORY-P1-02-01`); a deliberate kernel-stack-destroying fixture proves the IST path survives (**done** — `STORY-P1-02-02`, with the no-IST triple fault recorded as the contrast); fault latency has a `FEAT-P1-01` baseline (**done** — `LE-17`, [`REPORT-2026-07-27-07`](../reports/REPORT-2026-07-27-07.md): a sixth `fixture_measure` phase times a real `#UD` through the fixture's own fault entry, and a committed Tier 0 baseline exists at `D02/fault_ud2_capture_terminate_kernel_context`).
 
-Both Stories are now functionally Verified and this Feature still does not exit. That is the exit criteria working: `LE-17` is a single, small, named piece of measurement debt using machinery that already exists, and letting a Feature close over it would make the criterion decorative.
+All three exit-criteria clauses are now met. This Feature is functionally complete; it still carries assurance state `baseline-debt` rather than `verified` (Tier 0 only, no hardware-tier evidence — `LE-09`), the same distinction every other Story in this Epic already draws between "the mechanism was demonstrated" and "the guardrail closed."
 
 Note one correction this Feature's first Story forced on its own exit criteria: there is no "capture-resume path" to prove, because no resume case exists to enumerate. `STORY-P1-02-01`'s policy has two arms — terminate the faulting task, or halt when the kernel itself faulted — and the resume arm was deliberately not built rather than built unreachable. See that Story's second acceptance criterion.

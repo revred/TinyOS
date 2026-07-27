@@ -33,15 +33,28 @@
 //! reported, instead of triple-faulting silently. `#MC` (vector 18) keeps
 //! the shared fail-closed default and no IST — see [`crate::tss`]'s own doc
 //! comment for why a second IST slot is deliberately left unwired.
-//! Local-APIC timer-tick delivery is armed by [`init`] but nothing
-//! outside this module consumes a tick yet (no scheduler dispatch loop
-//! reads [`tick_count`]) — the same "primitive exists, no production
-//! consumer wired to it yet" honesty this codebase has applied to every
-//! prior Story's own HAL primitive.
+//!
+//! **`STORY-P1-04-01` gave the tick a consumer.** From `STORY-P0-04-02`
+//! until now, [`init`] armed local-APIC timer delivery and nothing acted on
+//! a tick — [`timer_interrupt_handler`] counted it and signalled
+//! end-of-interrupt, which was honest ("the primitive exists, no production
+//! consumer is wired to it") but left the scheduler cooperative-only. A
+//! binary may now register a [`TickHook`] via [`set_tick_hook`], which the
+//! handler invokes after the EOI; `kernel::preempt::on_timer_tick` is what
+//! this kernel installs there, and an interrupt-driven context switch out of
+//! that hook is what makes dispatch preemptive. **A binary that registers
+//! nothing behaves exactly as it did before that Story** — which is why
+//! every pre-existing fixture is unaffected.
+//!
+//! [`without_interrupts`] is the other half of that Story: the critical
+//! section task code needs before it may touch the scheduler the tick hook
+//! reads. The pure "should this section re-enable on exit?" rule lives in
+//! [`crate::rflags`], ungated and host-tested, for the same reason
+//! [`crate::idt`] is split out of this module.
 
 use crate::idt::Idt;
 use crate::qemu_exit::{exit_qemu, QemuExitCode};
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 /// The code-segment selector `boot.rs`'s own GDT installs (its second
 /// entry, index 1, RPL 0) — every IDT gate this module builds runs the CPU
@@ -101,6 +114,33 @@ const TIMER_MODE_PERIODIC: u32 = 1 << 17;
 /// count value.
 const TIMER_DIVIDE_BY_16: u32 = 0x3;
 
+// The two resumable ISR stubs. Both save every general-purpose register,
+// then carve a 16-byte-aligned [`crate::extended_state::EXTENDED_STATE_BYTES`]
+// scratch area out of the interrupted stack and `FXSAVE` into it before
+// calling any Rust code at all (`STORY-P1-04-01`, closing `LE-14`).
+//
+// **Why the extended-state save lives here and not on the preemption path.**
+// An interrupt handler is ordinary compiled code running on the interrupted
+// task's stack: it may touch SSE registers whether or not it goes on to
+// preempt anything. The first implementation of this Story saved and
+// restored around the *context switch* instead, and the Tier 0 fixture
+// caught it immediately — the victim task read back neither its own value
+// nor the preempting task's, because a non-preempting tick had already
+// clobbered `XMM0`. Saving in the stub is correct by construction rather
+// than by an argument about what the handler compiles to: nothing Rust can
+// emit runs before the `fxsave` or after the `fxrstor`.
+//
+// It composes with a context switch taken *inside* the handler for free.
+// The scratch area is on the task's own stack, and `context_switch_asm`
+// records a stack pointer below it, so the area travels with the suspended
+// task and is restored when — however much later — that task is resumed and
+// unwinds back out through this stub to its `iretq`.
+//
+// `rbx` holds the pre-alignment stack pointer across the call. That is safe
+// because `rbx` is itself one of the fifteen registers pushed above, so the
+// eventual `pop rbx` restores the interrupted task's value, and because
+// `context_switch_asm` preserves `rbx` across a switch (it is one of the
+// callee-saved registers that routine pushes).
 core::arch::global_asm!(
     r#"
     .section .text
@@ -123,7 +163,15 @@ timer_isr_stub:
         push r14
         push r15
 
+        mov rbx, rsp
+        sub rsp, {extended_state_bytes}
+        and rsp, -16
+        fxsave [rsp]
+
         call timer_interrupt_handler
+
+        fxrstor [rsp]
+        mov rsp, rbx
 
         pop r15
         pop r14
@@ -160,7 +208,15 @@ spurious_isr_stub:
         push r14
         push r15
 
+        mov rbx, rsp
+        sub rsp, {extended_state_bytes}
+        and rsp, -16
+        fxsave [rsp]
+
         call spurious_interrupt_handler
+
+        fxrstor [rsp]
+        mov rsp, rbx
 
         pop r15
         pop r14
@@ -178,7 +234,11 @@ spurious_isr_stub:
         pop rcx
         pop rax
         iretq
-    "#
+    "#,
+    // Not a second `512` literal: the reservation and
+    // `ExtendedState`'s own size are the same constant by construction, so
+    // they cannot drift apart.
+    extended_state_bytes = const crate::extended_state::EXTENDED_STATE_BYTES,
 );
 
 unsafe extern "C" {
@@ -196,8 +256,58 @@ pub fn tick_count() -> u32 {
     TICK_COUNT.load(Ordering::SeqCst)
 }
 
-/// Services one local-APIC timer interrupt: records the tick, then signals
-/// end-of-interrupt so the local APIC delivers the next one.
+/// What [`set_tick_hook`] installs: the kernel-side consumer of a timer tick
+/// (`STORY-P1-04-01`).
+///
+/// `extern "C" fn()` and nothing more, deliberately. `hal-x86_64` must not
+/// depend on `kernel` — `kernel` depends on *it* — so the scheduler cannot
+/// be a parameter here; the hook is a bare function the binary defines over
+/// its own statics, exactly as `tinyos_fault_entry` already is for the fault
+/// path. This is the same Dependency Inversion seam, expressed as a
+/// registered pointer rather than a linker symbol because, unlike a fault
+/// handler, *most* binaries in this workspace legitimately have no tick
+/// consumer at all.
+pub type TickHook = extern "C" fn();
+
+/// The installed [`TickHook`], or `0` for none — an `AtomicUsize` rather
+/// than a `static mut` because it is written from ordinary code and read
+/// from interrupt context.
+static TICK_HOOK: AtomicUsize = AtomicUsize::new(0);
+
+/// Installs `hook` as the consumer of every subsequent timer tick.
+///
+/// **A build that never calls this ticks exactly as it did before
+/// `STORY-P1-04-01`**: the handler still counts and still signals
+/// end-of-interrupt, and calls nothing. Preemption is opt-in per binary,
+/// which is what keeps every pre-existing fixture's behaviour bit-for-bit
+/// unchanged.
+///
+/// # Safety
+/// `hook` runs in interrupt context, on the interrupted task's own stack,
+/// with `IF` clear. It must be bounded and allocation-free
+/// (`agent/CODING_STANDARDS.md`'s RT rules), must not re-enter this module,
+/// and — if it performs a context switch, which is the entire point — must
+/// leave the interrupt frame `timer_isr_stub` is standing on intact, so the
+/// eventual `iretq` still resumes the task this tick interrupted.
+pub unsafe fn set_tick_hook(hook: TickHook) {
+    TICK_HOOK.store(hook as usize, Ordering::SeqCst);
+}
+
+/// Removes any installed [`TickHook`], returning the handler to its
+/// count-and-EOI behaviour.
+pub fn clear_tick_hook() {
+    TICK_HOOK.store(0, Ordering::SeqCst);
+}
+
+/// Services one local-APIC timer interrupt: records the tick, signals
+/// end-of-interrupt, then invokes the installed [`TickHook`], if any.
+///
+/// **The end-of-interrupt precedes the hook, and that ordering is
+/// load-bearing.** The hook may not return for a long time — a preempting
+/// hook returns only when the interrupted task is next resumed — and until
+/// the local APIC is told this interrupt is complete it will deliver no
+/// further ticks. Signalling afterwards would mean the *first* preemption
+/// silently stopped the clock, so nothing could ever be preempted again.
 ///
 /// # Safety
 /// Reached only via `timer_isr_stub`, itself only ever installed as
@@ -210,6 +320,85 @@ extern "C" fn timer_interrupt_handler() {
     TICK_COUNT.fetch_add(1, Ordering::SeqCst);
     // SAFETY: see this function's own doc comment.
     unsafe { lapic_write(LAPIC_EOI, 0) };
+    let hook = TICK_HOOK.load(Ordering::SeqCst);
+    if hook != 0 {
+        // SAFETY: `TICK_HOOK` only ever holds `0` or a value `set_tick_hook`
+        // stored, which is a `TickHook` function pointer by that function's
+        // own signature; its caller's `unsafe` contract covers what running
+        // it in interrupt context requires.
+        let hook: TickHook = unsafe { core::mem::transmute::<usize, TickHook>(hook) };
+        hook();
+    }
+}
+
+/// Clears `IF` (`cli`), returning the `RFLAGS` value that was live before —
+/// the value [`restore_interrupts`] needs to put things back.
+///
+/// # Safety
+/// Interrupts stay masked until a matching [`restore_interrupts`]. A caller
+/// that never restores stops the timer, the scheduler and every other
+/// interrupt-driven thing in this kernel.
+pub unsafe fn disable_interrupts() -> u64 {
+    let saved: u64;
+    // SAFETY: `pushfq`/`pop` touch only this function's own stack frame, and
+    // `cli` has no effect beyond masking interrupts.
+    unsafe {
+        core::arch::asm!(
+            "pushfq",
+            "pop {saved}",
+            "cli",
+            saved = out(reg) saved,
+            options(nomem),
+        );
+    }
+    saved
+}
+
+/// Re-enables interrupts **only if** `saved_rflags` says they were enabled
+/// when [`disable_interrupts`] captured it — [`crate::rflags::should_reenable`]'s
+/// rule, applied.
+///
+/// # Safety
+/// `saved_rflags` must be the value the matching [`disable_interrupts`]
+/// returned. Passing a fabricated value can enable interrupts inside an
+/// outer critical section that deliberately disabled them.
+pub unsafe fn restore_interrupts(saved_rflags: u64) {
+    if crate::rflags::should_reenable(saved_rflags) {
+        // SAFETY: `sti` has no effect beyond unmasking interrupts, and this
+        // arm runs only when they were unmasked on entry.
+        unsafe {
+            core::arch::asm!("sti", options(nomem, nostack, preserves_flags));
+        }
+    }
+}
+
+/// Runs `f` with maskable interrupts disabled, restoring the previous `IF`
+/// state afterwards (`STORY-P1-04-01` acceptance criterion 5).
+///
+/// This is what makes it sound for *task* code to touch the scheduler. The
+/// dispatcher gets that property for free — it runs with `IF` already clear,
+/// because a task's saved `RFLAGS` is what re-enables interrupts across the
+/// switch into it — but a task runs with interrupts on by construction, so a
+/// task that takes a lock or changes its own state would otherwise be racing
+/// the very tick hook that reads the scheduler.
+///
+/// Nests correctly: an inner section observes `IF` already clear and leaves
+/// it clear, rather than silently re-enabling interrupts its caller
+/// disabled. That rule is [`crate::rflags::should_reenable`], which is
+/// host-tested on both arms.
+///
+/// # Safety
+/// `f` must be bounded — this masks every interrupt in the system for its
+/// duration, including the timer the scheduler runs on.
+pub unsafe fn without_interrupts<R>(f: impl FnOnce() -> R) -> R {
+    // SAFETY: paired with the `restore_interrupts` below on every path — `f`
+    // cannot unwind, since this kernel is built `panic = "abort"`.
+    let saved = unsafe { disable_interrupts() };
+    let result = f();
+    // SAFETY: `saved` is exactly what the matching `disable_interrupts`
+    // returned, per `restore_interrupts`' own contract.
+    unsafe { restore_interrupts(saved) };
+    result
 }
 
 /// Services the local APIC's own spurious-interrupt vector.

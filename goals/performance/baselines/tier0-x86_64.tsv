@@ -4,3 +4,4 @@ D07	pool_u64x4_alloc_denied_exhausted	T0	x86_64	release	rdtsc	5	14	16	2026-07-27
 D04	context_switch_yield_roundtrip_2switches	T0	x86_64	release	rdtsc	5	216	226	2026-07-27
 D05	dispatch_select_highest_priority_ready	T0	x86_64	release	rdtsc	5	74	76	2026-07-27
 D05	dispatch_run_once_cooperative_round	T0	x86_64	release	rdtsc	5	420	446	2026-07-27
+D02	fault_ud2_capture_terminate_kernel_context	T0	x86_64	release	rdtsc	5	1120	1406	2026-07-27

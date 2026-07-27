@@ -46,6 +46,17 @@ pub const MAX_PCI_DEVICES: usize = 64;
 /// page-table frame allocator, as used by `exec`'s own Tier 0 fixtures.
 pub const EXEC_FRAME_POOL_CAPACITY: usize = 16;
 
+/// Capacity bound for the kernel binary's own fault-audit
+/// [`crate::spoor_journal::SpoorJournal`] (`STORY-P1-03-02` acceptance
+/// criterion I5) — the constant four `FEAT-P0-06` Reports deferred until a
+/// real production consumer existed: `main.rs`'s `tinyos_fault_entry` now
+/// journals the audit pair it computes, and the integration fixture's
+/// supervisor journals refusal/dispatch/containment through the same
+/// capacity. Sized to hold every spoor a single Tier 0 run can plausibly
+/// emit (a handful per fault/dispatch event) with wide headroom, while
+/// costing 512 bytes of static storage.
+pub const SPOOR_JOURNAL_CAPACITY: usize = 64;
+
 /// Static bytes the Interrupt Stack Table's known-good stacks commit
 /// (`STORY-P1-02-02`) — [`hal_x86_64::tss::IST_STACK_COUNT`] stacks of
 /// [`hal_x86_64::tss::IST_STACK_BYTES`] each.
@@ -82,6 +93,7 @@ pub const fn committed_bytes() -> usize {
     MAX_CPUS * core::mem::size_of::<CpuDescriptor>()
         + MAX_PCI_DEVICES * core::mem::size_of::<DeviceDescriptor>()
         + EXEC_FRAME_POOL_CAPACITY * core::mem::size_of::<PageTable>()
+        + SPOOR_JOURNAL_CAPACITY * core::mem::size_of::<u64>()
         + IST_STACK_BYTES
 }
 

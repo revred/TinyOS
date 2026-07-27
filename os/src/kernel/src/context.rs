@@ -176,6 +176,40 @@ pub unsafe fn switch(prev: *mut Context, next: *mut Context) {
     }
 }
 
+/// [`switch`], but first installs `next_cr3` as the CPU's live address space
+/// if it differs from the one already loaded (`STORY-P1-03-01`).
+///
+/// The `CR3` compare-and-reload happens **before** `switch`'s register swap,
+/// not after: `next_cr3` must already map everything the incoming task's
+/// saved registers/stack need, so the address space has to be live before
+/// its own suspended execution resumes into it, precisely mirroring how a
+/// real page fault would be attributed to the *incoming* task's mappings,
+/// never the outgoing one's.
+///
+/// Same-space switches (`next_cr3` equal to the value already in `CR3`) skip
+/// the reload entirely — [`hal_x86_64::paging::cr3_reload_needed`]'s own
+/// pure comparison, exercised host-side, is what this function's decision
+/// reduces to; this wrapper is the one place that turns that decision into a
+/// real, TLB-flushing hardware write.
+///
+/// # Safety
+/// Same contract as [`switch`], plus [`hal_x86_64::paging::write_cr3`]'s: if
+/// a reload is needed, `next_cr3` must be the physical, page-aligned address
+/// of a fully populated PML4 mapping the currently executing code/stack and
+/// (if interrupts are enabled) the IDT/GDT/TSS and their handlers, or the
+/// reload itself is an immediate, unrecoverable fault with nothing mapped to
+/// run a handler from.
+#[cfg(not(target_os = "windows"))]
+pub unsafe fn switch_address_space(prev: *mut Context, next: *mut Context, next_cr3: u64) {
+    let current_cr3 = hal_x86_64::paging::read_cr3();
+    if hal_x86_64::paging::cr3_reload_needed(current_cr3, next_cr3) {
+        // SAFETY: per this function's own contract.
+        unsafe { hal_x86_64::paging::write_cr3(next_cr3) };
+    }
+    // SAFETY: per this function's own contract (mirrors `switch`'s).
+    unsafe { switch(prev, next) };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

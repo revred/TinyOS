@@ -146,6 +146,15 @@ pub struct Tcb {
     /// (`crate::dispatch`). Starts at [`TaskState::Ready`] for every newly
     /// created task.
     state: TaskState,
+    /// This task's private address space, as a `CR3` value (the physical
+    /// address of its PML4) — `STORY-P1-03-01`'s bookkeeping. `None` for
+    /// every newly created task, meaning "no dedicated space; a switch into
+    /// this task must not touch `CR3`" — the default that keeps every
+    /// existing Story's tasks running exactly as they do today, since
+    /// nothing yet installs a per-task page-table tree on the real dispatch
+    /// path (that step, and the W^X-correct kernel mappings it needs to be
+    /// safe there, are `FEAT-P1-03`'s remaining work).
+    address_space: Option<u64>,
 }
 
 impl Tcb {
@@ -172,6 +181,12 @@ impl Tcb {
     /// Ticks attributed to this task in its current budget window.
     pub const fn ticks_consumed(&self) -> u32 {
         self.ticks_consumed
+    }
+
+    /// This task's `CR3` value, or `None` if it has no dedicated address
+    /// space (`STORY-P1-03-01`).
+    pub const fn address_space(&self) -> Option<u64> {
+        self.address_space
     }
 }
 
@@ -226,9 +241,26 @@ impl<const N: usize> Scheduler<N> {
         wcet_budget: WcetBudgetTicks,
         entry: TaskEntry,
     ) -> Result<TaskId, TaskCreateError> {
-        let tcb = Tcb { priority, wcet_budget, entry, ticks_consumed: 0, state: TaskState::Ready };
+        let tcb = Tcb {
+            priority,
+            wcet_budget,
+            entry,
+            ticks_consumed: 0,
+            state: TaskState::Ready,
+            address_space: None,
+        };
         let handle = self.tasks.alloc(tcb)?;
         Ok(TaskId(handle))
+    }
+
+    /// Attaches `cr3` (a physical PML4 address, e.g. `exec::AddressSpace`'s
+    /// own `cr3()` accessor) to `task` as its dedicated address space
+    /// (`STORY-P1-03-01`). Returns `None` (no side effect) if `task` doesn't
+    /// identify a currently live task.
+    pub fn set_address_space(&mut self, task: TaskId, cr3: u64) -> Option<()> {
+        let tcb = self.tasks.get_mut(task.0)?;
+        tcb.address_space = Some(cr3);
+        Some(())
     }
 
     /// The current (possibly priority-inheritance-boosted, `STORY-P0-02-03`)
@@ -282,6 +314,32 @@ impl<const N: usize> Scheduler<N> {
     #[cfg(test)]
     pub(crate) fn free_task_for_test(&mut self, task: TaskId) {
         let _ = self.tasks.free(task.0);
+    }
+
+    /// `task`'s dedicated address space (`Tcb::address_space`), or the
+    /// outer `None` if `task` doesn't identify a currently live task —
+    /// the read `kernel::dispatch`'s `CR3`-aware selection consumes
+    /// (`STORY-P1-03-02`), shaped like [`Scheduler::state_of`].
+    pub fn address_space_of(&self, task: TaskId) -> Option<Option<u64>> {
+        self.tasks
+            .iter_occupied()
+            .find(|(handle, _)| *handle == task.0)
+            .map(|(_, tcb)| tcb.address_space)
+    }
+
+    /// `task`'s current (possibly boosted) priority, or `None` if `task`
+    /// doesn't identify a currently live task — the shared-reference twin of
+    /// [`Scheduler::priority_of`], shaped like [`Scheduler::state_of`].
+    ///
+    /// `STORY-P1-04-01` needs this: the timer ISR's preemption decision reads
+    /// the running task's priority from an interrupt context that must not
+    /// take a `&mut` to the scheduler at all, since the dispatcher it
+    /// interrupted may hold one.
+    pub fn live_priority_of(&self, task: TaskId) -> Option<Priority> {
+        self.tasks
+            .iter_occupied()
+            .find(|(handle, _)| *handle == task.0)
+            .map(|(_, tcb)| tcb.priority())
     }
 
     /// `task`'s current dispatch state, or `None` if `task` doesn't
@@ -480,5 +538,35 @@ mod tests {
 
         assert_eq!(sched.state_of(task), None);
         assert_eq!(sched.set_state(task, TaskState::Ready), None);
+    }
+
+    // STORY-P1-03-01: a newly created task has no dedicated address space —
+    // the default that keeps every pre-existing Story's tasks unaffected.
+    #[test]
+    fn a_newly_created_task_has_no_address_space_by_default() {
+        let mut sched: Scheduler<1> = Scheduler::new();
+        let task = sched.create_task(low_priority(), BUDGET, dummy_entry).unwrap();
+        let tcb = sched.tasks.free(task.0).expect("just-created task should be present");
+        assert_eq!(tcb.address_space(), None);
+    }
+
+    // STORY-P1-03-01: `set_address_space` attaches a CR3 value that
+    // `Tcb::address_space` then reports back.
+    #[test]
+    fn set_address_space_attaches_a_cr3_value_to_a_task() {
+        let mut sched: Scheduler<1> = Scheduler::new();
+        let task = sched.create_task(low_priority(), BUDGET, dummy_entry).unwrap();
+        assert_eq!(sched.set_address_space(task, 0x1234_5000), Some(()));
+        let tcb = sched.tasks.free(task.0).expect("just-created task should be present");
+        assert_eq!(tcb.address_space(), Some(0x1234_5000));
+    }
+
+    // `set_address_space` against an unknown task fails closed.
+    #[test]
+    fn set_address_space_against_an_unknown_task_fails_closed() {
+        let mut sched: Scheduler<1> = Scheduler::new();
+        let task = sched.create_task(low_priority(), BUDGET, dummy_entry).unwrap();
+        sched.free_task_for_test(task);
+        assert_eq!(sched.set_address_space(task, 0x1000), None);
     }
 }

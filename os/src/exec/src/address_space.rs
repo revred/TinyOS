@@ -192,6 +192,11 @@ impl<const FRAMES: usize> FrameAllocator for PoolFrameAllocator<'_, FRAMES> {
 pub struct AddressSpace<'a, const FRAMES: usize> {
     pml4: &'a mut PageTable,
     frame_pool: &'a mut Pool<PageTable, FRAMES>,
+    /// The page-rounded `[start, end)` hull of every section `create`
+    /// mapped, or `None` for a space assembled without `create` —
+    /// what [`AddressSpace::teardown`] revokes and what
+    /// [`AddressSpace::seal_kernel_alias`] walks (`STORY-P1-03-02`).
+    image_range: Option<(u64, u64)>,
 }
 
 impl<'a, const FRAMES: usize> AddressSpace<'a, FRAMES> {
@@ -229,7 +234,17 @@ impl<'a, const FRAMES: usize> AddressSpace<'a, FRAMES> {
             }
         }
 
-        let mut this = AddressSpace { pml4, frame_pool };
+        let mut image_range: Option<(u64, u64)> = None;
+        for section in sections {
+            let (start, end) = section_range(section, image_base)?;
+            let end = end.div_ceil(PAGE_SIZE) * PAGE_SIZE;
+            image_range = Some(match image_range {
+                None => (start, end),
+                Some((lo, hi)) => (lo.min(start), hi.max(end)),
+            });
+        }
+
+        let mut this = AddressSpace { pml4, frame_pool, image_range };
         let mut staging_cursor = 0usize;
         for section in sections {
             staging_cursor =
@@ -292,6 +307,19 @@ impl<'a, const FRAMES: usize> AddressSpace<'a, FRAMES> {
         Ok(cursor)
     }
 
+    /// This address space's `CR3` value — the physical address of its PML4
+    /// (`STORY-P1-03-01`), i.e. what a caller loads into the register to
+    /// make this space the CPU's live address space.
+    ///
+    /// This kernel's current no-higher-half-split memory model means the
+    /// address of the caller-owned `pml4` this struct borrows already **is**
+    /// that physical address (`hal_x86_64::paging::FrameAddr`'s own doc
+    /// comment; the same assumption [`PoolFrameAllocator::allocate_frame`]
+    /// already relies on).
+    pub fn cr3(&self) -> u64 {
+        core::ptr::from_ref(&*self.pml4) as u64
+    }
+
     /// Looks up `virt`'s current mapping, if any — the read-back mechanism
     /// this module's own doc comment describes as standing in for a live
     /// CPU fault: a page this returns as non-`writable` is, per
@@ -343,6 +371,131 @@ impl<'a, const FRAMES: usize> AddressSpace<'a, FRAMES> {
     /// [`map_page`]: AddressSpace::map_page
     pub fn unmap_page(&mut self, virt: u64) -> Result<(), AddressSpaceError> {
         paging::unmap_4k(self.pml4, virt).map_err(AddressSpaceError::from)
+    }
+
+    /// Links a shared kernel page directory (built once by
+    /// [`crate::kernel_map::build_shared_directories`]) into this space's
+    /// tree, serving the 1GiB region at `virt_base` (`STORY-P1-03-02`
+    /// acceptance criterion A4) — the replacement for `STORY-P1-03-01`'s
+    /// per-space, all-RWX identity replica: every space references the same
+    /// W^X-correct directory rather than owning a copy.
+    pub fn attach_shared_pd(&mut self, virt_base: u64, pd: u64) -> Result<(), AddressSpaceError> {
+        let mut allocator = PoolFrameAllocator { pool: self.frame_pool };
+        paging::install_shared_pd(self.pml4, &mut allocator, virt_base, pd)
+            .map_err(AddressSpaceError::from)
+    }
+
+    /// Seals the loader's writable aliases (`STORY-P1-03-02` acceptance
+    /// criterion A3, review D5): for every page `create` mapped
+    /// *non-writable* in this space (image text/rodata), the identity-view
+    /// mapping of its backing frame in `kernel_pml4` — the staging bytes the
+    /// loader copied through — is re-protected RO-NX, so no executable or
+    /// read-only frame keeps a writable view anywhere. Without this, a
+    /// per-entry W^X audit passes while W^X is defeated through the alias.
+    ///
+    /// Fails closed if `kernel_pml4` doesn't map a frame at 4KiB
+    /// granularity (the kernel tree must cover the staging storage).
+    pub fn seal_kernel_alias(&self, kernel_pml4: &mut PageTable) -> Result<(), AddressSpaceError> {
+        self.reprotect_kernel_alias(kernel_pml4, false)
+    }
+
+    /// The inverse of [`AddressSpace::seal_kernel_alias`], restoring the
+    /// identity view to RW-NX — required before [`AddressSpace::teardown`]
+    /// can wipe the frames at all once `CR0.WP` is enabled (review D8).
+    pub fn unseal_kernel_alias(
+        &self,
+        kernel_pml4: &mut PageTable,
+    ) -> Result<(), AddressSpaceError> {
+        self.reprotect_kernel_alias(kernel_pml4, true)
+    }
+
+    fn reprotect_kernel_alias(
+        &self,
+        kernel_pml4: &mut PageTable,
+        writable: bool,
+    ) -> Result<(), AddressSpaceError> {
+        let Some((start, end)) = self.image_range else {
+            return Ok(());
+        };
+        let mut virt = start;
+        while virt < end {
+            if let Some(mapped) = self.translate(virt) {
+                if !mapped.writable {
+                    paging::protect_4k(kernel_pml4, mapped.phys, writable, false)
+                        .map_err(AddressSpaceError::from)?;
+                }
+            }
+            virt += PAGE_SIZE;
+        }
+        Ok(())
+    }
+
+    /// Generation-safe teardown, per the charter's `PD-13` and review D8's
+    /// protocol (`STORY-P1-03-02` acceptance criterion A2): revokes every
+    /// image mapping `create` built, wipes the staged frames (`staging` is
+    /// the same storage `create` copied into — the caller passes it back
+    /// rather than this struct holding a second long-lived borrow of it),
+    /// and advances `generation` — in that order, so the generation is
+    /// observably new before any frame reuse.
+    ///
+    /// What deliberately *survives*: the shared kernel directories linked by
+    /// [`AddressSpace::attach_shared_pd`] (so the torn tree remains loadable
+    /// and a stale-mapping probe is even executable), and the intermediate
+    /// page-table frames in `frame_pool` (present-but-empty, reclaimed only
+    /// when the pool itself is reset — documented, not counted as wiped).
+    /// `Drop` does **not** run — its reset would unlink the kernel
+    /// directories and free the tables the still-loadable tree references.
+    ///
+    /// The caller must ensure this tree is not the live `CR3`'s while its
+    /// own mappings are being revoked out from under it in a way the
+    /// currently executing code depends on — in practice: tear down from
+    /// the supervisor, never from the task being torn down.
+    pub fn teardown(self, staging: &mut [u8], generation: &mut TeardownGeneration) {
+        let mut this = core::mem::ManuallyDrop::new(self);
+        if let Some((start, end)) = this.image_range {
+            let mut virt = start;
+            while virt < end {
+                // `NotMapped` tolerated: the hull may span gaps between
+                // sections; everything present is revoked.
+                let _ = paging::unmap_4k(this.pml4, virt);
+                virt += PAGE_SIZE;
+            }
+        }
+        staging.fill(0);
+        generation.advance();
+    }
+}
+
+/// A monotonic teardown generation (`PD-13`): advanced after mappings are
+/// revoked and frames wiped, *before* any frame reuse — so "this frame
+/// belongs to generation N" is checkable evidence rather than convention.
+/// Owned by the caller (typically one per staging arena), not by any single
+/// `AddressSpace`, since it must outlive every space whose teardown it
+/// witnesses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TeardownGeneration(u64);
+
+impl TeardownGeneration {
+    /// Generation 0: nothing torn down yet. `const fn` for `static` use.
+    pub const fn new() -> Self {
+        TeardownGeneration(0)
+    }
+
+    /// Advances the generation by one (saturating — a wrapped generation
+    /// could alias an ancient one).
+    pub fn advance(&mut self) {
+        self.0 = self.0.saturating_add(1);
+    }
+
+    /// The current generation number.
+    pub const fn value(self) -> u64 {
+        self.0
+    }
+}
+
+impl Default for TeardownGeneration {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -467,6 +620,19 @@ mod tests {
             space.translate(IMAGE_BASE + PAGE_SIZE).expect("data page should be mapped");
         assert!(data_page.writable);
         assert!(!data_page.executable);
+    }
+
+    // STORY-P1-03-01: `cr3()` reports the same address the caller's own
+    // `pml4` binding already lives at — the no-higher-half-split assumption
+    // stated in `cr3()`'s own doc comment, pinned rather than just asserted.
+    #[test]
+    fn cr3_reports_the_pml4s_own_address() {
+        let mut pml4 = PageTable::new();
+        let pml4_addr = core::ptr::from_ref(&pml4) as u64;
+        let mut frame_pool: Pool<PageTable, 4> = Pool::new();
+        let space =
+            AddressSpace { pml4: &mut pml4, frame_pool: &mut frame_pool, image_range: None };
+        assert_eq!(space.cr3(), pml4_addr);
     }
 
     // STORY-P0-05-04: a section's file-backed bytes are actually copied
@@ -668,7 +834,8 @@ mod tests {
     fn map_page_and_unmap_page_round_trip() {
         let mut pml4 = PageTable::new();
         let mut frame_pool: Pool<PageTable, 4> = Pool::new();
-        let mut space = AddressSpace { pml4: &mut pml4, frame_pool: &mut frame_pool };
+        let mut space =
+            AddressSpace { pml4: &mut pml4, frame_pool: &mut frame_pool, image_range: None };
 
         assert_eq!(space.map_page(IMAGE_BASE, 0x9000, RW), Ok(()));
         let mapped = space.translate(IMAGE_BASE).expect("just-mapped page should translate");
@@ -684,7 +851,8 @@ mod tests {
     fn unmap_page_of_an_unmapped_address_fails_closed() {
         let mut pml4 = PageTable::new();
         let mut frame_pool: Pool<PageTable, 4> = Pool::new();
-        let mut space = AddressSpace { pml4: &mut pml4, frame_pool: &mut frame_pool };
+        let mut space =
+            AddressSpace { pml4: &mut pml4, frame_pool: &mut frame_pool, image_range: None };
         assert_eq!(space.unmap_page(IMAGE_BASE), Err(AddressSpaceError::NotMapped));
     }
 
@@ -694,8 +862,165 @@ mod tests {
     fn map_page_rejects_an_already_mapped_address() {
         let mut pml4 = PageTable::new();
         let mut frame_pool: Pool<PageTable, 4> = Pool::new();
-        let mut space = AddressSpace { pml4: &mut pml4, frame_pool: &mut frame_pool };
+        let mut space =
+            AddressSpace { pml4: &mut pml4, frame_pool: &mut frame_pool, image_range: None };
         space.map_page(IMAGE_BASE, 0x9000, RW).unwrap();
         assert_eq!(space.map_page(IMAGE_BASE, 0xa000, RW), Err(AddressSpaceError::AlreadyMapped));
+    }
+
+    /// One RX page then one RW page — the smallest section set exercising
+    /// both the sealed (non-writable) and unsealed (writable) alias cases.
+    fn rx_then_rw_sections() -> [SectionDescriptor; 2] {
+        [
+            SectionDescriptor {
+                virtual_address: 0,
+                virtual_size: PAGE_SIZE as u32,
+                file_offset: 0,
+                file_size: PAGE_SIZE as u32,
+                permissions: RX,
+            },
+            SectionDescriptor {
+                virtual_address: PAGE_SIZE as u32,
+                virtual_size: PAGE_SIZE as u32,
+                file_offset: PAGE_SIZE as u32,
+                file_size: PAGE_SIZE as u32,
+                permissions: RW,
+            },
+        ]
+    }
+
+    /// A stand-in kernel tree identity-mapping `staging`'s pages RW-NX —
+    /// what `exec::kernel_map`'s real directories provide under QEMU.
+    fn kernel_tree_over(
+        staging: &AlignedPages,
+        pml4: &mut PageTable,
+        frame_pool: &mut Pool<PageTable, 16>,
+    ) {
+        struct PoolAlloc<'a>(&'a mut Pool<PageTable, 16>);
+        impl FrameAllocator for PoolAlloc<'_> {
+            fn allocate_frame(&mut self) -> Option<u64> {
+                let handle = self.0.alloc(PageTable::new()).ok()?;
+                self.0.get_mut(handle).map(|t| core::ptr::from_mut(t) as u64)
+            }
+        }
+        let mut allocator = PoolAlloc(frame_pool);
+        let base = staging.0.as_ptr() as u64;
+        for page in 0..2u64 {
+            paging::map_4k(
+                pml4,
+                &mut allocator,
+                base + page * PAGE_SIZE,
+                base + page * PAGE_SIZE,
+                true,
+                false,
+            )
+            .expect("identity view of staging must map");
+        }
+    }
+
+    // STORY-P1-03-02 AC A3 (review D5): sealing removes the writable
+    // identity-view alias of every non-writable image page, leaves the
+    // writable pages' aliases alone, and unsealing restores them.
+    #[test]
+    fn sealing_removes_the_writable_alias_of_non_writable_pages_only() {
+        let bytes = AlignedPages([0x5A; 8192]);
+        let mut staging = AlignedPages([0; 8192]);
+        let mut pml4 = PageTable::new();
+        let mut frame_pool: Pool<PageTable, 16> = Pool::new();
+        let sections = rx_then_rw_sections();
+        let space = AddressSpace::create(
+            &mut pml4,
+            &mut frame_pool,
+            &sections,
+            IMAGE_BASE,
+            &bytes.0,
+            &mut staging.0,
+        )
+        .expect("valid sections should map");
+
+        let mut kernel_pml4 = PageTable::new();
+        let mut kernel_pool: Pool<PageTable, 16> = Pool::new();
+        kernel_tree_over(&staging, &mut kernel_pml4, &mut kernel_pool);
+
+        let rx_frame = space.translate(IMAGE_BASE).unwrap().phys;
+        let rw_frame = space.translate(IMAGE_BASE + PAGE_SIZE).unwrap().phys;
+
+        space.seal_kernel_alias(&mut kernel_pml4).expect("sealing over a covering tree succeeds");
+        let sealed = paging::translate(&kernel_pml4, rx_frame).unwrap();
+        assert!(!sealed.writable && !sealed.executable, "the RX page's alias must be RO-NX");
+        let untouched = paging::translate(&kernel_pml4, rw_frame).unwrap();
+        assert!(untouched.writable, "a writable page's alias stays writable");
+
+        space.unseal_kernel_alias(&mut kernel_pml4).expect("unsealing succeeds");
+        assert!(paging::translate(&kernel_pml4, rx_frame).unwrap().writable);
+    }
+
+    // Sealing against a kernel tree that doesn't cover the staged frames
+    // fails closed — never a silent partial seal.
+    #[test]
+    fn sealing_without_a_covering_kernel_tree_fails_closed() {
+        let bytes = AlignedPages([0; 8192]);
+        let mut staging = AlignedPages([0; 8192]);
+        let mut pml4 = PageTable::new();
+        let mut frame_pool: Pool<PageTable, 16> = Pool::new();
+        let sections = rx_then_rw_sections();
+        let space = AddressSpace::create(
+            &mut pml4,
+            &mut frame_pool,
+            &sections,
+            IMAGE_BASE,
+            &bytes.0,
+            &mut staging.0,
+        )
+        .unwrap();
+        let mut empty_kernel_tree = PageTable::new();
+        assert_eq!(
+            space.seal_kernel_alias(&mut empty_kernel_tree),
+            Err(AddressSpaceError::NotMapped)
+        );
+    }
+
+    // STORY-P1-03-02 AC A2 (`PD-13`, review D8): teardown revokes the image
+    // mappings, wipes the staged frames, advances the generation — and
+    // leaves an attached shared directory linked, so the torn tree stays
+    // loadable for the stale-mapping probe.
+    #[test]
+    fn teardown_revokes_wipes_and_advances_while_keeping_shared_directories() {
+        let bytes = AlignedPages([0xEE; 8192]);
+        let mut staging = AlignedPages([0; 8192]);
+        let mut pml4 = PageTable::new();
+        let mut frame_pool: Pool<PageTable, 16> = Pool::new();
+        let sections = rx_then_rw_sections();
+        let mut space = AddressSpace::create(
+            &mut pml4,
+            &mut frame_pool,
+            &sections,
+            IMAGE_BASE,
+            &bytes.0,
+            &mut staging.0,
+        )
+        .expect("valid sections should map");
+        // A stand-in shared kernel directory at a fixed fake address —
+        // teardown must leave the link itself intact.
+        space.attach_shared_pd(0, 0x7000).expect("linking a shared directory succeeds");
+        assert_eq!(space.translate(IMAGE_BASE).map(|p| p.writable), Some(false));
+
+        let mut generation = TeardownGeneration::new();
+        assert_eq!(generation.value(), 0);
+        space.teardown(&mut staging.0, &mut generation);
+
+        assert_eq!(generation.value(), 1, "the generation advances exactly once per teardown");
+        assert!(staging.0.iter().all(|&b| b == 0), "no residue of the dead task's frames");
+        assert_eq!(paging::translate(&pml4, IMAGE_BASE), None, "image mappings are revoked");
+        assert_eq!(
+            paging::translate(&pml4, IMAGE_BASE + PAGE_SIZE),
+            None,
+            "every image page is revoked, not just the first"
+        );
+        assert_eq!(
+            paging::directory_addr(&pml4, 0),
+            Some(0x7000),
+            "the shared kernel directory survives teardown — the torn tree stays loadable"
+        );
     }
 }

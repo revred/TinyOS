@@ -1,27 +1,46 @@
-# STORY-P1-03-02 — W^X/NX Mappings & Generation-Safe Teardown
+# STORY-P1-03-02 — W^X/NX Mappings, Generation-Safe Teardown, and the First Real Scheduled Task
 
-Status: **Specified, not yet started**
+Status: **In progress — acceptance criteria hardened 2026-07-28 after pre-implementation review**
 Feature: [`FEAT-P1-03`](../features/FEAT-P1-03.md)
 Introduced in: [`session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md`](../../session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md)
+Scope finalized in: [`session/hand-2026-07-28/02-first-real-task-integration-proposal.md`](../../session/hand-2026-07-28/02-first-real-task-integration-proposal.md)
+Criteria hardened in: [`session/hand-2026-07-28/03-story-p1-03-02-hardening-review.md`](../../session/hand-2026-07-28/03-story-p1-03-02-hardening-review.md) — nine pre-implementation defects (D1–D9), three of which made the original criteria unimplementable or vacuous as written
 
 ## Description
 
-Executable sealing and clean death: replace the all-RWX view with W^X/NX-correct mappings (kernel text RX, rodata RO-NX, data/stacks RW-NX; task sections per their PE64 permissions, which `exec` already computes but nothing yet enforces at runtime), and implement address-space teardown per the charter's `PD-13`: revoke mappings, wipe frames, advance the generation before any frame reuse — closing the "executable sealing" and "teardown" items on the Security Charter's runtime-evidence list.
+Two things, deliberately combined rather than sequenced across two Stories, per the user's 2026-07-28 decision: executable sealing/clean death, and the first real integration of every mechanism `EPIC-P0`/`EPIC-P1` has proven in isolation so far.
+
+**Part A — W^X/NX and teardown.** Replace the all-RWX view with W^X/NX-correct mappings (kernel text RX, rodata RO-NX, data/stacks RW-NX; task sections per their PE64 permissions, which `exec` already computes but nothing yet enforces at runtime), shared across every task's tree rather than duplicated (`STORY-P1-03-01`'s own fixture's all-RWX, per-space identity replica was an explicit, named stand-in for this). Implement address-space teardown per the charter's `PD-13`: revoke mappings, wipe frames, advance the generation before any frame reuse — replacing `AddressSpace::drop`'s current unconditional-zero teardown, which this Story's own predecessor's fixture had to route around (`core::mem::forget`) precisely because it isn't generation-safe.
+
+**Part B — the first real scheduled task.** Every prerequisite this needs is already Verified: real fault containment (`FEAT-P1-02`), real per-task `CR3` switching (`STORY-P1-03-01`), a real PE64/TXE loader with a living proof it works (`FEAT-P0-05`, `blue-sharc-fixture`), and a real capability-scoped Win32 compatibility shim with a closed allowlist (`STORY-P0-05-03`). This Story wires them together for the first time: `kernel::dispatch::run_once` gains `CR3` awareness (reads `Tcb::address_space`, calls `switch_address_space` when `Some`, plain `switch` when `None` — no behavior change for any existing task), the real boot path gains a second branch (ACPI/PCI discovery unchanged) that loads `blue-sharc.exe` into its own real, W^X-correct `AddressSpace` and schedules it, and an out-of-allowlist Win32 API call from inside that real task raises a real fault, contained live by the unmodified `kernel::fault` machinery — the first fault this project catches that came from a real workload's real defect shape, not a hand-placed `ud2` or a deliberately-unmapped probe address. Spoor gets its first production call site auditing that event.
 
 ## Depends on
 
-`STORY-P1-03-01`.
+`STORY-P1-03-01` (hard — Verified 2026-07-27); `FEAT-P0-05` (the PE64 loader and Win32 shim, both complete); `FEAT-P0-06` (spoor, complete but production-inert until this Story).
 
-## Acceptance criteria (draft — to be finalized when this Story starts)
+## Acceptance criteria (final, hardened per review D1–D9)
 
-1. A write to executable memory and an execute of writable memory each *fault* under Tier 0 (`BND-05` proven adversarially in both directions), contained by the `#PF` handler.
-2. Teardown-then-probe: after a task's space is torn down, a stale-mapping probe faults and a reused frame is provably wiped (fixture checks for the dead task's residue) with the generation advanced.
-3. No mapping anywhere in the running system is simultaneously writable and executable — verified by a page-table audit fixture, not by convention.
+**W^X and teardown:**
+
+1. With the enforcement bits explicitly enabled (`CR0.WP` and `EFER.NXE`, via a new HAL bring-up step — without them ring-0 W^X is vacuous, review D4), a write to executable memory and an execute of writable memory each *fault* under Tier 0 (`BND-05` proven adversarially in both directions), each raised by a scheduled task and contained by the unmodified `#PF` policy (task terminated, system survives).
+2. Teardown-then-probe, protocol per review D8: teardown revokes the space's image mappings, wipes the staged frames, and advances a teardown generation — in that order (`PD-13`) — while keeping the shared kernel directories linked so the torn tree remains loadable. A *task* (not the supervisor, whose faults halt by policy) scheduled into the torn-down space probes a stale image address and faults for real; the wiped frames are checked free of the dead task's residue before any reuse; the generation is observed advanced before reuse. Page-table frames stay pool-allocated until the space is dropped — documented, not counted as wiped.
+3. After memory-protection bring-up completes — which includes the supervisor itself retiring the boot-time RWX identity map for a W^X-correct kernel tree built from linker section bounds (kernel text RX, rodata RO-NX, data/stacks RW-NX; review D3) — no leaf mapping in any live tree is simultaneously writable and executable, **and** no frame mapped executable anywhere carries a writable alias anywhere (sealing of the loader's staging view, review D5) — verified by a page-table walk audit in the fixture, not by convention.
+4. Kernel mappings are *shared* across the supervisor's and every task's tree at page-directory granularity (review D6: PML4/PDPT sharing would leak the image across spaces, since image base and kernel low memory share PML4 slot 0) — one W^X-correct source directory per region (kernel low memory; the local-APIC MMIO page), referenced by every space, proven shared by reading the directory address back through each tree.
+
+**Integration — the first real task:**
+
+1. Dispatch gains `CR3` awareness with a host-testable seam (review D7): a pure `switch_plan` decision (`None → Plain`, `Some → InstallAddressSpace`) host-tested for both arms; `run_once` itself is byte-for-byte untouched and its existing tests keep passing (the no-regression guard); a new `run_once_in_space` consumes the plan and installs the selected task's space via `switch_address_space`, proven under Tier 0 where a `CR3` write can actually retire.
+2. The integration binary *reproduces the real boot path* (review D2: `kernel`'s own binary cannot link `exec` without a dependency cycle — unifying them is named follow-on work): the same ACPI topology and PCI bus-0 discovery calls with the same success gates, run *before* the CR3 retirement (firmware tables live outside the kernel tree's extent, review D3), then loads `blue-sharc.exe` through the real PE64/TXE pipeline into its own real, W^X-correct, kernel-sharing `AddressSpace` and schedules it via `run_once_in_space`.
+3. The capability boundary is proven at both of its real layers (review D1 — the original "an out-of-allowlist call faults" conflated three mechanisms, none of which faults):
+   - **Load time:** `win32_shim::check_imports` refuses `blue-sharc.exe`'s real 205-import surface on the integration path, and the refusal is recorded as a spoor — the gate as production behavior, not only as a fixture assertion.
+   - **Runtime, defense in depth:** under an explicit, documented override policy the image is scheduled anyway, entering at its own real entry point. Its real startup code's first reach beyond what was granted — an indirect call through its deliberately-unpatched IAT — lands on non-executable memory and raises a real `#PF`, captured and contained by the unmodified `kernel::fault` policy (task terminated, everything else keeps running), and audited as spoors. Nothing about the fault is hand-placed; it is the defect shape of a real ungoverned workload. (Named empirical risk and fallback trigger per review D1: if the pre-fault instruction stream proves non-deterministic under QEMU, the trigger falls back to the task writing its own RX `.text` — still a real W^X fault — and the Report says so.)
+4. This whole sequence (boot → discover topology → retire the RWX map → load, refuse, schedule anyway under override → real containment → audited) is proven under Tier 0 QEMU, reporting through the same `isa-debug-exit`/`TINYOS-RESULT/1` convention every other fixture uses.
+5. Spoor's first *production* call sites exist and are consumed (review D9): the shipping `kernel` binary's own `tinyos_fault_entry` journals the audit pair it already computes (with a new `kernel::capacities::SPOOR_JOURNAL_CAPACITY` backing it), and the integration supervisor journals refusal, dispatch, and containment, reporting the journal length in its serial verdict.
 
 ## Tests
 
-Not yet written — deferred until this Story starts. Requires Tier 0 W^X-violation and teardown fixtures plus a page-table audit.
+[`TEST-P1-03-02-A`](../tests/TEST-P1-03-02-A.md) — host tests for every pure seam (switch plan, shared-PD install, protect/seal, teardown/generation, audit walk) plus two Tier 0 fixtures: `wx-seal-fixture` (W^X both directions, sealing/alias audit, shared-PD proof, teardown-then-probe) and `first-task-fixture` (the reproduced real boot path scheduling `blue-sharc.exe` end to end).
 
 ## Goals verified
 
-G-SEC-2 (W^X/teardown halves), G-SEC-8 (immutable-image substrate, partial).
+G-SEC-2 (W^X/teardown halves, and active address spaces used by something real for the first time), G-SEC-8 (immutable-image substrate, partial), G-SEC-14 (spoor's first production audit trail).

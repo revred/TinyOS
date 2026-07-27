@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "src/os",
     "src/kernel",
     "src/hal",
     "src/hal-x86_64",

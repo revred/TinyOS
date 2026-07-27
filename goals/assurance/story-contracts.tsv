@@ -29,9 +29,20 @@ STORY-P1-01-02	FEAT-P1-01	D04,D05,D07	SEC-19,SEC-20	C0,C1	baseline-debt	Timing b
 STORY-P1-01-03	FEAT-P1-01	D04,D05,D07	SEC-19,SEC-20	C0,C1	baseline-debt	A second cycle source implementor must satisfy the shared trait contract on the host before any board exists
 STORY-P1-02-01	FEAT-P1-02	D02	SEC-03,SEC-14,SEC-19	C0,C1	baseline-debt	Fault capture and terminate-versus-resume policy must contain the faulting task and audit every decision
 STORY-P1-02-02	FEAT-P1-02	D02	SEC-14,SEC-19	C0,C1	baseline-debt	Double-fault IST handling must survive a compromised primary fault path and report before halting
-STORY-P1-03-01	FEAT-P1-03	D04,D08	SEC-03,SEC-19	C0,C1,C3	specified	Per-task CR3 installation must isolate address spaces with cross-space probes faulting and contained
-STORY-P1-03-02	FEAT-P1-03	D08	SEC-03,SEC-14,SEC-19	C0,C1,C3	specified	W^X sealing and generation-safe teardown must hold adversarially in both directions before frame reuse
-STORY-P1-04-01	FEAT-P1-04	D03,D05,D06	SEC-19,SEC-20	C0,C1	specified	Timer-driven preemption and priority inheritance must bound latency without granting priority from class
+STORY-P1-03-01	FEAT-P1-03	D04,D08	SEC-03,SEC-19	C0,C1,C3	baseline-debt	Per-task CR3 installation must isolate address spaces with cross-space probes faulting and contained
+STORY-P1-03-02	FEAT-P1-03	D04,D05,D08	SEC-03,SEC-14,SEC-19	C0,C1,C3	baseline-debt	W^X sealing and generation-safe teardown must hold adversarially in both directions before frame reuse and a real loaded workload must be contained and audited when it exceeds its granted capabilities
+STORY-P1-03-03	FEAT-P1-03	D04,D05,D08	SEC-03,SEC-14,SEC-19	C0,C1,C3	baseline-debt	Import resolution must give every call site a decided target so a refused capability faults at a named address rather than an arbitrary one, and the system image itself must load and schedule a real task
+STORY-P1-04-01	FEAT-P1-04	D03,D05,D06	SEC-19,SEC-20	C0,C1	baseline-debt	Timer-driven preemption and priority inheritance must bound latency without granting priority from class
 STORY-P1-04-02	FEAT-P1-04	D03	SEC-14,SEC-19,SEC-20	C0,C1	specified	WCET overrun enforcement must fire declared policy within bounded ticks and audit every decision
 STORY-P1-05-01	FEAT-P1-05	D05,D07	SEC-14,SEC-19,SEC-20	C1,C2	specified	Hostile saturation must degrade only the offender with RT reserves held and recovery bounded and complete
 STORY-P1-06-01	FEAT-P1-06	D03,D05	SEC-14,SEC-19,SEC-20	C0,C1	specified	Decision-to-actuation latency must stay inside a scheduler-enforced bound with late actuation prevented
+STORY-P9-01-01	FEAT-P9-01	D08,D25	SEC-14,SEC-19	C0,C1	specified	No plaintext survives teardown must be a measured invariant with a scanner proven able to fail rather than a property holding by accident of implementation
+STORY-P9-01-02	FEAT-P9-01	D08,D09	SEC-14,SEC-19	C0,C1	specified	The decoded staging image must not outlive its own use and the wipe must be verified externally rather than asserted by the code that performed it
+STORY-P9-02-01	FEAT-P9-02	D25	SEC-15,SEC-19	C0	specified	Entropy must be health-tested continuously and refuse rather than degrade and its determinism carve-out must be explicit and unavailable in a shipping image
+STORY-P9-03-01	FEAT-P9-03	D25	SEC-15,SEC-19	C0,C1	specified	Cryptographic primitives must pass published vectors refuse every tamper case allocate nothing and make nonce reuse impossible in the type system
+STORY-P9-04-01	FEAT-P9-04	D01,D25	SEC-01,SEC-15	C0,C1	specified	A measured boot must release the sealed root and a one-byte-modified kernel image must not which is the only defence against an attacker building their own TinyOS
+STORY-P9-04-02	FEAT-P9-04	D01,D24	SEC-01,SEC-14	C0,C1	specified	A fallback tier an attacker can force by disabling the TPM is a downgrade attack on the sealing defence so its key space must be disjoint and the policy per deployment
+STORY-P9-05-01	FEAT-P9-05	D08,D25	SEC-15,SEC-19	C0,C1	specified	Process keys must derive from a hardware-sealed root with public metadata as binding salt only and be verifiably absent from a dump after use
+STORY-P9-06-01	FEAT-P9-06	D08,D09	SEC-15,SEC-19	C0,C1,C2	specified	At-rest ciphertext must bind to address and generation so a relocated or replayed block fails authentication into the fault path rather than yielding plaintext
+STORY-P9-07-01	FEAT-P9-07	D08,D25	SEC-01,SEC-15	C0,C1,C2	specified	Memory-encryption activation must be confirmed by read-back and an absent engine must be documented accepted risk rather than quietly assumed covered
+STORY-P9-08-01	FEAT-P9-08	D08,D09	SEC-15,SEC-19	C0,C1,C2	specified	Randomized base and process id must carry measured entropy as salt diversity only and must not cost the reproducible boots Tier 0 evidence rests on

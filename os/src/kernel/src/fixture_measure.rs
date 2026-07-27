@@ -33,10 +33,12 @@
 
 use core::fmt::Write;
 use hal::time::{conformance, CycleSource, Timebase};
+use hal_x86_64::fault::FaultFrame;
 use hal_x86_64::serial::SerialPort;
 use hal_x86_64::tsc::{self, Tsc};
 use kernel::context::{self, Context};
 use kernel::dispatch;
+use kernel::fault::{Disposition, FaultReport, FaultingContext};
 use kernel::measure::{Calibration, Environment, Metric, Report, Samples, Stopwatch};
 use kernel::mem::Pool;
 use kernel::sched::{Priority, Scheduler, TaskState, WcetBudgetTicks};
@@ -80,6 +82,29 @@ static mut YIELDS: u64 = 0;
 static mut DISPATCHER_CTX: Context = Context::zeroed();
 static mut DISPATCH_CONTEXTS: [Context; TASKS] = [Context::zeroed(); TASKS];
 static mut DISPATCH_STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
+
+// D02 (`LE-17`) fault-latency state. A fault handler never resumes the
+// context it interrupted (`kernel::fault`'s own doc comment — there is no
+// `Resume` arm), so unlike `TASK_CTX` above, `FAULT_TASK_CTX` is
+// reinitialized every iteration rather than looped inside one long-lived
+// task: each iteration needs a fresh entry point to fault from.
+static mut FAULT_SUPERVISOR_CTX: Context = Context::zeroed();
+static mut FAULT_TASK_CTX: Context = Context::zeroed();
+/// Where the fault handler saves the faulted iteration's registers. Written
+/// once per iteration and never read — same rationale as
+/// `fixture_fault::ABANDONED_CTX`: a context nothing will ever resume is the
+/// honest destination.
+static mut FAULT_ABANDONED_CTX: Context = Context::zeroed();
+static mut FAULT_STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
+/// Cycle count read immediately before the victim's `ud2`, so the handler
+/// measures exactly the fault-to-disposition-decided span.
+static mut FAULT_START_CYCLES: u64 = 0;
+/// Set once before the phase begins; read (never written) by the handler on
+/// every fault.
+static mut FAULT_CALIBRATION: Calibration = Calibration::from_overhead_cycles(0);
+/// Counts iterations so the handler can skip recording during `WARMUP`,
+/// exactly like every other phase's driver loop does for itself.
+static mut FAULT_ITERATIONS_RUN: usize = 0;
 
 /// D04's measured task: yields straight back to whoever resumed it, so one
 /// timed region is exactly one switch out and one switch back — the smallest
@@ -334,9 +359,125 @@ fn phase_dispatch_round<S: CycleSource>(
     ok
 }
 
+/// D02's victim: timestamps itself, then raises a real `#UD` — the same
+/// architecturally-guaranteed instruction `fixture_fault::victim_invalid_opcode`
+/// uses, chosen here for the same reason: it is the one vector this kernel
+/// can fault from deterministically, with no dependency on GDT/page-table
+/// shape (unlike `#GP`/`#PF`, whose fixtures both note reasons a chosen
+/// address or selector could drift under a future change).
+extern "C" fn fault_latency_victim() -> ! {
+    // SAFETY: single-CPU fixture; only this task writes `FAULT_START_CYCLES`,
+    // and it is read back only by the handler this fault delivers control to.
+    unsafe {
+        FAULT_START_CYCLES = Tsc.read_cycles();
+        core::arch::asm!("ud2", options(nomem, nostack));
+    }
+    unreachable!("ud2 always faults")
+}
+
+/// D02 (`LE-17`, `PERF-D02-G01`..`G07`): fault-to-disposition-decided
+/// latency — the baseline `FEAT-P1-02`'s exit criteria name and
+/// `TEST-P1-02-01-A` clause 8 named as follow-on work rather than quietly
+/// skipping it.
+///
+/// Measures the real hardware path: a real `#UD` through this fixture's own
+/// `tinyos_fault_entry` (below), which runs the same `kernel::fault::of`/
+/// `audit` calls the production and `fixture_fault` entry points run, timed
+/// from immediately before the faulting instruction to immediately after the
+/// disposition and its audit pair are computed — the same span `PERF-D02-G21`
+/// ("fault decision and containment") states its budget against.
+///
+/// Uses `FaultingContext::Kernel` rather than a real scheduled task: this
+/// fixture measures the capture-decide-audit cost, which
+/// `kernel::fault::audit` computes identically regardless of which context
+/// faulted (it branches only on the *outcome* value stamped, never on cost),
+/// so no `Scheduler`/`TaskId` machinery is needed to measure it honestly. The
+/// containment behavior itself — a real task actually being terminated while
+/// its siblings keep running — is `fixture_fault`'s charge, already Verified;
+/// this fixture's only job is the timing.
+#[inline(never)]
+fn phase_fault_latency(calibration: &Calibration) -> bool {
+    // SAFETY: single-CPU fixture, run once per phase before any iteration.
+    unsafe {
+        FAULT_CALIBRATION = *calibration;
+        FAULT_ITERATIONS_RUN = 0;
+    }
+
+    for _ in 0..(WARMUP + SAMPLES) {
+        // SAFETY: `FAULT_STACK` is a never-moving static used by exactly one
+        // `Context` per iteration; the previous iteration's context was
+        // abandoned by the handler before this loop resumed, so reusing the
+        // stack memory is safe. `FAULT_SUPERVISOR_CTX`/`FAULT_TASK_CTX` are
+        // switched between strictly alternately, matching `switch`'s
+        // documented contract.
+        unsafe {
+            let stack =
+                core::slice::from_raw_parts_mut((&raw mut FAULT_STACK).cast::<u8>(), STACK_SIZE);
+            let Ok(task) = Context::new(stack, fault_latency_victim) else {
+                return false;
+            };
+            FAULT_TASK_CTX = task;
+            context::switch(&raw mut FAULT_SUPERVISOR_CTX, &raw mut FAULT_TASK_CTX);
+            // Control returns here only via the handler's escape switch,
+            // after the fault has been captured, decided and recorded.
+        }
+    }
+
+    // SAFETY: read after every switch above has returned.
+    unsafe { FAULT_ITERATIONS_RUN == WARMUP + SAMPLES }
+}
+
+/// The fixture-measure fault entry point (`LE-17`) — installed in place of
+/// `main.rs`'s default `tinyos_fault_entry` only under this feature, exactly
+/// as `fixture_fault` and `fixture_double_fault` already install their own.
+///
+/// Unlike the default handler, this one does not halt: it times the
+/// disposition path, records the sample, and switches back to the
+/// supervisor so `phase_fault_latency`'s loop can continue — the same
+/// escape-switch pattern `fixture_fault::tinyos_fault_entry` uses to survive
+/// past a fault it deliberately caused.
+///
+/// # Safety
+/// Called only by the `hal_x86_64::fault` stubs, with `frame` pointing at a
+/// fully-initialized [`FaultFrame`] on the faulting stack. Runs with `IF`
+/// clear (interrupt gates), so it cannot be re-entered by an interrupt.
+#[no_mangle]
+extern "C" fn tinyos_fault_entry(frame: *const FaultFrame) -> ! {
+    // SAFETY: the stubs pass a pointer to a fully-initialized `FaultFrame` on
+    // the current stack, live for this call.
+    let frame = unsafe { *frame };
+    // Read as early as possible: every instruction before this one inflates
+    // the reported latency by its own cost.
+    let stop = Tsc.read_cycles();
+
+    // SAFETY: single-CPU fixture; only this handler and `phase_fault_latency`
+    // touch these statics, never concurrently (the handler runs to
+    // completion, via the escape switch, before the driver loop resumes).
+    unsafe {
+        let calibration = (&raw const FAULT_CALIBRATION).read();
+        let started = (&raw const FAULT_START_CYCLES).read();
+        let corrected = calibration.correct(stop.saturating_sub(started));
+        FAULT_ITERATIONS_RUN += 1;
+        if FAULT_ITERATIONS_RUN > WARMUP {
+            let samples: &mut Samples<SAMPLES> = &mut *core::ptr::addr_of_mut!(SAMPLE_BUFFER);
+            samples.record(corrected);
+        }
+
+        // The real disposition/audit path — the same `kernel::fault`
+        // functions the production and `fixture_fault` entry points call —
+        // so this measures the actual cost, not a hand-rolled stand-in for it.
+        let report = FaultReport { vector: frame.vector, context: FaultingContext::Kernel };
+        let disposition = Disposition::of(&report);
+        let _ = kernel::fault::audit(&report, disposition);
+
+        context::switch(&raw mut FAULT_ABANDONED_CTX, &raw mut FAULT_SUPERVISOR_CTX);
+    }
+    unreachable!("a measured fault-latency iteration is never switched back into")
+}
+
 /// How many metrics this fixture measures — the fixed capacity of the
 /// collected-summary array below.
-const METRICS: usize = 5;
+const METRICS: usize = 6;
 
 /// One measured phase, held until every phase has run.
 ///
@@ -404,26 +545,28 @@ pub fn run() -> bool {
     // `SerialPort` method — `init`'s own documented contract.
     let mut serial = unsafe { SerialPort::init() };
 
-    // Retire the legacy PIC before anything is measured. This is not
-    // housekeeping — it is load-bearing, and finding out why cost this
-    // fixture its first bring-up failure: `Context::new` seeds a task's
-    // initial `rflags` with `IF` set, so the first `context::switch` into a
-    // measured task enables interrupts, and this fixture boot path installs no
-    // IDT at all (nothing here calls `interrupts::init`, deliberately — an
-    // armed APIC timer would inject ticks into the regions being measured).
-    // With the PIC left in its power-on state, a legacy IRQ0 that accumulated
-    // during the ~10 ms PIT calibration above then fired the instant `IF` went
-    // high, against an empty IDT: triple fault, QEMU shutdown, and a truncated
-    // envelope. Masking every legacy line first removes the interrupt source
-    // rather than papering over the missing IDT — which remains real, tracked
-    // debt (loose ends `LE-03`/`LE-04`, plus `LE-11` for the `IF`-set-with-no-IDT
-    // seam this uncovered).
+    // Retire the legacy PIC and install fault-only handling before anything
+    // is measured. This is not housekeeping — it is load-bearing, and finding
+    // out why cost this fixture its first bring-up failure: `Context::new`
+    // seeds a task's initial `rflags` with `IF` set, so the first
+    // `context::switch` into a measured task enables interrupts. With the PIC
+    // left in its power-on state, a legacy IRQ0 that accumulated during the
+    // ~10 ms PIT calibration below then fired the instant `IF` went high,
+    // against an empty IDT: triple fault, QEMU shutdown, and a truncated
+    // envelope (loose ends `LE-03`/`LE-04`, plus `LE-11` for the
+    // `IF`-set-with-no-IDT seam this uncovered).
     //
-    // SAFETY: this fixture never executes `sti` and never calls
-    // `interrupts::init`, so no interrupt can be in flight while the remap
-    // sequence runs — `remap_and_mask_pic`'s documented contract, satisfied
-    // trivially.
-    unsafe { hal_x86_64::interrupts::remap_and_mask_pic() };
+    // `init_faults_only` (not the bare PIC remap this fixture called before
+    // `LE-17`) is what `phase_fault_latency` needs: a real IDT routing `#UD`
+    // to this file's own `tinyos_fault_entry`, below. It arms no APIC timer
+    // and never executes `sti` itself, so it changes nothing about the four
+    // earlier phases' own interrupt-free measurement — only a deliberate
+    // fault reaches this IDT at all.
+    //
+    // SAFETY: called once, here, before any other code depends on interrupts
+    // being masked or on a fault handler existing — `init_faults_only`'s
+    // documented contract.
+    unsafe { hal_x86_64::interrupts::init_faults_only() };
 
     let source = Tsc;
     // The shared `CycleSource` conformance suite, run here against the real
@@ -456,27 +599,31 @@ pub fn run() -> bool {
     let samples: &mut Samples<SAMPLES> = unsafe { &mut *core::ptr::addr_of_mut!(SAMPLE_BUFFER) };
 
     let mut ok = conformance_ok;
-    let mut collected: [Option<Measured>; METRICS] = [None, None, None, None, None];
+    let mut collected: [Option<Measured>; METRICS] = [None, None, None, None, None, None];
 
     ok &= phase_pool_alloc_free(&source, &calibration, samples);
     ok &= collect(&mut collected, 0, "D07", "pool_u64x64_alloc_free_round_trip", samples);
-    let _ = writeln!(serial, "fixture-measure phase 1/5 done (D07 alloc/free)");
+    let _ = writeln!(serial, "fixture-measure phase 1/6 done (D07 alloc/free)");
 
     ok &= phase_pool_denial(&source, &calibration, samples);
     ok &= collect(&mut collected, 1, "D07", "pool_u64x4_alloc_denied_exhausted", samples);
-    let _ = writeln!(serial, "fixture-measure phase 2/5 done (D07 denial)");
+    let _ = writeln!(serial, "fixture-measure phase 2/6 done (D07 denial)");
 
     ok &= phase_context_switch(&source, &calibration, samples);
     ok &= collect(&mut collected, 2, "D04", "context_switch_yield_roundtrip_2switches", samples);
-    let _ = writeln!(serial, "fixture-measure phase 3/5 done (D04 context switch)");
+    let _ = writeln!(serial, "fixture-measure phase 3/6 done (D04 context switch)");
 
     ok &= phase_dispatch_select(&source, &calibration, samples);
     ok &= collect(&mut collected, 3, "D05", "dispatch_select_highest_priority_ready", samples);
-    let _ = writeln!(serial, "fixture-measure phase 4/5 done (D05 selection)");
+    let _ = writeln!(serial, "fixture-measure phase 4/6 done (D05 selection)");
 
     ok &= phase_dispatch_round(&source, &calibration, samples);
     ok &= collect(&mut collected, 4, "D05", "dispatch_run_once_cooperative_round", samples);
-    let _ = writeln!(serial, "fixture-measure phase 5/5 done (D05 dispatch round)");
+    let _ = writeln!(serial, "fixture-measure phase 5/6 done (D05 dispatch round)");
+
+    ok &= phase_fault_latency(&calibration);
+    ok &= collect(&mut collected, 5, "D02", "fault_ud2_capture_terminate_kernel_context", samples);
+    let _ = writeln!(serial, "fixture-measure phase 6/6 done (D02 fault latency)");
 
     let environment = Environment {
         tier: "T0",

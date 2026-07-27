@@ -12,6 +12,7 @@ mod assurance;
 mod gate;
 mod governance;
 mod performance_catalogue;
+mod probe_pe;
 mod timing;
 mod txe;
 
@@ -27,6 +28,50 @@ enum XtaskExit {
     KernelBootSucceeded = 0,
     KernelBootFailed = 1,
     HarnessError = 2,
+}
+
+/// A fixture that emits a `TINYOS-MEAS/1` envelope, identified by what has
+/// to be built to run it.
+///
+/// Previously this was just a Cargo feature name, because every measurable
+/// fixture lived in `kernel`'s own binary. `STORY-P1-03-03`'s D04
+/// same-space-vs-cross-space measurement cannot: it needs `exec`'s address
+/// spaces, and `exec` depends on `kernel`, so it is a separate binary in a
+/// separate package — the same constraint that put every other integration
+/// fixture there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MeasurableTarget {
+    package: &'static str,
+    binary: &'static str,
+    feature: Option<&'static str>,
+}
+
+/// Maps a `--fixture=` value to what must be built, or `None` if that
+/// fixture emits no measurement envelope.
+fn measurable_fixture(name: &str) -> Option<MeasurableTarget> {
+    match name {
+        "measure" => Some(MeasurableTarget {
+            package: "kernel",
+            binary: "kernel",
+            feature: Some("fixture-measure"),
+        }),
+        "measure-regression" => Some(MeasurableTarget {
+            package: "kernel",
+            binary: "kernel",
+            feature: Some("fixture-measure-regression"),
+        }),
+        "pool-bench" => Some(MeasurableTarget {
+            package: "kernel",
+            binary: "kernel",
+            feature: Some("fixture-pool-bench"),
+        }),
+        "dispatch" => Some(MeasurableTarget {
+            package: "exec",
+            binary: "dispatch-measure-fixture",
+            feature: None,
+        }),
+        _ => None,
+    }
 }
 
 /// QEMU's own process exit code when the guest writes to the isa-debug-exit
@@ -53,6 +98,12 @@ fn main() -> ExitCode {
             // like `broken-boot`/`context-switch` are.
             let (package, binary, feature) = match fixture.as_deref() {
                 None => ("kernel", "kernel", None),
+                // The system image (`STORY-P1-03-03`): the real boot path
+                // that discovers hardware, installs W^X address spaces, and
+                // schedules a real loaded task. Lives in its own top-level
+                // package because it depends on *both* `kernel` and `exec`,
+                // which `kernel`'s own binary can never do.
+                Some("os") => ("os", "os", None),
                 Some("broken-boot") => ("kernel", "kernel", Some("fixture-broken-boot")),
                 Some("context-switch") => ("kernel", "kernel", Some("fixture-context-switch")),
                 Some("address-space") => ("exec", "exec-fixture", None),
@@ -60,6 +111,10 @@ fn main() -> ExitCode {
                 Some("blue-sharc") => ("exec", "blue-sharc-fixture", None),
                 Some("blue-sharc-broken") => ("exec", "blue-sharc-broken-fixture", None),
                 Some("shared-memory") => ("exec", "shared-memory-fixture", None),
+                Some("address-space-switch") => ("exec", "address-space-switch-fixture", None),
+                Some("wx-seal") => ("exec", "wx-seal-fixture", None),
+                Some("first-task") => ("exec", "first-task-fixture", None),
+                Some("dispatch-measure") => ("exec", "dispatch-measure-fixture", None),
                 Some("idt-apic-timer") => ("kernel", "kernel", Some("fixture-idt-apic-timer")),
                 Some("idt-apic-unrouted") => {
                     ("kernel", "kernel", Some("fixture-idt-apic-unrouted"))
@@ -69,6 +124,10 @@ fn main() -> ExitCode {
                 Some("measure") => ("kernel", "kernel", Some("fixture-measure")),
                 Some("fault") => ("kernel", "kernel", Some("fixture-fault")),
                 Some("double-fault") => ("kernel", "kernel", Some("fixture-double-fault")),
+                Some("preempt") => ("kernel", "kernel", Some("fixture-preempt")),
+                Some("priority-inversion") => {
+                    ("kernel", "kernel", Some("fixture-priority-inversion"))
+                }
                 Some(other) => {
                     eprintln!("xtask: unknown --fixture value '{other}'");
                     return ExitCode::from(XtaskExit::HarnessError as u8);
@@ -166,6 +225,24 @@ fn main() -> ExitCode {
                 }
             }
         }
+        "make-probe-pe" => {
+            let output = args.find_map(|a| a.strip_prefix("--output=").map(str::to_string));
+            let Some(output) = output else {
+                eprintln!("usage: cargo run -p xtask -- make-probe-pe --output=<path>");
+                return ExitCode::from(XtaskExit::HarnessError as u8);
+            };
+            let image = probe_pe::build();
+            match std::fs::write(&output, &image) {
+                Ok(()) => {
+                    println!("make-probe-pe: wrote {output} ({} bytes)", image.len());
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("xtask: could not write {output}: {error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         "check-image-size" => {
             let ceiling = args
                 .find_map(|a| a.strip_prefix("--ceiling=").map(str::to_string))
@@ -173,7 +250,9 @@ fn main() -> ExitCode {
                 .unwrap_or(8 * 1024 * 1024);
             match check_image_size(ceiling) {
                 Ok(size) => {
-                    println!("check-image-size: kernel image {size} bytes (ceiling {ceiling})");
+                    println!(
+                        "check-image-size: system image (os) {size} bytes (ceiling {ceiling})"
+                    );
                     ExitCode::SUCCESS
                 }
                 Err(message) => {
@@ -194,12 +273,11 @@ fn main() -> ExitCode {
                 .iter()
                 .find_map(|a| a.strip_prefix("--fixture=").map(str::to_string))
                 .unwrap_or_else(|| "measure".to_string());
-            let feature = match fixture.as_str() {
-                "measure" => "fixture-measure",
-                "pool-bench" => "fixture-pool-bench",
-                other => {
+            let target = match measurable_fixture(&fixture) {
+                Some(target) => target,
+                None => {
                     eprintln!(
-                        "xtask: --fixture={other} reports no measurement envelope; measurable fixtures are `measure` and `pool-bench`"
+                        "xtask: --fixture={fixture} reports no measurement envelope; measurable fixtures are `measure`, `pool-bench` and `dispatch`"
                     );
                     return ExitCode::from(XtaskExit::HarnessError as u8);
                 }
@@ -215,7 +293,7 @@ fn main() -> ExitCode {
                     },
                     None => Profile::Dev,
                 };
-            match measure(feature, runs, keep.as_deref(), profile) {
+            match measure(target, runs, keep.as_deref(), profile) {
                 Ok(code) => ExitCode::from(code as u8),
                 Err(message) => {
                     eprintln!("xtask: {message}");
@@ -238,12 +316,13 @@ fn main() -> ExitCode {
             // slowed measured phase, so "prove the gate can fail" is a command
             // anyone can re-run rather than a one-time screenshot — the
             // discipline `fixture-broken-boot` established for boot.
-            let feature = if rest.iter().any(|a| a == "--inject-regression") {
-                "fixture-measure-regression"
+            let fixture = if rest.iter().any(|a| a == "--inject-regression") {
+                "measure-regression"
             } else {
-                "fixture-measure"
+                "measure"
             };
-            match check_timing_regression(runs, baseline, update, date, feature) {
+            let target = measurable_fixture(fixture).expect("both spellings are measurable");
+            match check_timing_regression(runs, baseline, update, date, target) {
                 Ok(code) => ExitCode::from(code as u8),
                 Err(message) => {
                     eprintln!("xtask: {message}");
@@ -451,7 +530,7 @@ struct MeasuredRuns {
 /// gates), so the gate can never be looking at evidence gathered differently
 /// from the evidence a developer sees.
 fn run_measurements(
-    feature: &str,
+    target: MeasurableTarget,
     runs: usize,
     keep_dir: Option<&Path>,
     profile: Profile,
@@ -480,8 +559,13 @@ fn run_measurements(
         // earlier run would be exactly the silent-wrong-evidence failure this
         // command exists to prevent.
         let _ = std::fs::remove_file(&capture);
-        let outcome =
-            qemu_x86_64("kernel", "kernel", Some(feature), Some(capture.as_path()), profile)?;
+        let outcome = qemu_x86_64(
+            target.package,
+            target.binary,
+            target.feature,
+            Some(capture.as_path()),
+            profile,
+        )?;
         let text = std::fs::read_to_string(&capture).map_err(|e| {
             format!("run {run} produced no readable serial capture at {}: {e}", capture.display())
         })?;
@@ -550,12 +634,12 @@ fn run_measurements(
 /// Reports Tier 0 measurements and their run-to-run variance —
 /// `STORY-P1-01-01`'s acceptance criteria 2 and 3.
 fn measure(
-    feature: &str,
+    target: MeasurableTarget,
     runs: usize,
     keep_dir: Option<&Path>,
     profile: Profile,
 ) -> Result<XtaskExit, String> {
-    let measured = run_measurements(feature, runs, keep_dir, profile)?;
+    let measured = run_measurements(target, runs, keep_dir, profile)?;
     let envelopes = measured.envelopes;
 
     if envelopes.len() >= 2 {
@@ -607,7 +691,7 @@ fn check_timing_regression(
     baseline_path: Option<PathBuf>,
     update: bool,
     date: Option<String>,
-    feature: &str,
+    target: MeasurableTarget,
 ) -> Result<XtaskExit, String> {
     let profile = Profile::Release;
     if runs < gate::MINIMUM_RUNS {
@@ -629,7 +713,7 @@ fn check_timing_regression(
         path
     });
 
-    let measured = run_measurements(feature, runs, None, profile)?;
+    let measured = run_measurements(target, runs, None, profile)?;
     if !measured.fixture_ok {
         eprintln!(
             "xtask check-timing-regression: a fixture reported a self-consistency failure, so its numbers are not evidence"
@@ -750,18 +834,27 @@ fn pack_txe(input: &str, output: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Builds `kernel`'s own release binary against the custom x86_64 target and
-/// checks its file size against `ceiling` — `G-DX-8`'s whole-image (not
-/// per-crate) budget, applied to what actually ships (`kernel`'s own linked
-/// binary) rather than to Tier 0 fixture binaries (`exec-fixture`,
-/// `win32-shim-fixture`, `blue-sharc-fixture`, ...), which exist only to
-/// drive QEMU-harness tests and are never part of a shipped image — the same
-/// "test code doesn't count" convention `check-crate-sizes` already applies
-/// by excluding `#[cfg(test)]` bodies. `os/src/drivers*` doesn't exist as a
-/// crate yet, so there is nothing to exclude from this measurement today;
-/// `kernel` links no `exec` code either (no production call site exists
-/// yet, per `STORY-P0-06-03`/`-04`'s own precedent for the identical gap),
-/// so this measures exactly what ships right now, not a future superset.
+/// Builds the **system image** — the `os` binary — against the custom
+/// x86_64 target and checks its file size against `ceiling`: `G-DX-8`'s
+/// whole-image (not per-crate) budget, applied to what actually ships.
+///
+/// **This moved from `kernel` to `os` in `STORY-P1-03-03`, and the move is
+/// the point.** Until then `kernel`'s binary *was* the shipping image, and
+/// its own doc comment noted that it "links no `exec` code" — true, and
+/// exactly the gap that meant the shipping image had never loaded or
+/// scheduled anything. `os` links `kernel` *and* `exec` *and* the embedded
+/// workload it schedules, so this number now covers the loader, the address
+/// spaces, the capability shim and the image being run. Measuring `kernel`
+/// today would be measuring a library's test harness rather than the
+/// product, and would quietly under-report the budget it exists to enforce.
+///
+/// Tier 0 fixture binaries (`exec-fixture`, `blue-sharc-fixture`,
+/// `wx-seal-fixture`, ...) are still excluded: they exist only to drive
+/// QEMU-harness tests and never ship — the same "test code doesn't count"
+/// convention `check-crate-sizes` applies by excluding `#[cfg(test)]`
+/// bodies. `blue-sharc.exe` in particular is an 8.3MiB third-party
+/// application that lives in a fixture precisely so it is not part of this
+/// measurement; the workload `os` embeds is the 16KiB capability probe.
 fn check_image_size(ceiling: u64) -> Result<u64, String> {
     let os_root = os_root()?;
     let target_spec = os_root.join("targets").join("x86_64-tinyos.json");
@@ -771,7 +864,7 @@ fn check_image_size(ceiling: u64) -> Result<u64, String> {
         .arg("build")
         .arg("--release")
         .arg("-p")
-        .arg("kernel")
+        .arg("os")
         .arg("--target")
         .arg(&target_spec)
         .arg("-Z")
@@ -783,15 +876,15 @@ fn check_image_size(ceiling: u64) -> Result<u64, String> {
         .status()
         .map_err(|e| format!("failed to invoke cargo build: {e}"))?;
     if !build_status.success() {
-        return Err("kernel release build failed".to_string());
+        return Err("os release build failed".to_string());
     }
 
-    let kernel_elf = os_root.join("target").join("x86_64-tinyos").join("release").join("kernel");
-    let size = std::fs::metadata(&kernel_elf)
-        .map_err(|e| format!("could not stat {}: {e}", kernel_elf.display()))?
+    let image = os_root.join("target").join("x86_64-tinyos").join("release").join("os");
+    let size = std::fs::metadata(&image)
+        .map_err(|e| format!("could not stat {}: {e}", image.display()))?
         .len();
     if size > ceiling {
-        return Err(format!("kernel image is {size} bytes, exceeding the {ceiling}-byte ceiling"));
+        return Err(format!("system image is {size} bytes, exceeding the {ceiling}-byte ceiling"));
     }
     Ok(size)
 }
