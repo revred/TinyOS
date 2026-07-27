@@ -2,7 +2,7 @@
 
 Status: **Specified — six Stories, none started; this Feature exists to close `LE-09`, and `LE-09` closes on `STORY-P1-07-06`'s Report and on nothing earlier**
 Epic: [`EPIC-P1`](../epics/EPIC-P1.md)
-Introduced in: [`session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md`](../../session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md), accepted with its §7 decisions in [`session/hand-2026-07-28/18-feat-p1-07-acceptance-and-spine.md`](../../session/hand-2026-07-28/18-feat-p1-07-acceptance-and-spine.md)
+Introduced in: [`session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md`](../../session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md), accepted with its §7 decisions in [`session/hand-2026-07-28/19-feat-p1-07-acceptance-and-spine.md`](../../session/hand-2026-07-28/19-feat-p1-07-acceptance-and-spine.md)
 
 ## Description
 
