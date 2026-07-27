@@ -104,7 +104,7 @@
 
 <h1>TinyOS — Handovers for 28 July 2026</h1>
 <p class="muted">This page indexes every handover produced on this date, in order. Per the <a href="../README.md">session naming convention</a>, all handovers from a single calendar date live in this one folder. Previous session: <a href="../hand-2026-07-27/index.html">27 July 2026</a> (closed through Handover 10 — <code>STORY-P1-03-01</code>, finished the same day this folder was created by a concurrent thread; see Handover 01 below for how that race is reconciled).</p>
-<span class="status">EPIC-P1: FEAT-P1-01/-02/-03 complete · FEAT-P1-04 in progress (STORY-P1-04-01 Verified — this kernel preempts) · STORY-P1-04-02 next</span>
+<span class="status">EPIC-P1: FEAT-P1-01/-02/-03 complete · FEAT-P1-04 half done (STORY-P1-04-01 Verified — this kernel preempts) · STORY-P1-04-02 started, Test document written, implementation next</span>
 
 <h2>Read this first</h2>
 <ol class="entries">
@@ -151,6 +151,10 @@
   <li class="entry">
     <span class="num">09</span><a href="09-story-p1-04-01-preemption.md">STORY-P1-04-01 Verified &mdash; timer-driven preemption, extended state, and inversion avoidance</a>
     <p><strong>This kernel preempts.</strong> A task whose body contains no <code>switch</code>, no <code>hlt</code> and no scheduler call ran ~1.3M iterations, was taken off the CPU by a real local-APIC tick, and resumed exactly where it was for another ~420k. <code>kernel::dispatch</code> was not modified &mdash; a preempting tick switches into the same <code>dispatcher_ctx</code> <code>run_once</code> is already suspended at. <strong>Closed <code>LE-14</code>, but not where it was scoped</strong>: the adversarial <code>XMM0</code> check failed with the save/restore on the preemption path, because an interrupt handler is itself compiled code on the interrupted task's stack and a <em>non</em>-preempting tick clobbers SSE just as thoroughly, so <code>FXSAVE</code>/<code>FXRSTOR</code> moved into the ISR stub &mdash; then the omission was deliberately falsified to prove the check can fail. <strong>Closed <code>LE-01</code></strong>: the three-task inversion scenario runs for real, with the medium task <code>Ready</code> throughout and frozen at zero while the boosted holder finishes. Opens <code>LE-20</code>; <code>LE-02</code> untouched, so <code>FEAT-P1-04</code> does not exit.</p>
+  </li>
+  <li class="entry">
+    <span class="num">10</span><a href="10-next-session-mandate.md">Next-session mandate &mdash; finish STORY-P1-04-02</a>
+    <p>The start-here document written at the close of this date. <code>EPIC-P1</code> is two thirds done; <code>FEAT-P1-04</code> is half done and <code>STORY-P1-04-02</code> is <strong>already started from an unusual position</strong> &mdash; its Test document is written and no implementation code exists, so the next session begins at Green rather than at spec, and must not rewrite bounds that were deliberately fixed before the fixtures existed. Names four traps up front: an overrun is not a CPU fault and must not be routed through <code>kernel::fault::Disposition</code> (already decided); a tick landing in the dispatcher must be charged to <em>nobody</em>; the Degrade arm is vacuous without a competitor between the offender&rsquo;s original priority and its floor; and the disposition runs in interrupt context standing on the stack it may be about to restart. Also records the exact state of the tree &mdash; three commits on an unmerged branch, only <code>HEAD</code> verified, three files deliberately uncommitted &mdash; and three process lessons, including an adversarial check that failed <em>with</em> the mechanism present and thereby found it in the wrong place.</p>
   </li>
 </ol>
 
