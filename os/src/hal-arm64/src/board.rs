@@ -112,6 +112,10 @@ mod tests {
         // instead. The linker script and this constant must agree with
         // config.txt or the image is entered at the wrong offset.
         assert_eq!(KERNEL_LOAD_ADDRESS, 0x0008_0000);
-        assert!(KERNEL_LOAD_ADDRESS < MIN_RAM_SIZE, "the image loads inside DRAM on every SKU");
+        // Both operands are constants, so this is a compile-time claim rather
+        // than a runtime one. `const { .. }` says so — and makes a future SKU
+        // whose `MIN_RAM_SIZE` dropped below the load address fail to build
+        // rather than fail a test run.
+        const { assert!(KERNEL_LOAD_ADDRESS < MIN_RAM_SIZE, "the image loads inside DRAM on every SKU") };
     }
 }
