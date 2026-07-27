@@ -259,6 +259,9 @@ mod tests {
         ImportEntry {
             dll_name: FixedBytes::for_test(dll_bytes, dll.len()),
             symbol_name: FixedBytes::for_test(symbol_bytes, symbol.len()),
+            // `check_imports` reads only the names; IAT slot resolution is
+            // `crate::iat`'s concern and has its own tests.
+            iat_slot_rva: 0,
         }
     }
 

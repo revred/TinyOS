@@ -147,6 +147,24 @@ pub struct ImportEntry {
     pub dll_name: FixedBytes<MAX_DLL_NAME_LEN>,
     /// The imported symbol's name, e.g. `b"HeapAlloc"`.
     pub symbol_name: FixedBytes<MAX_SYMBOL_NAME_LEN>,
+    /// Relative virtual address of *this import's own slot in the Import
+    /// Address Table* — the 8-byte cell the image's own code indirects
+    /// through at every call site for this symbol (`STORY-P1-03-03`).
+    ///
+    /// Recorded from the descriptor's `FirstThunk` (the IAT), never from
+    /// `OriginalFirstThunk` (the ILT), even though the loader reads *names*
+    /// from the ILT when one is present: the ILT is the immutable
+    /// description of what was imported, the IAT is the mutable table a
+    /// loader is expected to overwrite. Writing a resolved address into the
+    /// ILT would leave every call site still indirecting through an
+    /// unpatched IAT.
+    ///
+    /// Slot index counts **every** thunk in the descriptor's array,
+    /// including ordinal-only imports this parser does not record as
+    /// [`ImportEntry`]s (`pe::parse`'s own doc comment) — an ordinal import
+    /// still occupies its IAT cell, so skipping it would shift every later
+    /// slot address by eight bytes and patch the wrong cells.
+    pub iat_slot_rva: u32,
 }
 
 /// A parsed, validated PE64 image: its entry point, image base, sections,
@@ -400,11 +418,17 @@ pub fn parse<const SECTIONS: usize, const IMPORTS: usize>(
                 rva_to_file_offset(parsed_sections, name_rva).ok_or(PeError::RvaOutOfBounds)?;
             let dll_name: FixedBytes<MAX_DLL_NAME_LEN> = read_c_string(bytes, dll_name_offset)?;
 
+            // Names are read from the ILT when the image has one (it is the
+            // immutable copy); IAT slot addresses always come from
+            // `FirstThunk`, since that is the table a loader patches. When
+            // an image has no separate ILT the two coincide.
             let thunk_rva =
                 if original_first_thunk != 0 { original_first_thunk } else { first_thunk };
+            let iat_base_rva = if first_thunk != 0 { first_thunk } else { thunk_rva };
             if thunk_rva != 0 {
                 let mut thunk_offset = rva_to_file_offset(parsed_sections, thunk_rva)
                     .ok_or(PeError::RvaOutOfBounds)?;
+                let mut thunk_index = 0u32;
                 loop {
                     let thunk_end =
                         thunk_offset.checked_add(THUNK_LEN).ok_or(PeError::Truncated)?;
@@ -425,10 +449,19 @@ pub fn parse<const SECTIONS: usize, const IMPORTS: usize>(
                         if import_count >= IMPORTS {
                             return Err(PeError::TooManyImports);
                         }
-                        imports[import_count] = Some(ImportEntry { dll_name, symbol_name });
+                        let iat_slot_rva = iat_base_rva
+                            .checked_add(
+                                thunk_index
+                                    .checked_mul(THUNK_LEN as u32)
+                                    .ok_or(PeError::RvaOutOfBounds)?,
+                            )
+                            .ok_or(PeError::RvaOutOfBounds)?;
+                        imports[import_count] =
+                            Some(ImportEntry { dll_name, symbol_name, iat_slot_rva });
                         import_count += 1;
                     }
                     thunk_offset += THUNK_LEN;
+                    thunk_index += 1;
                 }
             }
             desc_offset += IMPORT_DESCRIPTOR_LEN;
@@ -481,7 +514,14 @@ mod tests {
         // DLL name + NUL.
         import_block.extend_from_slice(b"MYDLL.DLL\0");
         assert_eq!(import_block.len(), 77);
+        image_around(import_block)
+    }
 
+    /// Wraps an already-built import block in the DOS/PE/COFF/optional
+    /// headers and the single `.text` section that carries it — shared by
+    /// [`well_formed_image`] and [`image_with_split_ilt_and_iat`] so the two
+    /// differ only in the import layout under test.
+    fn image_around(import_block: std::vec::Vec<u8>) -> std::vec::Vec<u8> {
         let section_table_offset = DOS_HEADER_LEN + 4 + COFF_HEADER_LEN + 128;
         let raw_data_offset = section_table_offset + SECTION_HEADER_LEN;
 
@@ -541,6 +581,67 @@ mod tests {
         assert_eq!(imports.len(), 1);
         assert_eq!(imports[0].dll_name.as_bytes(), b"MYDLL.DLL");
         assert_eq!(imports[0].symbol_name.as_bytes(), b"MySymbol");
+        // STORY-P1-03-03: the IAT cell this import's call sites indirect
+        // through — `FirstThunk` plus this import's slot index (0 here).
+        assert_eq!(imports[0].iat_slot_rva, IMAGE_BASE_RVA + 40);
+    }
+
+    /// The same shape as [`well_formed_image`], but with a *separate* ILT
+    /// and IAT (the layout every real linker emits) and an ordinal-only
+    /// import occupying the first thunk slot — so a parser that recorded
+    /// the ILT address, or that counted only named imports, would compute
+    /// the wrong cell for `MySymbol`.
+    fn image_with_split_ilt_and_iat() -> std::vec::Vec<u8> {
+        let ilt_rva = IMAGE_BASE_RVA + 40;
+        let iat_rva = IMAGE_BASE_RVA + 64;
+        let iibn_rva = IMAGE_BASE_RVA + 88;
+        let name_rva = IMAGE_BASE_RVA + 99;
+
+        let mut import_block = std::vec::Vec::new();
+        import_block.extend_from_slice(&ilt_rva.to_le_bytes()); // OriginalFirstThunk
+        import_block.extend_from_slice(&0u32.to_le_bytes());
+        import_block.extend_from_slice(&0u32.to_le_bytes());
+        import_block.extend_from_slice(&name_rva.to_le_bytes()); // Name
+        import_block.extend_from_slice(&iat_rva.to_le_bytes()); // FirstThunk
+        import_block.extend_from_slice(&[0u8; 20]); // null descriptor
+        assert_eq!(import_block.len(), 40);
+
+        // ILT: [0] ordinal-only import, [1] named import, [2] terminator.
+        import_block.extend_from_slice(&(IMAGE_ORDINAL_FLAG64 | 7).to_le_bytes());
+        import_block.extend_from_slice(&(iibn_rva as u64).to_le_bytes());
+        import_block.extend_from_slice(&0u64.to_le_bytes());
+        assert_eq!(import_block.len(), 64);
+        // IAT: same three cells, holding the unpatched thunk values.
+        import_block.extend_from_slice(&(IMAGE_ORDINAL_FLAG64 | 7).to_le_bytes());
+        import_block.extend_from_slice(&(iibn_rva as u64).to_le_bytes());
+        import_block.extend_from_slice(&0u64.to_le_bytes());
+        assert_eq!(import_block.len(), 88);
+        import_block.extend_from_slice(&0u16.to_le_bytes()); // Hint
+        import_block.extend_from_slice(b"MySymbol\0");
+        assert_eq!(import_block.len(), 99);
+        import_block.extend_from_slice(b"MYDLL.DLL\0");
+
+        image_around(import_block)
+    }
+
+    // STORY-P1-03-03: the slot address comes from `FirstThunk`, not the
+    // ILT, and its index counts ordinal-only imports that occupy a cell
+    // without being recorded as an `ImportEntry`. Both mistakes are silent
+    // — they patch a real, wrong cell — so both are pinned here.
+    #[test]
+    fn the_iat_slot_comes_from_first_thunk_and_counts_ordinal_only_slots() {
+        let bytes = image_with_split_ilt_and_iat();
+        let descriptor: LoadDescriptor<4, 4> = parse(&bytes).unwrap();
+        let imports: std::vec::Vec<_> = descriptor.imports().collect();
+        assert_eq!(imports.len(), 1, "the ordinal-only import is not recorded by name");
+        assert_eq!(imports[0].symbol_name.as_bytes(), b"MySymbol");
+        // IAT base (IMAGE_BASE_RVA + 64) + one slot for the ordinal import.
+        assert_eq!(imports[0].iat_slot_rva, IMAGE_BASE_RVA + 64 + 8);
+        assert_ne!(
+            imports[0].iat_slot_rva,
+            IMAGE_BASE_RVA + 40 + 8,
+            "the ILT address must never be recorded as the patch target"
+        );
     }
 
     #[test]

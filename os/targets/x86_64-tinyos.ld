@@ -21,8 +21,14 @@ SECTIONS
         KEEP(*(.note.pvh))
     } :note :text
 
+    /* Section-boundary symbols (STORY-P1-03-02): the W^X kernel page
+     * tables are built from these at run time (exec::kernel_map), so the
+     * permission map can never drift from the layout the linker actually
+     * produced. .boot is deliberately inside the executable range — its
+     * mode-transition code is fetched exactly like .text is. */
     .boot : ALIGN(4K)
     {
+        __kernel_exec_start = .;
         KEEP(*(.boot))
         KEEP(*(.boot.*))
     } :text
@@ -30,11 +36,14 @@ SECTIONS
     .text : ALIGN(4K)
     {
         *(.text .text.*)
+        __kernel_exec_end = .;
     } :text
 
     .rodata : ALIGN(4K)
     {
+        __kernel_rodata_start = .;
         *(.rodata .rodata.*)
+        __kernel_rodata_end = .;
     } :text
 
     .data : ALIGN(4K)
@@ -46,6 +55,7 @@ SECTIONS
     {
         *(COMMON)
         *(.bss .bss.*)
+        __kernel_image_end = .;
     } :text
 
     /DISCARD/ :

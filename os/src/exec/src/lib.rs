@@ -14,6 +14,8 @@
 #![deny(missing_docs)]
 
 pub mod address_space;
+pub mod iat;
+pub mod kernel_map;
 pub mod pe;
 pub mod shared_memory;
 pub mod win32_shim;

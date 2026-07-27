@@ -6,6 +6,7 @@ version = 4
 name = "exec"
 version = "0.1.0"
 dependencies = [
+ "hal",
  "hal-x86_64",
  "kernel",
 ]
@@ -35,6 +36,16 @@ version = "0.1.0"
 dependencies = [
  "hal",
  "hal-x86_64",
+]
+
+[[package]]
+name = "os"
+version = "0.1.0"
+dependencies = [
+ "exec",
+ "hal",
+ "hal-x86_64",
+ "kernel",
 ]
 
 [[package]]
