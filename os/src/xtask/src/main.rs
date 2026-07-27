@@ -116,6 +116,12 @@ fn main() -> ExitCode {
                 // package because it depends on *both* `kernel` and `exec`,
                 // which `kernel`'s own binary can never do.
                 Some("os") => ("os", "os", None),
+                // `STORY-P1-04-03`: the same system image, embedding a real
+                // PE64 whose `.text` is a two-byte self-jump. It is the only
+                // difference between this build and the one above, which is
+                // what makes it evidence that the *shipping* hook enforces
+                // rather than that a fixture can be made to.
+                Some("os-runaway") => ("os", "os", Some("fixture-os-runaway")),
                 Some("broken-boot") => ("kernel", "kernel", Some("fixture-broken-boot")),
                 Some("context-switch") => ("kernel", "kernel", Some("fixture-context-switch")),
                 Some("address-space") => ("exec", "exec-fixture", None),
@@ -245,12 +251,18 @@ fn main() -> ExitCode {
             }
         }
         "make-probe-pe" => {
-            let output = args.find_map(|a| a.strip_prefix("--output=").map(str::to_string));
+            let rest: Vec<String> = args.collect();
+            let output = rest.iter().find_map(|a| a.strip_prefix("--output=").map(str::to_string));
             let Some(output) = output else {
-                eprintln!("usage: cargo run -p xtask -- make-probe-pe --output=<path>");
+                eprintln!("usage: cargo run -p xtask -- make-probe-pe [--runaway] --output=<path>");
                 return ExitCode::from(XtaskExit::HarnessError as u8);
             };
-            let image = probe_pe::build();
+            // `STORY-P1-04-03`: the same image with a self-jump for `.text`.
+            // A workload that never yields is what the shipping image's WCET
+            // enforcement has to be proven against, and there is no Windows
+            // toolchain here to compile one — see `probe_pe::build_runaway`.
+            let runaway = rest.iter().any(|a| a == "--runaway");
+            let image = if runaway { probe_pe::build_runaway() } else { probe_pe::build() };
             match std::fs::write(&output, &image) {
                 Ok(()) => {
                     println!("make-probe-pe: wrote {output} ({} bytes)", image.len());

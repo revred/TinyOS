@@ -129,6 +129,31 @@ fn text_bytes() -> [u8; PAGE as usize] {
     page
 }
 
+/// The runaway image's machine code (`STORY-P1-04-03`).
+///
+/// ```text
+///   jmp $                       EB FE
+/// ```
+///
+/// Two bytes, and that is the whole workload: an unconditional jump to
+/// itself. It calls nothing, so it never reaches an import; it dereferences
+/// nothing, so it never faults; it executes no `hlt`, so it never idles.
+/// **It is software that will not give up the CPU**, which is precisely the
+/// thing a WCET budget exists to be enforced against and the one thing no
+/// previous workload in this project has been.
+///
+/// It keeps the probe's entire import surface (see [`build_runaway`]) so
+/// that the loader, the capability gate and the IAT patcher all behave
+/// identically to the shipping run — the imports are resolved and simply
+/// never called.
+fn runaway_text_bytes() -> [u8; PAGE as usize] {
+    let mut page = [0u8; PAGE as usize];
+    // `EB rel8` with rel8 = -2: the displacement is measured from the end of
+    // the two-byte instruction, so -2 lands back on the jump itself.
+    page[..2].copy_from_slice(&[0xEB, 0xFE]);
+    page
+}
+
 /// `.rdata`: one import descriptor for `KERNEL32.dll` importing
 /// `GetCurrentProcess` then `ExitProcess`, with a separate ILT and IAT.
 fn rdata_bytes() -> [u8; PAGE as usize] {
@@ -169,8 +194,28 @@ fn rdata_bytes() -> [u8; PAGE as usize] {
     page
 }
 
-/// Builds the complete image.
+/// Builds the capability probe: the shipping system image's embedded
+/// workload.
 pub fn build() -> Vec<u8> {
+    build_with(text_bytes())
+}
+
+/// Builds the runaway image (`STORY-P1-04-03`, `TEST-P1-04-03-A` clause 7):
+/// byte-for-byte the capability probe **except** for its `.text` page, which
+/// is [`runaway_text_bytes`]'s self-jump.
+///
+/// The two images differing only in their code is not a convenience — it is
+/// the property that makes a Tier 0 run against this image evidence about
+/// the shipping binary. Everything the PE parser reads, the capability gate
+/// decides on, and the IAT patcher writes is identical, so the only variable
+/// between the two runs is whether the workload ever gives the CPU back. A
+/// host test asserts exactly that byte-range equality.
+pub fn build_runaway() -> Vec<u8> {
+    build_with(runaway_text_bytes())
+}
+
+/// Builds the complete image around a caller-supplied `.text` page.
+fn build_with(text: [u8; PAGE as usize]) -> Vec<u8> {
     let mut image = vec![0u8; IMAGE_LEN];
 
     // -- DOS header --
@@ -222,7 +267,7 @@ pub fn build() -> Vec<u8> {
         image[header + 36..header + 40].copy_from_slice(&characteristics.to_le_bytes());
     }
 
-    image[TEXT_RVA as usize..(TEXT_RVA + PAGE) as usize].copy_from_slice(&text_bytes());
+    image[TEXT_RVA as usize..(TEXT_RVA + PAGE) as usize].copy_from_slice(&text);
     image[RDATA_RVA as usize..(RDATA_RVA + PAGE) as usize].copy_from_slice(&rdata_bytes());
     // `.data` stays zeroed: the result slot starts empty, so a supervisor
     // reading the expected value back can never be reading a value the
@@ -369,5 +414,82 @@ mod tests {
     #[test]
     fn generation_is_deterministic() {
         assert_eq!(build(), build());
+        assert_eq!(build_runaway(), build_runaway());
+    }
+
+    // ---------------------------------------------------------------
+    // STORY-P1-04-03 / TEST-P1-04-03-A clause 9 — the runaway image.
+    // ---------------------------------------------------------------
+
+    // The one property the whole of clause 7 depends on, asserted as bytes.
+    // A mis-assembled jump would present under QEMU as an unexplained fault
+    // rather than as a workload that will not give up the CPU, and the run
+    // would then be proving containment instead of enforcement.
+    #[test]
+    fn the_runaway_image_entry_point_is_an_unconditional_self_jump() {
+        let image = build_runaway();
+        let entry = TEXT_RVA as usize;
+        assert_eq!(&image[entry..entry + 2], &[0xEB, 0xFE], "jmp $ at the entry point");
+        // And nothing follows it that could be reached: the rest of the page
+        // is zero, so a jump that somehow fell through would `add [rax], al`
+        // and fault rather than silently doing something plausible.
+        assert!(image[entry + 2..entry + PAGE as usize].iter().all(|&b| b == 0));
+    }
+
+    // The two images must differ *only* in `.text`. Everything the loader,
+    // the capability gate and the IAT patcher look at is then identical by
+    // construction, so nothing about admission can silently change between
+    // the shipping run and the runaway one — which is what makes the runaway
+    // run evidence about the shipping binary rather than about itself.
+    #[test]
+    fn the_runaway_image_differs_from_the_probe_only_in_its_text_section() {
+        let probe = build();
+        let runaway = build_runaway();
+        assert_eq!(probe.len(), runaway.len());
+        let text = TEXT_RVA as usize..(TEXT_RVA + PAGE) as usize;
+        assert_ne!(probe[text.clone()], runaway[text.clone()], "the code must differ");
+        assert_eq!(probe[..text.start], runaway[..text.start], "headers and section table");
+        assert_eq!(probe[text.end..], runaway[text.end..], ".rdata and .data");
+    }
+
+    // It imports the same two names, by name, through a separate ILT and
+    // IAT — so `check_imports` admits it and `patch_imports` grants exactly
+    // two, identically to the shipping workload. It simply never calls them.
+    #[test]
+    fn the_runaway_image_carries_the_same_admitted_import_surface() {
+        let image = build_runaway();
+        assert_eq!(&image[0..2], b"MZ");
+        assert_eq!(&image[0x80..0x84], b"PE\0\0");
+        assert_ne!(ILT_RVA, IAT_RVA);
+        for index in 0..2u32 {
+            let iat = IAT_RVA as usize + (index as usize * 8);
+            let thunk = u64::from_le_bytes(image[iat..iat + 8].try_into().unwrap());
+            assert_ne!(thunk, 0);
+            assert_eq!(thunk & IMAGE_ORDINAL_FLAG64, 0, "both imports are by name");
+        }
+        let name_at = |rva: u32| {
+            let start = rva as usize + 2;
+            let end = start + image[start..].iter().position(|&b| b == 0).unwrap();
+            std::str::from_utf8(&image[start..end]).unwrap().to_string()
+        };
+        assert_eq!(name_at(IIBN_GET_CURRENT_PROCESS_RVA), "GetCurrentProcess");
+        assert_eq!(name_at(IIBN_EXIT_PROCESS_RVA), "ExitProcess");
+    }
+
+    // No section is both writable and executable — the runaway image must
+    // not ask for something the W^X loader would have to refuse, or the run
+    // would end at the loader instead of at the enforcement path.
+    #[test]
+    fn the_runaway_image_requests_no_writable_executable_section() {
+        let image = build_runaway();
+        let table = 0x80 + 4 + 20 + 240;
+        for index in 0..3 {
+            let header = table + index * 40;
+            let characteristics =
+                u32::from_le_bytes(image[header + 36..header + 40].try_into().unwrap());
+            let writable = characteristics & IMAGE_SCN_MEM_WRITE != 0;
+            let executable = characteristics & IMAGE_SCN_MEM_EXECUTE != 0;
+            assert!(!(writable && executable), "section {index} requests W+X");
+        }
     }
 }

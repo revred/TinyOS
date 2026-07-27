@@ -6,6 +6,16 @@ license.workspace = true
 publish.workspace = true
 description = "The TinyOS system image (STORY-P1-03-03): the real boot path that discovers hardware, installs W^X address spaces, and schedules a real loaded task under capability mediation."
 
+[features]
+# `STORY-P1-04-03` / `TEST-P1-04-03-A` clause 7. Embeds `runaway-probe.txe`
+# instead of `capability-probe.txe` and **changes nothing else**: the tick
+# hook, the dispatch loop, the declared overrun policy and the address-space
+# handling are the same compiled code as the shipping build. That is what
+# makes a Tier 0 run under this feature evidence about the binary that ships
+# rather than about a scenario assembled to pass. The two images are asserted
+# to differ only in `.text` by `xtask`'s own host tests.
+fixture-os-runaway = []
+
 [dependencies]
 kernel = { path = "../kernel" }
 exec = { path = "../exec" }
