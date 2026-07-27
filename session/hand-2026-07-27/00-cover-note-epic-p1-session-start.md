@@ -12,7 +12,7 @@ New session folder per the naming convention (all handovers from one calendar da
 
 ## This session's mandate (from Handover 37, unchanged)
 
-1. **`LE-07` cheap CI probe first** — trigger the existing workflow once, record the observed result (pass or fail) in a Report.
+1. **`LE-07` cheap CI probe first** — **done, same day**: the first push of this work (commit `cbaee41`) triggered CI; both QEMU jobs passed, lint failed on one `clippy::needless_lifetimes` in a test helper (local runs were `--lib`-scoped, CI runs `--all-targets`), fixed in `f1d7c90` whose run `30226663769` is fully green. LE-07 is closed in the register.
 2. **`STORY-P1-01-01`** — the measurement harness, strict TDD (failing tests + `TEST-P1-01-01-A` before implementation), arch-neutral API (cycle source behind a trait — the Pi 5 slice reuses it), subsuming `pool-bench` (`LE-06`). `REPORT-2026-07-27-01`'s scored-against-catalogue discipline is the template its Reports follow.
 3. **`LE-09` proposal** — one-page minimal ARM64/Pi 5 slice scoping with two sequencing options; the user decides.
 4. Then `STORY-P1-01-02` (baselines + regression gate, demonstrated to fail), then `FEAT-P1-02`.
