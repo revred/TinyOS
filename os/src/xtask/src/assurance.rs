@@ -37,6 +37,15 @@ const LANDING_ZONE_FIELD_COUNT: usize = 10;
 const FEATURE_CONTRACT_FIELD_COUNT: usize = 9;
 const CONTRACT_FIELD_COUNT: usize = 7;
 const LOOSE_END_FIELD_COUNT: usize = 8;
+const GUARDRAIL_EVIDENCE_HEADER: &str =
+    "guardrail_id\tdomain\tstory_id\tevidence_kind\tevidence_path\trecorded_in\tnote";
+const GUARDRAIL_EVIDENCE_FIELD_COUNT: usize = 7;
+/// Crates that ship inside the image, and therefore must contain no heap.
+///
+/// `xtask` is deliberately absent: it is a host tool, it links `std`, and it
+/// allocates freely. Conflating it with the shipped crates would either make the
+/// no-heap gate unpassable or make it meaningless.
+const SHIPPED_CRATES: [&str; 6] = ["hal", "hal-arm64", "hal-x86_64", "exec", "kernel", "os"];
 /// Placeholder for a field that has no value yet.
 ///
 /// The TSV convention in this directory is that every field is non-empty, so an
@@ -91,6 +100,13 @@ pub struct AssuranceSummary {
     pub open_loose_end_count: usize,
     /// Number of Epic/Feature/Story documents with a parseable `Status:` header.
     pub status_header_count: usize,
+    /// Number of `PERF-Dnn-Gnn` release gates with dated evidence recorded.
+    ///
+    /// This is a count of gates that have *evidence*, never a score and never a
+    /// pass rate. A gate absent from the register is unevidenced, which is what
+    /// it is; it is never "passed". No Story's assurance state is derived from
+    /// this number — that conversion still requires every applicable gate.
+    pub guardrail_evidence_count: usize,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -304,9 +320,19 @@ pub fn check_assurance_spine(repo_root: &Path) -> Result<AssuranceSummary, Strin
     let loose_ends = validate_loose_ends(&loose_end_contents)?;
     validate_loose_end_references(repo_root, &loose_ends.ids)?;
 
+    // The no-heap gate runs before the evidence register reads it, so a
+    // `PERF-Dnn-G11` row can never outlive the property it records.
+    validate_no_heap(repo_root)?;
+
+    let evidence_path = repo_root.join("goals").join("assurance").join("guardrail-evidence.tsv");
+    let evidence_contents = fs::read_to_string(&evidence_path)
+        .map_err(|error| format!("failed to read {}: {error}", evidence_path.display()))?;
+    let guardrail_evidence_count = validate_guardrail_evidence(&evidence_contents, &contracts)?;
+
     let statuses = validate_status_headers(repo_root)?;
 
     Ok(AssuranceSummary {
+        guardrail_evidence_count,
         feature_count: feature_contracts.features.len(),
         story_count: contracts.stories.len(),
         containment_class_count: containment_classes.len(),
@@ -1176,6 +1202,162 @@ fn validate_loose_ends(contents: &str) -> Result<LooseEndIndex, String> {
         return Err("loose-ends register has no entries".to_string());
     }
     Ok(LooseEndIndex { ids, open_count })
+}
+
+/// Validates the guardrail evidence register and returns the number of gates
+/// carrying dated evidence.
+///
+/// `TEST-P0-01-05-A` clause 1. The check that gives the register its value is
+/// the last one: **a Story may only record evidence in a domain its own
+/// contract selects.** Without it the register would accept evidence filed
+/// against a gate nobody was ever obliged to close, which is a more convincing
+/// way to be wrong than having no register at all.
+///
+/// Clause 2: no aggregate is computed here and no Story state is derived from
+/// these rows. The count is a count of evidence, not a score.
+fn validate_guardrail_evidence(contents: &str, contracts: &ContractIndex) -> Result<usize, String> {
+    let mut lines = contents.lines();
+    let header = lines
+        .next()
+        .ok_or_else(|| "guardrail evidence register is empty".to_string())?
+        .trim_end_matches('\r');
+    if header != GUARDRAIL_EVIDENCE_HEADER {
+        return Err(format!(
+            "unexpected guardrail-evidence header; expected exactly `{GUARDRAIL_EVIDENCE_HEADER}`"
+        ));
+    }
+
+    let mut seen = BTreeSet::new();
+    for (zero_based_index, raw_line) in lines.enumerate() {
+        let line_number = zero_based_index + 2;
+        let fields = non_empty_tsv_fields(
+            raw_line,
+            line_number,
+            GUARDRAIL_EVIDENCE_FIELD_COUNT,
+            "guardrail-evidence",
+        )?;
+
+        let guardrail_id = fields[0];
+        validate_performance_guardrail_id(guardrail_id, line_number)?;
+
+        // `PERF-D04-G11` names its own domain, so a row claiming a different one
+        // is internally inconsistent and every later check would be reading a
+        // domain the id does not refer to.
+        let domain = fields[1];
+        let id_domain = guardrail_id.split('-').nth(1).unwrap_or_default();
+        if id_domain != domain {
+            return Err(format!(
+                "guardrail-evidence line {line_number}: `{guardrail_id}` is a `{id_domain}` \
+                 guardrail but the row records domain `{domain}`"
+            ));
+        }
+
+        let story_id = fields[2];
+        let Some(contract) = contracts.details_by_story.get(story_id) else {
+            return Err(format!(
+                "guardrail-evidence line {line_number}: `{story_id}` has no contract row"
+            ));
+        };
+        if !contract.performance_domains.contains(domain) {
+            return Err(format!(
+                "guardrail-evidence line {line_number}: `{story_id}` records evidence in `{domain}` \
+                 but its contract selects {}",
+                join_owned_ids(&contract.performance_domains)
+            ));
+        }
+
+        if !seen.insert((guardrail_id.to_string(), story_id.to_string())) {
+            return Err(format!(
+                "guardrail-evidence line {line_number}: duplicate evidence for `{guardrail_id}` \
+                 from `{story_id}`"
+            ));
+        }
+    }
+
+    Ok(seen.len())
+}
+
+/// Fails if any shipped crate could allocate.
+///
+/// `TEST-P0-01-05-A` clause 3, and the evidence behind every `PERF-Dnn-G11` row
+/// in the register. `G11` asks for zero heap allocations per steady-state work
+/// unit; this system has no heap at all, which is a stronger property and a
+/// compiler-enforced one — a `no_std` crate with no `#[global_allocator]` cannot
+/// use `alloc` and would fail to build if it tried.
+///
+/// The property was true by design. This makes it true on purpose: the day
+/// someone adds an allocator, the `G11` evidence is withdrawn by CI rather than
+/// silently invalidated by a change nobody connected to it.
+///
+/// `#[cfg(test)]` code is exempt deliberately. Host tests link `std` on purpose
+/// and `kernel::measure`'s tests use `String` today; the claim is about the
+/// shipped image, and conflating the two would make the gate either unpassable
+/// or meaningless.
+fn validate_no_heap(repo_root: &Path) -> Result<(), String> {
+    const FORBIDDEN: [&str; 3] = ["#[global_allocator]", "extern crate alloc", "use alloc::"];
+
+    for crate_name in SHIPPED_CRATES {
+        let crate_src = repo_root.join("os").join("src").join(crate_name).join("src");
+        let mut sources = Vec::new();
+        collect_rust_sources(&crate_src, &mut sources)?;
+        if sources.is_empty() {
+            return Err(format!("no-heap gate: {crate_name} has no Rust sources to check"));
+        }
+
+        let mut declares_no_std = false;
+        for path in sources {
+            let contents = fs::read_to_string(&path)
+                .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+            if contents.contains("no_std") {
+                declares_no_std = true;
+            }
+            let mut in_test_module = false;
+            for (zero_based_index, line) in contents.lines().enumerate() {
+                if line.trim_start().starts_with("#[cfg(test)]") {
+                    in_test_module = true;
+                    continue;
+                }
+                if in_test_module {
+                    continue;
+                }
+                for needle in FORBIDDEN {
+                    if line.contains(needle) {
+                        return Err(format!(
+                            "no-heap gate: {}:{} contains `{needle}` outside `#[cfg(test)]`; \
+                             every `PERF-Dnn-G11` row in guardrail-evidence.tsv rests on this \
+                             system having no heap, so add an allocator only by withdrawing that \
+                             evidence first",
+                            path.display(),
+                            zero_based_index + 1
+                        ));
+                    }
+                }
+            }
+        }
+        if !declares_no_std {
+            return Err(format!(
+                "no-heap gate: crate `{crate_name}` declares no `no_std`, so it links the host \
+                 allocator and cannot support a `G11` claim"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Collects `.rs` files under a directory, recursively.
+fn collect_rust_sources(directory: &Path, output: &mut Vec<PathBuf>) -> Result<(), String> {
+    let entries = fs::read_dir(directory)
+        .map_err(|error| format!("failed to read {}: {error}", directory.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("failed to read a directory entry: {error}"))?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_rust_sources(&path, output)?;
+        } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+            output.push(path);
+        }
+    }
+    Ok(())
 }
 
 /// Fails if any `LE-*` token in the live documents has no row in the register.
@@ -2378,6 +2560,121 @@ mod tests {
             .expect("xtask manifest lives at os/src/xtask")
             .to_path_buf();
         check_assurance_spine(&repo_root).expect("committed assurance spine must be valid")
+    }
+
+    fn evidence_contracts() -> ContractIndex {
+        let fixture = format!(
+            "{CONTRACT_HEADER}\n\
+             STORY-P0-01-01\tFEAT-P0-01\tD01\tSEC-19\tC0\tbaseline-debt\trationale\n\
+             STORY-P0-02-01\tFEAT-P0-02\tD05\tSEC-19\tC0\tbaseline-debt\trationale\n"
+        );
+        let security = SecurityIndex {
+            controls: BTreeSet::from(["SEC-19".to_string()]),
+            classes_by_control: BTreeMap::from([(
+                "SEC-19".to_string(),
+                BTreeSet::from(["C0".to_string()]),
+            )]),
+        };
+        let classes = BTreeSet::from(["C0".to_string()]);
+        let feature_classes = BTreeMap::from([
+            ("FEAT-P0-01".to_string(), BTreeSet::from(["C0".to_string()])),
+            ("FEAT-P0-02".to_string(), BTreeSet::from(["C0".to_string()])),
+        ]);
+        validate_story_contracts(&fixture, &security, &classes, &feature_classes)
+            .expect("fixture contracts are valid")
+    }
+
+    fn evidence_row(guardrail: &str, domain: &str, story: &str) -> String {
+        format!("{guardrail}\t{domain}\t{story}\tstructural\tpath\t2026-07-28\tnote\n")
+    }
+
+    // `TEST-P0-01-05-A` clause 1.
+    #[test]
+    fn guardrail_evidence_counts_valid_rows() {
+        let fixture = format!(
+            "{GUARDRAIL_EVIDENCE_HEADER}\n{}{}",
+            evidence_row("PERF-D01-G11", "D01", "STORY-P0-01-01"),
+            evidence_row("PERF-D05-G11", "D05", "STORY-P0-02-01"),
+        );
+        let count = validate_guardrail_evidence(&fixture, &evidence_contracts())
+            .expect("valid register passes");
+        assert_eq!(count, 2);
+    }
+
+    // `TEST-P0-01-05-A` clause 1: the check the register exists for. Evidence
+    // filed against a gate the Story's own contract never selected is more
+    // convincing than having no register at all, and therefore worse.
+    #[test]
+    fn guardrail_evidence_rejects_a_domain_the_story_does_not_select() {
+        let fixture = format!(
+            "{GUARDRAIL_EVIDENCE_HEADER}\n{}",
+            evidence_row("PERF-D05-G11", "D05", "STORY-P0-01-01"),
+        );
+        let error = validate_guardrail_evidence(&fixture, &evidence_contracts())
+            .expect_err("a domain outside the contract must fail");
+        assert!(error.contains("STORY-P0-01-01"), "{error}");
+        assert!(error.contains("D05"), "{error}");
+    }
+
+    #[test]
+    fn guardrail_evidence_rejects_a_domain_disagreeing_with_its_own_id() {
+        let fixture = format!(
+            "{GUARDRAIL_EVIDENCE_HEADER}\n{}",
+            evidence_row("PERF-D01-G11", "D05", "STORY-P0-02-01"),
+        );
+        let error = validate_guardrail_evidence(&fixture, &evidence_contracts())
+            .expect_err("a mismatched domain must fail");
+        assert!(error.contains("D01"), "{error}");
+    }
+
+    #[test]
+    fn guardrail_evidence_rejects_an_unknown_story() {
+        let fixture = format!(
+            "{GUARDRAIL_EVIDENCE_HEADER}\n{}",
+            evidence_row("PERF-D01-G11", "D01", "STORY-P9-99-99"),
+        );
+        let error = validate_guardrail_evidence(&fixture, &evidence_contracts())
+            .expect_err("an unmapped Story must fail");
+        assert!(error.contains("STORY-P9-99-99"), "{error}");
+    }
+
+    #[test]
+    fn guardrail_evidence_rejects_a_malformed_guardrail_id() {
+        let fixture = format!(
+            "{GUARDRAIL_EVIDENCE_HEADER}\n{}",
+            evidence_row("PERF-D01-G99", "D01", "STORY-P0-01-01"),
+        );
+        validate_guardrail_evidence(&fixture, &evidence_contracts())
+            .expect_err("G99 is not a guardrail");
+    }
+
+    #[test]
+    fn guardrail_evidence_rejects_duplicates() {
+        let row = evidence_row("PERF-D01-G11", "D01", "STORY-P0-01-01");
+        let fixture = format!("{GUARDRAIL_EVIDENCE_HEADER}\n{row}{row}");
+        let error = validate_guardrail_evidence(&fixture, &evidence_contracts())
+            .expect_err("a duplicate pair must fail");
+        assert!(error.contains("duplicate"), "{error}");
+    }
+
+    #[test]
+    fn guardrail_evidence_rejects_a_wrong_header() {
+        let fixture = "guardrail_id\tdomain\n";
+        validate_guardrail_evidence(fixture, &evidence_contracts())
+            .expect_err("a changed header must fail");
+    }
+
+    // `TEST-P0-01-05-A` clause 3: the property every `PERF-Dnn-G11` row rests on.
+    #[test]
+    fn the_shipped_crates_contain_no_heap() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = manifest_dir
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+            .expect("xtask manifest lives at os/src/xtask")
+            .to_path_buf();
+        validate_no_heap(&repo_root).expect("no shipped crate may allocate");
     }
 
     fn loose_end_fixture() -> String {

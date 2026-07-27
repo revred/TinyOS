@@ -545,7 +545,7 @@ fn main() -> ExitCode {
             match result {
                 Ok(summary) => {
                     println!(
-                        "assurance-spine-check: {} Features, {} Stories, {} Tests, {} Reports, {} containment classes, {} boundary tests, {} security controls, {} Protection Domain contracts, {} code-admission gates, {} class communication pairs, {} application/platform targets, {} landing zones, {} selected Story/performance contracts, {} selected application/performance contracts, {} loose ends ({} open), {} status headers",
+                        "assurance-spine-check: {} Features, {} Stories, {} Tests, {} Reports, {} containment classes, {} boundary tests, {} security controls, {} Protection Domain contracts, {} code-admission gates, {} class communication pairs, {} application/platform targets, {} landing zones, {} selected Story/performance contracts, {} selected application/performance contracts, {} loose ends ({} open), {} status headers, {} release gates with evidence",
                         summary.feature_count,
                         summary.story_count,
                         summary.test_count,
@@ -562,7 +562,8 @@ fn main() -> ExitCode {
                         summary.selected_application_performance_contracts,
                         summary.loose_end_count,
                         summary.open_loose_end_count,
-                        summary.status_header_count
+                        summary.status_header_count,
+                        summary.guardrail_evidence_count
                     );
                     ExitCode::SUCCESS
                 }
