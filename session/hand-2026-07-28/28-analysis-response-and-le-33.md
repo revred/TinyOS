@@ -39,6 +39,29 @@ it.
    **549 passing** (498 at Handover 26's close; the delta is the concurrent `hal-arm64` work).
 6. **Jetson Orin Nano is not in `FEAT-P1-07`.** Its §6 boundary excludes PCIe, RP1, Ethernet, USB,
    GPIO and multi-core. Listing Jetson bring-up as current debt implies scope deliberately excluded.
+   The wider point, from the second draft: the Pi 5 is the **only** hardware target carrying a
+   Feature and contract rows. Jetson is in the README's design scope with zero Features, zero
+   Stories and zero contract rows, so it cannot be an "authoritative timing benchmark" today.
+7. **"Tier 0 QEMU x86_64/ARM64 CI pipeline" was false — and the analysis got it from us.**
+   This is the one correction that landed on the repository rather than on the analysis, and it is
+   the most useful thing either draft produced.
+
+   [`README.md`](../../README.md)'s "Default supported set for v1" listed *"QEMU x86_64 + QEMU
+   ARM64 — CI gate, every commit"* under a heading that reads as a description of current state.
+   **It is not one.** Every entry in `cargo run -p xtask -- list-fixtures` is x86_64, and CI's only
+   AArch64 steps `build` and `clippy` `hal-arm64` against the target spec — which establishes that
+   the crate compiles, not that anything runs.
+
+   So a line in the README was asserting ARM64 Tier 0 coverage while `LE-09` and `LE-27` sat open
+   in the register recording that **no ARM64 code in this repository has ever executed, on silicon
+   or under emulation.** A reviewer reading the README in good faith reported a pipeline back to us
+   that does not exist, which is how a stale line does damage: it does not merely fail to inform,
+   it manufactures confirmation.
+
+   The section is amended in place with the reason and the provenance, as a *second* dated
+   correction to the same three lines — the first, on the same date, was the Raspberry Pi phase
+   placement. **Two corrections to one short section in one day is itself the finding**, and it
+   suggests the v1-target list wants a state column rather than another prose note next time.
 
 ## Registered
 
@@ -67,6 +90,35 @@ than the analysis or the reviewing session first stated**:
 
 Those are two *different* failure modes — a declared cell nobody measured, and a domain nobody
 selected — and the bidirectional guard `LE-29` calls for must catch both. The row now says so.
+
+### `LE-34` — the README target list wants a state column, not a third paragraph (new)
+
+The correction above was the *second* dated prose repair to the same three lines in one day. Both
+repairs took the same form — append a paragraph explaining why the line above is not quite true —
+and a third corrector will do it again, because prose has no field a checker can read.
+
+The list needs a **state column** (`planned` / `compiles-only` / `Tier 0 gated` / `hardware in
+hand`) carrying a value per target, so that a claim of coverage becomes something checkable rather
+than something that rots. This is `LE-30`'s failure mode in a second hand-maintained document, and
+the row says so: same shape, different file, and now with a measured drift rate.
+
+### `LE-35` — selecting a `design`-readiness domain needs a rule that has never been written (new)
+
+`LE-29`'s `D17` half has an obvious fix — have some Story select `D17` — and **the obvious fix is
+unsafe as stated.** Selecting a domain pulls all 25 guardrails into the selecting Story's contract.
+`D17`'s readiness is `design`: the subsystem does not exist. So a Story selecting `D17` inherits 25
+obligations, not one of which can be closed.
+
+Handover 25 already set the precedent from the other direction, refusing to record `G11` evidence
+for `design`, `stand-in-only`, `specified` and `unbuilt` domains because *a guardrail cannot be
+closed for a subsystem that does not exist* — and noting that recording all seventeen would have
+validated cleanly and been the cheapest lie available.
+
+**The rule that precedent implies has never been written down.** A Story selecting a
+`design`-readiness domain must initialise those guardrails as **stated open debt at selection
+time**, not as satisfiable obligations. Otherwise the contract presents as closeable, and the
+cheapest lie is available again. The row names where it belongs: `goals/assurance/README.md`, and
+ideally inside `check-assurance-spine` so the shape cannot be got wrong by hand.
 
 ### `LE-31` — first pass done, and it changes the conclusion
 
@@ -113,7 +165,7 @@ indistinguishable from a charter amendment.
 ## Verification
 
 ```text
-check-assurance-spine        green — 33 loose ends (22 open), was 32 (21)
+check-assurance-spine        green — 35 loose ends (24 open), was 32 (21)
 check-performance-catalogue  green — 625 cells (25 x 25)
 cargo test -p xtask          137 passed
 cargo test --workspace       549 passed
@@ -129,3 +181,10 @@ now with two worked instances instead of one hypothetical.
 
 `STORY-P0-05-01` is still the single cheapest thing on the board: one Story, one domain, no hardware,
 and it would move `Stories verified` off zero for the first time.
+
+And one discipline, because this session nearly broke it twice: **a finding that stays in a handover
+stops being read.** `LE-34` and `LE-35` were both, for a while, paragraphs in this document — an
+observation about a README and a design note about a Story that does not exist yet. Neither is a
+defect in code and neither blocks anything today, which is exactly the profile of the findings this
+project keeps rediscovering. They are rows now. `LE-28`, `LE-33` and `LE-30` all say the same thing
+from three different directions, and the register is where that sentence goes.

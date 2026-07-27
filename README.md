@@ -146,6 +146,15 @@ This pairing deliberately avoids a third, non-64-bit microcontroller board for "
 2. Jetson Orin Nano — primary real-world edge target.
 3. Generic x86_64 laptop/NUC — host-bridge and shell UX target.
 
+**This is the v1 target, not the current state — corrected 2026-07-28 (second correction to this
+section).** Item 1 reads as a description of today's CI and is not one: **there is no QEMU ARM64
+gate and no ARM64 fixture.** Every entry in `cargo run -p xtask -- list-fixtures` is x86_64, and
+CI's only AArch64 steps build and lint `hal-arm64` against the target spec — which says the crate
+compiles, not that anything runs. That is exactly what `LE-09` and `LE-27` exist to record: no
+ARM64 code in this repository has ever executed, on silicon or under emulation. An external review
+on this date read this line as current state and reported a "Tier 0 QEMU x86_64/ARM64 pipeline"
+back to us, which is how a line like this does damage.
+
 Real CAN/USB hardware-in-the-loop rigs are added from Phase 3 onward, once the bus stack exists.
 
 **Corrected 2026-07-28.** This line previously placed Raspberry Pi at "Phase 3 onward" alongside the HIL rigs. That is superseded: a Raspberry Pi 5 is in hand and is `EPIC-P1`'s (Phase 1) first physical timing target — see [`FEAT-P1-07`](goals/features/FEAT-P1-07.md). The two were never the same commitment. The HIL rigs wait on the bus stack; the Pi 5 waits on nothing, because the slice that reaches it needs no bus, no network and no drivers — the firmware loads the image from SD and the debug UART carries the results. Note that on a Pi 5 the reverse is emphatically true of networking: USB, Ethernet and GPIO all sit behind the RP1 southbridge over PCIe, so peer-to-peer Ethernet is *not* a near-term transport on this board (`LE-26`).
