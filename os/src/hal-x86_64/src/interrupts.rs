@@ -437,8 +437,30 @@ extern "C" fn spurious_interrupt_handler() {}
 /// define one for yet.
 #[no_mangle]
 extern "C" fn unhandled_interrupt_handler() -> ! {
+    // `TEST-P0-01-04-A` clause 2. The containment action is unchanged — this
+    // adds a diagnostic to it, nothing else. Without the line, an unrouted
+    // interrupt stopped the machine with no output whatsoever, which made
+    // `fixture-idt-apic-unrouted`'s CI step unable to assert anything beyond
+    // an exit code every other failure also produces. Emitted before
+    // `exit_qemu`, which stops the machine.
+    //
+    // The vector is deliberately not named: this is one shared stub installed
+    // for every unrouted vector and it receives no vector argument, so naming
+    // it would need per-vector trampolines (`LE-25`).
+    //
+    // SAFETY: single-CPU fail-closed path, interrupts already masked by the
+    // gate that dispatched here; re-initializing the UART is idempotent.
+    use core::fmt::Write;
+    let mut serial = unsafe { crate::serial::SerialPort::init() };
+    let _ = writeln!(serial, "{UNROUTED_SENTINEL} fail_closed=true");
     exit_qemu(QemuExitCode::Failure)
 }
+
+/// The sentinel [`unhandled_interrupt_handler`] emits before stopping.
+///
+/// Versioned like every other machine-read line this system produces, because
+/// a CI step that greps for it is a consumer with a contract.
+pub const UNROUTED_SENTINEL: &str = "TINYOS-UNROUTED/1";
 
 /// Loads `idt` via `lidt`.
 ///

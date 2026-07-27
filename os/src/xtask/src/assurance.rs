@@ -2323,7 +2323,7 @@ mod tests {
         let summary =
             check_assurance_spine(&repo_root).expect("committed assurance spine must be valid");
         assert_eq!(summary.feature_count, 22);
-        assert_eq!(summary.story_count, 49);
+        assert_eq!(summary.story_count, 50);
         assert_eq!(summary.containment_class_count, 5);
         assert_eq!(summary.boundary_test_count, 20);
         assert_eq!(summary.security_control_count, 20);
@@ -2332,12 +2332,12 @@ mod tests {
         assert_eq!(summary.class_communication_pair_count, 25);
         assert_eq!(summary.application_platform_count, 19);
         assert_eq!(summary.landing_zone_count, 9);
-        assert_eq!(summary.test_count, 36);
-        assert_eq!(summary.report_count, 43);
+        assert_eq!(summary.test_count, 37);
+        assert_eq!(summary.report_count, 44);
         assert!(summary.selected_performance_contracts >= 625);
         assert!(summary.selected_application_performance_contracts >= 625);
-        assert_eq!(summary.loose_end_count, 24);
-        assert_eq!(summary.open_loose_end_count, 14);
+        assert_eq!(summary.loose_end_count, 25);
+        assert_eq!(summary.open_loose_end_count, 15);
     }
 
     fn loose_end_fixture() -> String {

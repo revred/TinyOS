@@ -19,6 +19,7 @@ The first milestone, per [`docs/mvp-delivery-strategy.md`](../../docs/mvp-delive
 | [`STORY-P0-01-01`](../stories/STORY-P0-01-01.md) | Empty kernel crate boots in QEMU x86_64 and halts cleanly | Verified |
 | [`STORY-P0-01-02`](../stories/STORY-P0-01-02.md) | CI pipeline runs format/lint/crate-size-ceiling checks on every PR | Verified |
 | [`STORY-P0-01-03`](../stories/STORY-P0-01-03.md) | `xtask qemu-x86_64` command builds and launches the kernel under QEMU | Verified |
+| [`STORY-P0-01-04`](../stories/STORY-P0-01-04.md) | The harness is held to the discipline it enforces: panics and unrouted interrupts report themselves, both exit-code holes close, and every fixture is provably run by CI | Verified (Tier 0 + Host; assurance `baseline-debt`) |
 
 ## Containment contract
 
@@ -30,4 +31,6 @@ Boot and governance may verify, measure, transfer, or reject; they never create 
 
 ## Exit criteria
 
-All three Stories reach **Verified**. Met locally on 2026-07-26 (see `goals/reports/REPORT-2026-07-26-01` through `-03`); CI has not yet run against this work. This unblocks `FEAT-P0-02` (scheduler), since scheduler work needs a booting kernel to run inside.
+All Stories reach **Verified**. Met locally on 2026-07-26 for the first three (see `goals/reports/REPORT-2026-07-26-01` through `-03`); this unblocked `FEAT-P0-02` (scheduler), since scheduler work needs a booting kernel to run inside.
+
+**`STORY-P0-01-04` (2026-07-28) retired the assurance debt in the harness itself**, and found that this Feature's exit had been claimed on weaker evidence than it read as: nine of the twenty-three Tier 0 fixtures — including `context-switch`, `idt-apic-timer` and `address-space`, all named by owning Test documents claiming Tier 0 evidence — **had no CI step at all**. They passed when run, so the behaviour was sound; what did not exist was continuous evidence for it. All nine now run on every push, both exit-code holes are closed by asserting on serial content rather than on an exit code any failure produces, and a host test fails if the fixture table and the workflow drift apart in either direction.

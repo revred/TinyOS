@@ -64,13 +64,71 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y qemu-system-x86
       - name: Boot kernel (expect success)
         run: cargo run -p xtask -- qemu-x86_64
-      - name: Boot deliberately-broken fixture (expect distinguishable failure code)
+      # STORY-P0-01-04 closed the exit-code hole this step carried for three
+      # mandates. Exit 1 alone was never sufficient: every other failure also
+      # exits 1, so the assertion could not tell "panicked as designed" from
+      # "broke". The blocker was that there was nothing to grep — the panic
+      # handler was a bare exit_qemu and this fixture produced an *empty*
+      # serial capture. Panics now report themselves on COM1, so the
+      # assertion can key on the deliberate panic's own message.
+      - name: TEST-P0-01-03-A — deliberately-broken boot fails closed, for the stated reason
         run: |
           set +e
-          cargo run -p xtask -- qemu-x86_64 --fixture=broken-boot
+          cargo run -p xtask -- qemu-x86_64 --fixture=broken-boot --serial-capture=broken-boot.log
           code=$?
+          set -e
           if [ "$code" -ne 1 ]; then
             echo "expected xtask exit code 1 (KernelBootFailed) for the broken-boot fixture, got $code"
+            cat broken-boot.log || true
+            exit 1
+          fi
+          if ! grep -q 'TINYOS-PANIC/1 message=fixture-broken-boot: deliberate panic' broken-boot.log; then
+            echo "broken-boot exited 1 but not from its own deliberate panic:"
+            cat broken-boot.log || true
+            exit 1
+          fi
+
+      # STORY-P0-01-04, TEST-P0-01-04-A clause 5. Every fixture below existed,
+      # compiled and passed, and no CI step ran any of them — nine of the
+      # twenty-three. An unrun fixture is an unverified fixture that looks
+      # verified, which is LE-07's lesson in a new place, and a host test now
+      # fails if the table and this workflow drift apart in either direction.
+      - name: TEST-P0-02-02-A — cooperative context switch preserves callee-saved state
+        run: cargo run -p xtask -- qemu-x86_64 --fixture=context-switch
+      - name: TEST-P0-04-02-A — IDT loads and the local-APIC timer delivers
+        run: cargo run -p xtask -- qemu-x86_64 --fixture=idt-apic-timer
+      - name: TEST-P0-04-03-A — PCI enumeration over the real ECAM window
+        run: cargo run -p xtask -- qemu-x86_64 --fixture=pci-enumeration
+      - name: TEST-P0-05-02-A — two real disjoint address spaces are built and validated
+        run: cargo run -p xtask -- qemu-x86_64 --fixture=address-space
+      - name: TEST-P0-05-03-A — the Win32 shim resolves through a patched IAT
+        run: cargo run -p xtask -- qemu-x86_64 --fixture=win32-shim
+      - name: TEST-P0-05-04-A — a real PE64 parses and loads
+        run: cargo run -p xtask -- qemu-x86_64 --fixture=blue-sharc
+      - name: TEST-P0-05-04-A — the same bytes, corrupted, are rejected
+        run: cargo run -p xtask -- qemu-x86_64 --fixture=blue-sharc-broken
+      - name: TEST-P0-07-01-A — shared-memory IPC between two tasks
+        run: cargo run -p xtask -- qemu-x86_64 --fixture=shared-memory
+
+      # Same exit-code hole as broken-boot, closed the same way. This
+      # fixture's *correct* outcome is a failure exit code: `int 0x21` reaches
+      # the shared fail-closed default, which stops the machine. The default
+      # handler now names itself first, so "reached containment" is
+      # distinguishable from "died some other way".
+      - name: TEST-P0-04-02-A — an unrouted vector reaches the fail-closed default (expect failure)
+        run: |
+          set +e
+          cargo run -p xtask -- qemu-x86_64 --fixture=idt-apic-unrouted --serial-capture=unrouted.log
+          code=$?
+          set -e
+          if [ "$code" -ne 1 ]; then
+            echo "expected xtask exit code 1 (fail-closed stop) for idt-apic-unrouted, got $code"
+            cat unrouted.log || true
+            exit 1
+          fi
+          if ! grep -q 'TINYOS-UNROUTED/1 fail_closed=true' unrouted.log; then
+            echo "idt-apic-unrouted exited 1 without reaching the fail-closed default handler:"
+            cat unrouted.log || true
             exit 1
           fi
 

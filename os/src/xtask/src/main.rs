@@ -1418,6 +1418,91 @@ mod tests {
         assert!(checked > 0, "the scan must actually find CI fixture invocations");
     }
 
+    // TEST-P0-01-04-A clause 4. A registry that names an owning Test which
+    // does not exist reads as traceability and provides none — the same
+    // failure class the assurance spine already rejects for Stories and
+    // Features, applied to the table that claims to be the fixture set's
+    // source of truth.
+    #[test]
+    fn every_fixture_declares_an_owning_test_that_exists() {
+        let tests = repo_root().join("goals").join("tests");
+        for fixture in FIXTURES {
+            let path = tests.join(format!("{}.md", fixture.owning_test));
+            assert!(
+                path.is_file(),
+                "fixture `{}` declares owning test `{}`, which is not a document under goals/tests/",
+                fixture.name,
+                fixture.owning_test
+            );
+        }
+    }
+
+    // TEST-P0-01-04-A clause 5. The existing drift guard checks CI -> table.
+    // This is the reverse and more dangerous direction: a fixture that
+    // exists, compiles, and is never run is an unverified fixture that looks
+    // verified. LE-07 in a new place.
+    #[test]
+    fn every_fixture_in_the_table_is_run_by_ci() {
+        let workflow = fs::read_to_string(repo_root().join(".github/workflows/ci.yml"))
+            .expect("CI workflow must be readable");
+        let mut invoked: BTreeSet<String> = BTreeSet::new();
+        for (index, _) in workflow.match_indices("--fixture=") {
+            let rest = &workflow[index + "--fixture=".len()..];
+            invoked.insert(
+                rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '-').collect(),
+            );
+        }
+        // Three shapes count as "run", and conflating them would overstate
+        // the gap:
+        //   - `--fixture=<name>` on `qemu-x86_64` (the common case),
+        //   - the bare `qemu-x86_64` / `measure` subcommands, which invoke
+        //     their namespace's default with no flag at all,
+        //   - a name that resolves in the *measurable* namespace, which CI
+        //     drives through `measure` and `check-timing-regression`.
+        // The last is why `--fixture=` is overloaded across two namespaces,
+        // which is the condition the existing drift guard already documents.
+        // Line-based rather than a substring search on `\n`: the workflow is
+        // checked out with CRLF on Windows, so anchoring on a bare newline
+        // silently matches nothing and reports every default-invoked fixture
+        // as unrun.
+        let invoked_bare =
+            |suffix: &str| workflow.lines().any(|line| line.trim_end().ends_with(suffix));
+        // Credit coverage by *build target*, not by name. `--fixture=` is
+        // overloaded across two namespaces and the same binary can be spelled
+        // differently in each — `dispatch` and `dispatch-measure` are one
+        // fixture — so comparing names would report a fixture as unrun that
+        // CI runs under its other spelling.
+        type Target = (&'static str, &'static str, Option<&'static str>);
+        let mut covered: BTreeSet<Target> = BTreeSet::new();
+        if invoked_bare("xtask -- qemu-x86_64") {
+            if let Some(f) = qemu_fixture(None) {
+                covered.insert((f.package, f.binary, f.feature));
+            }
+        }
+        if invoked_bare("xtask -- measure --runs=1") {
+            if let Some(t) = measurable_fixture("measure") {
+                covered.insert((t.package, t.binary, t.feature));
+            }
+        }
+        for name in &invoked {
+            if let Some(f) = qemu_fixture(Some(name)) {
+                covered.insert((f.package, f.binary, f.feature));
+            }
+            if let Some(t) = measurable_fixture(name) {
+                covered.insert((t.package, t.binary, t.feature));
+            }
+        }
+        let missing: Vec<&str> = FIXTURES
+            .iter()
+            .filter(|f| !covered.contains(&(f.package, f.binary, f.feature)))
+            .map(|f| f.name)
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "these fixtures exist but no CI step runs them, so they are unverified while looking verified: {missing:?}"
+        );
+    }
+
     #[test]
     fn usage_names_every_subcommand() {
         let text = usage();

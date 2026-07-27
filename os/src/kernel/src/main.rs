@@ -447,6 +447,6 @@ extern "C" fn tinyos_double_fault_entry(frame: *const hal_x86_64::fault::FaultFr
 }
 
 #[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    exit_qemu(QemuExitCode::Failure)
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    hal_x86_64::qemu_exit::panic_report(info)
 }

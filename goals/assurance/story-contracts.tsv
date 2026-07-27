@@ -2,6 +2,7 @@ story_id	feature_id	performance_domains	security_controls	containment_classes	st
 STORY-P0-01-01	FEAT-P0-01	D01,D25	SEC-01,SEC-17,SEC-19,SEC-20	C0,C1	baseline-debt	Boot timing footprint authenticated C0-to-C1 transfer and bounded-failure evidence
 STORY-P0-01-02	FEAT-P0-01	D25	SEC-14,SEC-19,SEC-20	C0,C1,C2,C3,C4	baseline-debt	Governance must reject incomplete class feature Story control and boundary-test contracts
 STORY-P0-01-03	FEAT-P0-01	D01,D24	SEC-01,SEC-17,SEC-20	C0,C1	baseline-debt	C0 boot failure must be bounded distinguishable and recoverable before C1 transfer
+STORY-P0-01-04	FEAT-P0-01	D01	SEC-19,SEC-20	C0,C1	baseline-debt	A harness that enforces assurance on everything else must itself be enforced, and a fixture nobody runs is an unverified fixture that looks verified
 STORY-P0-02-01	FEAT-P0-02	D05	SEC-03,SEC-05,SEC-20	C1,C2,C3,C4	baseline-debt	Task creation grants no authority and class never implies scheduling priority
 STORY-P0-02-02	FEAT-P0-02	D04,D08	SEC-03,SEC-19	C1,C2,C3,C4	baseline-debt	Context switching must preserve complete isolation and class state with bounded cost
 STORY-P0-02-03	FEAT-P0-02	D06	SEC-03,SEC-05,SEC-20	C1,C2,C3,C4	baseline-debt	Priority inheritance cannot become capability or containment-class inheritance
