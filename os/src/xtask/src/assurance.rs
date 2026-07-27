@@ -2015,7 +2015,7 @@ mod tests {
         let summary =
             check_assurance_spine(&repo_root).expect("committed assurance spine must be valid");
         assert_eq!(summary.feature_count, 22);
-        assert_eq!(summary.story_count, 47);
+        assert_eq!(summary.story_count, 48);
         assert_eq!(summary.containment_class_count, 5);
         assert_eq!(summary.boundary_test_count, 20);
         assert_eq!(summary.security_control_count, 20);
@@ -2024,8 +2024,8 @@ mod tests {
         assert_eq!(summary.class_communication_pair_count, 25);
         assert_eq!(summary.application_platform_count, 19);
         assert_eq!(summary.landing_zone_count, 9);
-        assert_eq!(summary.test_count, 34);
-        assert_eq!(summary.report_count, 41);
+        assert_eq!(summary.test_count, 35);
+        assert_eq!(summary.report_count, 42);
         assert!(summary.selected_performance_contracts >= 625);
         assert!(summary.selected_application_performance_contracts >= 625);
     }

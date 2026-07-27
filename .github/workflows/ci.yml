@@ -160,6 +160,49 @@ jobs:
       - name: TEST-P1-03-03-A — the system image boots, loads and runs a real task
         run: cargo run -p xtask -- qemu-x86_64 --fixture=os
 
+      # STORY-P1-04-03, closing LE-20. For two Features this project had a
+      # Verified preemptive scheduler and a Verified WCET watchdog, and the
+      # binary it ships ran neither: `os` installed no tick hook. This step
+      # boots the *same* `os` binary with one thing changed — the four pages
+      # `include_bytes!` embeds are a real PE64 whose `.text` is `EB FE`,
+      # `jmp $`. It imports the same two names, is admitted by the same
+      # capability gate, and is mapped by the same loader; it simply never
+      # calls, never faults and never yields.
+      #
+      # The hook, the dispatch loop, the declared overrun policy and the
+      # address-space handling are the same compiled code as the step above,
+      # which is what makes this evidence about the shipping binary rather
+      # than about a fixture. With `set_tick_hook` removed and nothing else
+      # changed, this step does not fail an assertion — it times out at 15s,
+      # because the shipping image has no way to take the CPU back.
+      - name: TEST-P1-04-03-A — the shipping image enforces its budget on a workload that never yields
+        run: |
+          set +e
+          cargo run -p xtask -- qemu-x86_64 --fixture=os-runaway --serial-capture=os-runaway.log
+          code=$?
+          set -e
+          if [ "$code" -ne 0 ]; then
+            echo "the shipping image failed to contain a runaway workload (exit $code):"
+            cat os-runaway.log
+            exit 1
+          fi
+          # The exit code alone is not the assertion. `wcet-trip` established
+          # why (REPORT-2026-07-28-04): a run that succeeds for some other
+          # reason is indistinguishable from one that enforced. These are the
+          # two consequences the reporting path cannot produce on its own —
+          # the priority read back out of the scheduler, and the tick hook
+          # having been installed at all.
+          if ! grep -q 'priority_after_enforce=Some(0)' os-runaway.log; then
+            echo "the workload's declared degrade was not applied by the kernel:"
+            cat os-runaway.log
+            exit 1
+          fi
+          if ! grep -q 'hook_installed=true' os-runaway.log; then
+            echo "the shipping image installed no tick hook:"
+            cat os-runaway.log
+            exit 1
+          fi
+
       # STORY-P1-03-03: FEAT-P1-03's last exit criterion. Two dispatch
       # rounds through the production CR3-aware dispatcher differing only in
       # whether the selected task's address space is already loaded, so the

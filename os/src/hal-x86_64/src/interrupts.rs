@@ -299,6 +299,19 @@ pub fn clear_tick_hook() {
     TICK_HOOK.store(0, Ordering::SeqCst);
 }
 
+/// Whether a [`TickHook`] is currently installed (`STORY-P1-04-03`).
+///
+/// **Why a binary wants to ask.** "This image dispatches preemptively and
+/// enforces WCET budgets" is a claim about whether this pointer is non-null,
+/// and the alternative evidence — counting ticks that were actually serviced
+/// — is a claim about how long the boot happened to take relative to the
+/// timer period. A boot fast enough to finish inside one tick would report no
+/// serviced ticks and be indistinguishable from a build that forgot to
+/// install anything. This read is the same fact without the race.
+pub fn tick_hook_installed() -> bool {
+    TICK_HOOK.load(Ordering::SeqCst) != 0
+}
+
 /// Services one local-APIC timer interrupt: records the tick, signals
 /// end-of-interrupt, then invokes the installed [`TickHook`], if any.
 ///
