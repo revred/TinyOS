@@ -61,6 +61,18 @@ Three things in this Feature are hostile input, and each is named because a brin
 
 `LE-09` does not close on this Feature being decomposed, contracted or half-implemented. A decision is not evidence; a plan is not evidence.
 
+### Amended 2026-07-28 by [`ADR 0005`](../../docs/adr/0005-arm64-real-time-tier-is-conditional-on-secure-world-qualification.md) — a measurement establishes the *tier*, not a *bound*
+
+Registered as `LE-43`. The criteria above fused two claims that `ADR 0005` separates, and this section separates them. **Nothing above is withdrawn** — every criterion still holds exactly as written, and this Feature is still the only one that can close `LE-09`.
+
+- **What this Feature establishes on completion:** a hardware tier exists. `LE-09` closes. Every number in its Report is real hardware evidence and is quotable as such.
+- **What it does not establish:** a worst-case latency bound, WCET claim, jitter envelope, or any `G-RT-*` / `G-PA-*` guarantee. Under `ADR 0005` those are quotable only from a platform holding a **secure-world qualification record**, and **no platform holds one — the Pi 5 included.** A GIC's secure interrupt groups routed to `EL3` by `SCR_EL3.FIQ` preempt NS-EL1 irrespective of `PSTATE.I`, unattributably, and no one has yet looked at how this board's firmware configured that.
+- **What this Feature therefore also produces**, as evidence toward a future qualification record rather than as a new exit criterion: **`Q1`** — the Report's board revision, firmware version, clock policy and thermal state already *are* `Q1`, plus the entry exception level the first serial capture reveals; and the beginning of **`Q2`** — what can and cannot be determined about secure-world configuration on closed Pi 5 firmware, stated in those words where it cannot.
+- **Whether the qualification record itself is [`STORY-P1-07-06`](../stories/STORY-P1-07-06.md)'s scope or a seventh Story is not settled here**, and `ADR 0005` deliberately declines to settle it. §6 governs: a seventh Story means re-decomposing this Feature, which is a scope decision rather than a diff.
+- **If a `Q3` residency campaign is attempted, its positive control is not optional.** A campaign that observes nothing reads as qualification and is the cheapest result to obtain, so an instrument that has never been shown to detect a known perturbation cannot be believed when it reports zero. `ADR 0005` §"The trap this ADR sets" is binding on any Report claiming `Q3`.
+
+A Report from this Feature that quotes one of its numbers as a `G04`-class bound is wrong under `ADR 0005`, and **nothing in this repository would currently catch it** — that gap is `LE-33`'s second condition, which is open.
+
 ## Explicit non-goals
 
 Out of scope, and pulling any of them in means re-decomposing rather than extending:

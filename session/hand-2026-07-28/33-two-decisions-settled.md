@@ -10,10 +10,15 @@ blocked on a physical object.
 **On the folder date.** This repository's document dates run one day ahead of the clock, per Handover
 13 §"A note on dates".
 
-**Concurrency (rule 7).** No commits arrived on `main` mid-session. Slot 33 was claimed by creating
+**Concurrency (rule 7).** **A concurrent session was live and `4c1afd1` landed on `main` after this
+session's `d89c00a`** — Handover 34, plus the `LE-43` row it raised against this session's work. The
+full three-way collision and how it was resolved is in §4; the short version is that **nothing
+belonging to the other session was repaired, rewritten, or staged.** Slot 33 was claimed by creating
 this file before its contents were written (rule 4), and `goals/assurance/loose-ends.tsv` was edited
-field-wise and field-count-validated in the same tool call (rule 8). `goals/reports/_soak-p0-03-01.log`
-was dirty on entry and was left alone, as Handover 32 asked.
+field-wise and field-count-validated in the same tool call (rule 8) — which is how the duplicate
+`LE-43` was caught. `goals/reports/_soak-p0-03-01.log` was dirty on entry and was left alone, as
+Handover 32 asked; an empty untracked file named `ADR` in the repository root was likewise left
+alone, unattributable to either session.
 
 ## What landed
 
@@ -24,9 +29,10 @@ was dirty on entry and was left alone, as Handover 32 asked.
 | `ADR 0004` | Status → **Superseded**, with a forward pointer. **Body unedited**, because `README.md`, `EPIC-P1` and the Handover series cite it |
 | `loose-ends.tsv` | `LE-39` and `LE-41` closed against `hand-2026-07-28/33`; **`LE-33`'s row gains a second condition** |
 | `README.md`, `EPIC-P1`, `goals/index.html` | Reconciled to `ADR 0005`; the dashboard's two ADR-0004-dependent claims corrected in place |
+| `FEAT-P1-07`, `STORY-P1-07-06`, `LE-09` | Amended so the Feature and the Story carry `ADR 0005`'s consequence, not only this handover — the fix `LE-43` asks for. **`LE-43` itself is left open**, see §4 |
 
-`check-assurance-spine` green at close: 23 Features, 58 Stories, 45 Tests, 46 Reports, **42 loose ends
-(29 open)**, 84 status headers, 11 release gates with evidence.
+`check-assurance-spine` green at close: 23 Features, 58 Stories, 45 Tests, 46 Reports, **43 loose ends
+(30 open)**, 84 status headers, 11 release gates with evidence.
 
 ## 1. `LE-39` — the premise, and why the repair is not "pick a different architecture"
 
@@ -124,6 +130,57 @@ That is recorded on `LE-33`'s existing row rather than as `LE-43`, deliberately.
 with a wider mouth, and splitting it would let the ARM64 half be closed while the x86_64 half stayed
 open — which is exactly the shape that makes a register stop being readable.
 
+## 4. `LE-43` — this session's reconciliation was incomplete, and a concurrent grounding pass caught it
+
+**Raised by [Handover 34](34-next-session-mandate.md), not by this session, and it is that session's
+row to close.** This section records the defect against the work that caused it and the amendments
+that answer it; **`LE-43` is left `open`**, and `35-le-43-closed.md` is a claimed slot belonging to
+the session that raised it. An earlier draft of this section closed the row and registered a second
+`LE-43` of its own — that duplicate was removed the moment the collision was seen, and this is the
+correction rather than a quiet edit.
+
+`ADR 0005` changed **what closing `LE-09` means**, and §1 above stated that correctly. It did not
+reach the two artifacts that actually *carry* the closure condition:
+
+- **`LE-09`'s `owner_path`** still read *"a Pi 5 must produce a measurement."*
+- **`FEAT-P1-07`'s exit criteria** still asked only for *"board revision, firmware version, clock
+  policy and thermal state."*
+
+Neither mentioned qualification, and inside `goals/` only `EPIC-P1.md` and `index.html` referenced
+the new ADR at all. **The failure is not that the reading was wrong — it is that the reading was in a
+handover.** A session working `FEAT-P1-07` reads the Feature, not the handover. That is
+**prose-versus-register in a fourth place in one week**, after `LE-28` (a warning where a gate
+belonged), `LE-33` (a decision with no machine behind it) and `LE-36` (a rule that existed only after
+the fact).
+
+**The fix separates two claims that were fused**, and the sentence is now in all three places rather
+than one:
+
+> **A measurement establishes the tier. A bound additionally needs a qualification record.**
+
+`LE-09`'s row now says so; `FEAT-P1-07` gains an "Amended by `ADR 0005`" section that **withdraws
+nothing** above it and names what the Feature does and does not establish, including that its Report
+already *is* `Q1`; and `STORY-P1-07-06` gains it as **named debt rather than a seventh acceptance
+criterion**, deliberately — adding a clause there would extend `TEST-P1-07-06-A`, which is not
+amendable from that direction. The Red comes first, from the session that starts the Story.
+
+**The mechanical half is not closed and is deliberately left with `LE-33`.** Amending prose removes
+this instance; it does not stop the next one. A Report from `FEAT-P1-07` quoting one of its numbers as
+a `G04`-class bound would still be wrong and still pass every gate in this repository — which is
+precisely the second condition `LE-33` now owes.
+
+**Concurrency, per rule 7.** `4c1afd1` — *"File Handover 34, and register what Handover 33 did not
+catch"* — arrived on `main` **after** this session's `d89c00a` and while this section was being
+written. It added `LE-43` (open), Handover 34, and a session-index entry. The collision was three-way
+and is recorded because the protocol has no mechanism for it: both sessions independently wrote an
+`LE-43` row, and slot 35 was claimed for its closure while this session was amending the very
+artifacts that closure depends on. **Resolution taken here**: the duplicate row was withdrawn in
+favour of the one that raised the finding, the row was left `open`, and the amendments were kept —
+they touch `FEAT-P1-07`, `STORY-P1-07-06` and `LE-09`'s `owner_path`, none of which the other session
+had modified. **Nothing belonging to the other session was repaired, rewritten, or staged**, and
+`--no-verify` was not reached for. The session closing `LE-43` should verify these three amendments
+rather than inherit them — that is `ADR 0005`'s own trap, applied to a handover instead of a detector.
+
 ## Where that leaves the next session
 
 **The order in [Handover 32](32-next-session-mandate.md) §"What to do" stands, minus its step 1.**
@@ -158,7 +215,7 @@ anything, getting a zero, and filing it. Every Q3 needs its positive control in 
 ```text
 main                    ff980d0 + this session's commit
 assurance spine         23 Features, 58 Stories, 45 Tests, 46 Reports
-                        42 loose ends (29 open), 84 status headers
+                        43 loose ends (30 open), 84 status headers
                         11 release gates with dated evidence, of 391
 host tests              unchanged — no code was written
 Stories verified        0 / 58
