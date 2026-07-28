@@ -48,14 +48,15 @@ If a session ran concurrently, its handover states which commits arrived mid-ses
 
 Later on 2026-07-28, a hand-built edit to [`goals/assurance/loose-ends.tsv`](../goals/assurance/loose-ends.tsv)
 consumed the tab separating two fields, leaving a 7-field row in an 8-field file. The session that
-made it caught the break with its own field-count check and repaired it several steps later. In
+made it caught the break with its own ad-hoc field-count check and repaired it several steps later. In
 between, `check-assurance-spine` failed for a **different** session that had changed nothing — in a
 file they were correctly leaving alone, for a reason they could not diagnose from their own tree.
 
 Rule 2 worked: their pre-commit caught it rather than letting a broken spine ship. But no rule
 prevented it. So: **when you hand-edit a machine-checked file, validate it before your next tool
-call** — a field-count pass or the relevant `check-*` subcommand — not several steps later when you
-happen to look. The edit is not finished until the file parses.
+call** — `cargo run -p xtask -- check-spine-files` — not several steps later when you happen to look.
+The edit is not finished until the file parses. (That command did not exist when this rule was
+written; the next section is why it does now, and why a field count alone was the wrong instrument.)
 
 And when you *hit* someone else's broken row, the response is the one the `STORY-P1-07-02` session
 used, which is better than this document previously asked for:
@@ -79,9 +80,20 @@ a new `HEAD`, diffing the working tree against it, and reading both rows. Credit
 worked, because the next session will reach for the one it is told about.
 
 So rule 8's "validate before your next tool call" needs its instrument named: **validate with the
-check that would fail** — for a spine TSV that is `check-assurance-spine` or an equivalent id-and-order
-pass, not a field count alone. `LE-36` asks for a field-count guard and is, on this evidence,
-**under-specified**: field counting is necessary and demonstrably not sufficient.
+check that would fail** — not a field count alone. `LE-36` asked for a field-count guard and was, on
+this evidence, **under-specified**: field counting is necessary and demonstrably not sufficient.
+
+**The instrument now exists.** `STORY-P0-01-07` closed `LE-36` with:
+
+```text
+cargo run -p xtask -- check-spine-files
+```
+
+It checks header agreement, field count, **key uniqueness and id contiguity** across all 15
+hand-edited spine TSVs and does nothing that requires opening a second file, so it returns fast
+enough that skipping it has no excuse. It is a strict subset of `check-assurance-spine`: it can never
+pass where the full check would fail on the same file. Run it after every hand edit; run
+`check-assurance-spine` before you commit.
 
 **2. Guard the write, not only the result.** A second session read the broken row, built a repair, and
 gated the write on the file's line count — which **refused to fire**, because by then the other session

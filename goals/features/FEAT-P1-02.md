@@ -22,7 +22,7 @@ This Feature is deliberately sequenced **before** active per-task address spaces
 
 | Story | Summary | Status |
 |---|---|---|
-| [`STORY-P1-02-01`](../stories/STORY-P1-02-01.md) | `#PF`/`#GP`/`#UD` handlers: context capture, terminate-vs-halt policy, spoor audit | Verified (Tier 0 + Host; assurance `baseline-debt`) |
+| [`STORY-P1-02-01`](../stories/STORY-P1-02-01.md) | `#PF`/`#GP`/`#UD` handlers: context capture, terminate-vs-halt policy, spoor audit | Functionally Verified (Tier 0 + Host; assurance `baseline-debt`) |
 | [`STORY-P1-02-02`](../stories/STORY-P1-02-02.md) | Double-fault safety: TSS/IST stack switching, fault-in-fault-path survival | Verified (Tier 0 + Host; assurance `baseline-debt`) |
 
 ## Containment contract

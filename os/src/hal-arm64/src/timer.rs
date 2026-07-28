@@ -119,7 +119,7 @@ impl<R: VirtualCounter> CycleSource for Cntvct<R> {
 ///
 /// Constructed by [`GenericTimerTimebase::from_register`]; carries `None`
 /// whenever the frequency could not be trusted, and every consumer downstream
-/// then reports cycles only (the `TINYOS-MEAS/1` envelope emits
+/// then reports cycles only (the `TINYOS-MEAS/2` envelope emits
 /// `cycles_per_us=unknown`).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct GenericTimerTimebase {
@@ -414,6 +414,8 @@ mod tests {
         let environment = Environment {
             tier: "T1",
             arch: Cntvct::<StepCounter>::ARCH,
+            platform: "rpi5-bcm2712",
+            qualification: kernel::measure::UNQUALIFIED,
             cycle_source: Cntvct::<StepCounter>::NAME,
             overhead_cycles: calibration.overhead_cycles(),
             cycles_per_us: timebase.cycles_per_us(),
@@ -428,18 +430,18 @@ mod tests {
         assert_eq!(
             lines.next(),
             Some(
-                "TINYOS-MEAS/1 BEGIN tier=T1 arch=aarch64 cycle_source=cntvct_el0 \
+                "TINYOS-MEAS/2 BEGIN tier=T1 arch=aarch64 platform=rpi5-bcm2712 qualification=none cycle_source=cntvct_el0 \
                  overhead_cycles=0 cycles_per_us=54"
             )
         );
         assert_eq!(
             lines.next(),
             Some(
-                "TINYOS-MEAS/1 METRIC domain=D04 metric=context_switch n=8 dropped=0 warmup=0 \
+                "TINYOS-MEAS/2 METRIC domain=D04 metric=context_switch n=8 dropped=0 warmup=0 \
                  min=10 p50=10 p99=10 p99_9=10 max=10 unit=cycles"
             )
         );
-        assert_eq!(lines.next(), Some("TINYOS-MEAS/1 END metrics=1"));
+        assert_eq!(lines.next(), Some("TINYOS-MEAS/2 END metrics=1"));
         assert_eq!(lines.next(), None);
     }
 }

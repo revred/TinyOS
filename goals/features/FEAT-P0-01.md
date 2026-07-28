@@ -19,9 +19,10 @@ The first milestone, per [`docs/mvp-delivery-strategy.md`](../../docs/mvp-delive
 | [`STORY-P0-01-01`](../stories/STORY-P0-01-01.md) | Empty kernel crate boots in QEMU x86_64 and halts cleanly | Verified |
 | [`STORY-P0-01-02`](../stories/STORY-P0-01-02.md) | CI pipeline runs format/lint/crate-size-ceiling checks on every PR | Verified |
 | [`STORY-P0-01-03`](../stories/STORY-P0-01-03.md) | `xtask qemu-x86_64` command builds and launches the kernel under QEMU | Verified |
-| [`STORY-P0-01-04`](../stories/STORY-P0-01-04.md) | The harness is held to the discipline it enforces: panics and unrouted interrupts report themselves, both exit-code holes close, and every fixture is provably run by CI | Verified (Tier 0 + Host; assurance `baseline-debt`) |
-| [`STORY-P0-01-05`](../stories/STORY-P0-01-05.md) | A guardrail evidence register, and the first release gates that need no hardware: `G11` recorded for ten domains on a compiler-enforced no-heap property | Verified (Host; assurance `baseline-debt`) |
+| [`STORY-P0-01-04`](../stories/STORY-P0-01-04.md) | The harness is held to the discipline it enforces: panics and unrouted interrupts report themselves, both exit-code holes close, and every fixture is provably run by CI | Functionally Verified (Tier 0 + Host; assurance `baseline-debt`) |
+| [`STORY-P0-01-05`](../stories/STORY-P0-01-05.md) | A guardrail evidence register, and the first release gates that need no hardware: `G11` recorded for ten domains on a compiler-enforced no-heap property | Functionally Verified (Host; assurance `baseline-debt`) |
 | [`STORY-P0-01-06`](../stories/STORY-P0-01-06.md) | The `D09` disposition: all 25 gates given a named blocker, `G20` closed on the first measurement of the PE64 load path, and `LE-09` shown to block exactly one of them | Verified (Tier 0 + Host; assurance `baseline-debt`) |
+| [`STORY-P0-01-07`](../stories/STORY-P0-01-07.md) | Four prose rules become gates: bound provenance (`LE-33`), design-readiness open debt (`LE-35`), the fast spine-file check (`LE-36`), and Feature/Story status agreement (`LE-44`) | Functionally Verified (Host; assurance `baseline-debt`) |
 
 ## Containment contract
 

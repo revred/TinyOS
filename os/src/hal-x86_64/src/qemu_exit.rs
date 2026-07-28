@@ -53,7 +53,7 @@ pub fn exit_qemu(code: QemuExitCode) -> ! {
 /// The sentinel a panicking TinyOS binary emits on COM1 before it stops.
 ///
 /// Versioned like every other machine-read line this system produces
-/// (`TINYOS-MEAS/1`, `TINYOS-RESULT/1`), because a host-side assertion that
+/// (`TINYOS-MEAS/2`, `TINYOS-RESULT/1`), because a host-side assertion that
 /// greps for it is a consumer with a contract, not a debugging convenience.
 pub const PANIC_SENTINEL: &str = "TINYOS-PANIC/1";
 

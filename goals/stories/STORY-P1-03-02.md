@@ -1,6 +1,6 @@
 # STORY-P1-03-02 — W^X/NX Mappings, Generation-Safe Teardown, and the First Real Scheduled Task
 
-Status: **In progress — acceptance criteria hardened 2026-07-28 after pre-implementation review**
+Status: **Verified (Tier 0 + Host), 2026-07-28** — assurance state `baseline-debt`; implemented and verified in [`session/hand-2026-07-28/04-story-p1-03-02-wx-seal-and-first-real-task.md`](../../session/hand-2026-07-28/04-story-p1-03-02-wx-seal-and-first-real-task.md), after the acceptance criteria were hardened against nine pre-implementation defects. This header read `In progress` for four days while [`FEAT-P1-03`](../features/FEAT-P1-03.md) recorded the Story as `Verified` in two places; the disagreement was found by `LE-44`'s cross-check in [`STORY-P0-01-07`](STORY-P0-01-07.md) and is the sharpest instance that row predicted
 Feature: [`FEAT-P1-03`](../features/FEAT-P1-03.md)
 Introduced in: [`session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md`](../../session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md)
 Scope finalized in: [`session/hand-2026-07-28/02-first-real-task-integration-proposal.md`](../../session/hand-2026-07-28/02-first-real-task-integration-proposal.md)

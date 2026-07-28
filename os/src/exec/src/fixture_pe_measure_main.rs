@@ -223,6 +223,8 @@ fn run() -> bool {
     let environment = Environment {
         tier: "T0",
         arch: "x86_64",
+        platform: "qemu-tcg-x86_64",
+        qualification: kernel::measure::UNQUALIFIED,
         cycle_source: "Tsc",
         overhead_cycles: calibration.overhead_cycles(),
         cycles_per_us: timebase.cycles_per_us(),

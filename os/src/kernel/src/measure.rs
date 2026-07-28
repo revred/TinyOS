@@ -38,7 +38,16 @@ use hal::time::CycleSource;
 /// The report envelope's version sentinel. Bumping the digit is a breaking
 /// change to the format `xtask`'s parser accepts — the parser rejects every
 /// version it does not know rather than best-effort parsing an unknown one.
-pub const ENVELOPE: &str = "TINYOS-MEAS/1";
+pub const ENVELOPE: &str = "TINYOS-MEAS/2";
+
+/// The value [`Environment::qualification`] carries when the measuring platform
+/// holds no secure-world qualification record.
+///
+/// Written explicitly rather than left absent, because `ADR 0005` decision 3 is
+/// that **the default for a platform with no record is "not qualified", never
+/// "presumed clean"** — and an absent field is exactly the silence that reads as
+/// the second one.
+pub const UNQUALIFIED: &str = "none";
 
 /// The unit every percentile in this envelope is denominated in. Cycles, not
 /// microseconds: a cycle count is what a [`CycleSource`] can honestly
@@ -296,6 +305,23 @@ pub struct Environment<'a> {
     /// The established cycles-per-microsecond factor, or `None` when no
     /// trustworthy factor exists — emitted as `unknown`, never as a guess.
     pub cycles_per_us: Option<u32>,
+    /// Which *platform* produced these samples, not merely which architecture
+    /// (`qemu-tcg-x86_64`, `rpi5-bcm2712`, ...), resolving against
+    /// `goals/assurance/qualified-platforms.tsv`.
+    ///
+    /// `ADR 0005` made the real-time tier a property of a qualified platform
+    /// rather than of an instruction set: a bare-metal AArch64 board with no
+    /// secure interrupts routed to `EL3` has no hole at all, and one holding
+    /// firmware that routed several has a large one. `arch` alone cannot tell
+    /// those apart, so `arch` alone cannot decide what may be quoted.
+    pub platform: &'a str,
+    /// The `REPORT-*` id of the platform's secure-world qualification record,
+    /// or [`UNQUALIFIED`].
+    ///
+    /// Emitted by the fixture rather than added by a human afterwards, so that
+    /// a measurement carries its own provenance from the moment it exists.
+    /// `LE-33`'s second condition, and the field the host-side bound gate reads.
+    pub qualification: &'a str,
 }
 
 /// One metric's identity plus its summary, as emitted on one `METRIC` line.
@@ -313,7 +339,7 @@ pub struct Metric<'a> {
     pub summary: Summary,
 }
 
-/// Emits the versioned `TINYOS-MEAS/1` envelope to any [`Write`] sink — COM1
+/// Emits the versioned `TINYOS-MEAS/2` envelope to any [`Write`] sink — COM1
 /// inside a fixture, a `String` in a host test.
 ///
 /// The envelope is three line kinds, in order: one `BEGIN` carrying the
@@ -334,9 +360,12 @@ impl<'w, W: Write> Report<'w, W> {
         let report = Report { sink, emitted: 0 };
         write!(
             report.sink,
-            "{ENVELOPE} BEGIN tier={} arch={} cycle_source={} overhead_cycles={} cycles_per_us=",
+            "{ENVELOPE} BEGIN tier={} arch={} platform={} qualification={} cycle_source={} \
+             overhead_cycles={} cycles_per_us=",
             environment.tier,
             environment.arch,
+            environment.platform,
+            environment.qualification,
             environment.cycle_source,
             environment.overhead_cycles
         )?;
@@ -588,6 +617,8 @@ mod tests {
         let environment = Environment {
             tier: "T0",
             arch: "x86_64",
+            platform: "qemu-tcg-x86_64",
+            qualification: UNQUALIFIED,
             cycle_source: "rdtsc",
             overhead_cycles: 26,
             cycles_per_us: Some(1_000),
@@ -613,11 +644,11 @@ mod tests {
 
         assert_eq!(
             sink,
-            "TINYOS-MEAS/1 BEGIN tier=T0 arch=x86_64 cycle_source=rdtsc overhead_cycles=26 \
-             cycles_per_us=1000\n\
-             TINYOS-MEAS/1 METRIC domain=D07 metric=pool_alloc_free_round_trip n=10000 dropped=0 \
+            "TINYOS-MEAS/2 BEGIN tier=T0 arch=x86_64 platform=qemu-tcg-x86_64 \
+             qualification=none cycle_source=rdtsc overhead_cycles=26 cycles_per_us=1000\n\
+             TINYOS-MEAS/2 METRIC domain=D07 metric=pool_alloc_free_round_trip n=10000 dropped=0 \
              warmup=500 min=40 p50=44 p99=60 p99_9=120 max=900 unit=cycles\n\
-             TINYOS-MEAS/1 END metrics=1\n"
+             TINYOS-MEAS/2 END metrics=1\n"
         );
     }
 
@@ -627,6 +658,8 @@ mod tests {
         let environment = Environment {
             tier: "T0",
             arch: "x86_64",
+            platform: "qemu-tcg-x86_64",
+            qualification: UNQUALIFIED,
             cycle_source: "rdtsc",
             overhead_cycles: 26,
             cycles_per_us: None,
@@ -643,6 +676,8 @@ mod tests {
         let environment = Environment {
             tier: "T0",
             arch: "x86_64",
+            platform: "qemu-tcg-x86_64",
+            qualification: UNQUALIFIED,
             cycle_source: "test",
             overhead_cycles: 0,
             cycles_per_us: None,

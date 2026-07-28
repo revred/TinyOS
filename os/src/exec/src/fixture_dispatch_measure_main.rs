@@ -35,7 +35,7 @@
 //! where it belongs: it is this fixture's own setup, not part of the
 //! dispatch round under test.
 //!
-//! Reports through the same `TINYOS-MEAS/1` envelope and `TINYOS-RESULT/1`
+//! Reports through the same `TINYOS-MEAS/2` envelope and `TINYOS-RESULT/1`
 //! sentinel every other measured fixture uses, so `xtask measure` and the
 //! `check-timing-regression` gate consume it with no special case.
 
@@ -327,6 +327,8 @@ fn run() -> bool {
     let environment = Environment {
         tier: "T0",
         arch: "x86_64",
+        platform: "qemu-tcg-x86_64",
+        qualification: kernel::measure::UNQUALIFIED,
         cycle_source: "Tsc",
         overhead_cycles: calibration.overhead_cycles(),
         cycles_per_us: timebase.cycles_per_us(),

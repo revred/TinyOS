@@ -54,6 +54,40 @@ The rule that "no mapped release gate may be failed, missing, waived silently, o
 
 The register's own integrity check is the one that matters: **a Story may only file evidence in a domain its own contract selects.** Evidence filed against a gate nobody was ever obliged to close is a more convincing way to be wrong than having no register at all.
 
+### Selecting a domain whose subsystem does not exist: stated open debt
+
+Added by [`STORY-P0-01-07`](../stories/STORY-P0-01-07.md), closing `LE-35`. Handover 25 set the precedent and never wrote the rule down.
+
+Selecting a performance domain pulls **all 25 of its guardrails** into the selecting Story's contract. Where the domain's `readiness` column in [`../performance/catalogue.tsv`](../performance/catalogue.tsv) is `design`, `stand-in-only`, `specified` or `unbuilt`, **the subsystem does not exist, and not one of those 25 can be closed.** A guardrail cannot be closed for something that has not been built, and the absence of a heap in unwritten code is evidence about nothing.
+
+So a selection of that kind is **initialised as stated open debt at the moment it is made**, in [`open-debt.tsv`](open-debt.tsv), with a reason per `(Story, domain)` pair. Left implicit, the contract presents as satisfiable and the cheapest lie available becomes recording all 25.
+
+`check-assurance-spine` enforces it in both directions, and the second direction matters as much as the first:
+
+- a contract selecting a non-implemented-readiness domain **without** a debt row is rejected, naming the readiness;
+- a debt row for a domain that *is* implemented (`prototype`, `prototype-cooperative`, `prototype-inactive`, `partial`) is rejected — **debt may name a subsystem that does not exist; it may not excuse one that does**;
+- a debt row whose recorded readiness disagrees with the catalogue is rejected;
+- a `(Story, domain)` pair present in **both** `open-debt.tsv` and `guardrail-evidence.tsv` is rejected. A gate cannot be simultaneously unclosable and closed.
+
+Debt is not a waiver. The obligation stays in the contract and stays visible; what the register records is that it cannot be discharged yet, and why.
+
+### Quoting a worst-case bound: provenance, not just a number
+
+Added by [`STORY-P0-01-07`](../stories/STORY-P0-01-07.md), closing `LE-33`. The decisions are [`ADR 0004`](../../docs/adr/0004-arm64-is-the-real-time-tier.md) and [`ADR 0005`](../../docs/adr/0005-arm64-real-time-tier-is-conditional-on-secure-world-qualification.md); until now both were prose, and a Report could file a `G04` row from a QEMU x86_64 run with every gate green.
+
+`G04` is the bound-class column — *"observed maximum and WCET bound"* — and it is the only one that asserts what cannot be exceeded rather than describing what was seen. Filing a `G04` row therefore requires more than a measurement:
+
+1. The Report must carry a `TINYOS-BOUND/1` claim line for that guardrail id, naming its `tier`, `arch`, `platform` and `qualification` — the same provenance the `TINYOS-MEAS/2` envelope now emits at the moment of measurement.
+2. The claim is **refused** if its tier is `T0` (an emulator), its architecture is `x86_64` (SMIs are outside the OS's authority by design), or its platform is not `qualified` in [`qualified-platforms.tsv`](qualified-platforms.tsv).
+3. **A platform absent from that register is unqualified, never presumed clean.** Silence is not evidence. As of writing, the count of qualified platforms is **zero — the Raspberry Pi 5 included.**
+
+What this does *not* do is read English. A Report may still state a bound in a sentence, and no lint here parses sentences. What it makes impossible is a bound entering the machine-readable spine from a source the ADRs disqualify.
+
+### Two commands, and which to run when
+
+- `cargo run -p xtask -- check-spine-files` — fast. Header agreement, field count, key uniqueness and id contiguity on all 15 hand-edited TSVs, and nothing that requires opening a second file. This is the instrument [`agent/CONCURRENT_SESSIONS.md`](../../agent/CONCURRENT_SESSIONS.md) rule 8 asks you to run **between two edits**, and it is a strict subset of the full check.
+- `cargo run -p xtask -- check-assurance-spine` — everything below, including the cross-file joins the fast check deliberately skips. This is what CI gates on.
+
 All 23 currently functional-Verified Phase-0 Stories are `baseline-debt`; the two planned Stories are `specified`. This avoids rewriting history or pretending that functional tests measured latency tails, CPU cycles, memory allocations, active cross-process isolation, signing, or hostile-load safety.
 
 ## What CI enforces
@@ -78,6 +112,10 @@ All 23 currently functional-Verified Phase-0 Stories are `baseline-debt`; the tw
 - a Report that references no mapped Story or Test;
 - malformed, duplicate, or unknown `Dnn` and `SEC-nn` references;
 - a guardrail-evidence row whose id is malformed, whose domain disagrees with its own id, whose Story has no contract row, whose Story does not select the domain it claims evidence in, or that duplicates an existing `(guardrail, story)` pair;
+- a domain selection whose subsystem does not exist and which is not initialised as stated open debt, a debt row for an implemented domain, a debt row disagreeing with the catalogue's readiness, or a `(Story, domain)` pair that is both open debt and evidenced (`LE-35`);
+- a `G04` bound-class evidence row whose Report carries no `TINYOS-BOUND/1` claim, or whose claim is sourced from Tier 0, from `x86_64`, or from a platform holding no secure-world qualification record (`LE-33`, `ADR 0004` + `ADR 0005`);
+- a malformed platform register row, a `qualified` platform citing a Report that does not exist, or an `unqualified` one citing a qualification record at all;
+- **a Feature Stories-table row that disagrees with the referenced Story's own `Status:` header** — the state word compared exactly, and `criterion N` / `criteria N and M` tokens compared as a set (`LE-44`);
 - **a shipped crate that could allocate** — every crate inside the image must declare `no_std` and must not declare `#[global_allocator]`, `extern crate alloc`, or `use alloc::` outside `#[cfg(test)]`. This is the evidence behind every `PERF-Dnn-G11` row: the guardrail asks for zero heap allocations per steady-state work unit, and this system has no heap at all, which is stronger and compiler-enforced. The gate exists so that adding an allocator withdraws the evidence loudly instead of invalidating it silently;
 - an unknown assurance state;
 - an incomplete security control catalogue;

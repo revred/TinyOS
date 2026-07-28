@@ -1,4 +1,4 @@
-//! Host-side parser for the kernel measurement harness's `TINYOS-MEAS/1`
+//! Host-side parser for the kernel measurement harness's `TINYOS-MEAS/2`
 //! envelope (`STORY-P1-01-01`), plus the run-to-run variance arithmetic the
 //! Story's third acceptance criterion requires.
 //!
@@ -22,7 +22,7 @@ use std::fmt;
 /// The only envelope version this parser accepts. An unknown version is an
 /// error rather than a best-effort parse: the format's whole purpose is that
 /// a consumer knows exactly which keys carry which meaning.
-pub const SUPPORTED_ENVELOPE: &str = "TINYOS-MEAS/1";
+pub const SUPPORTED_ENVELOPE: &str = "TINYOS-MEAS/2";
 
 /// The sentinel every envelope line starts with, regardless of version — how
 /// this parser tells "a measurement line I must validate" from "unrelated
@@ -72,6 +72,14 @@ pub struct Envelope {
     pub tier: String,
     /// Target architecture.
     pub arch: String,
+    /// The measuring platform, resolving against
+    /// `goals/assurance/qualified-platforms.tsv`. `ADR 0005` made the real-time
+    /// tier a property of a *qualified platform* rather than of an instruction
+    /// set, so `arch` alone can no longer decide what a run may be quoted as.
+    pub platform: String,
+    /// The `REPORT-*` id of the platform's secure-world qualification record,
+    /// or [`UNQUALIFIED`].
+    pub qualification: String,
     /// Cycle-source implementor name.
     pub cycle_source: String,
     /// Calibrated per-sample overhead already subtracted guest-side.
@@ -145,6 +153,15 @@ pub enum TimingError {
         key: String,
         /// The offending value.
         value: String,
+    },
+    /// A field constrained to a fixed vocabulary carried something else.
+    UnexpectedValue {
+        /// The offending key.
+        key: String,
+        /// The offending value.
+        value: String,
+        /// What the format permits there.
+        expected: &'static str,
     },
     /// A token in a record was not a `key=value` pair at all.
     MalformedField {
@@ -242,6 +259,9 @@ impl fmt::Display for TimingError {
             }
             TimingError::NotANumber { key, value } => {
                 write!(formatter, "key `{key}` expects a number, found `{value}`")
+            }
+            TimingError::UnexpectedValue { key, value, expected } => {
+                write!(formatter, "key `{key}` expects {expected}, found `{value}`")
             }
             TimingError::MalformedField { record, token } => {
                 write!(formatter, "{record} record has token `{token}`, which is not a `key=value` pair")
@@ -348,7 +368,20 @@ pub fn parse_result(text: &str) -> Result<RunResult, TimingError> {
 }
 
 /// `BEGIN`'s required keys, in the order the harness emits them.
-const BEGIN_KEYS: [&str; 5] = ["tier", "arch", "cycle_source", "overhead_cycles", "cycles_per_us"];
+const BEGIN_KEYS: [&str; 7] = [
+    "tier",
+    "arch",
+    "platform",
+    "qualification",
+    "cycle_source",
+    "overhead_cycles",
+    "cycles_per_us",
+];
+
+/// The `qualification=` value a platform holding no secure-world qualification
+/// record emits. `ADR 0005` decision 3: silence is not evidence, so the absence
+/// is written down rather than left out.
+pub const UNQUALIFIED: &str = "none";
 
 /// `METRIC`'s required keys.
 const METRIC_KEYS: [&str; 11] =
@@ -382,6 +415,8 @@ pub fn parse_stream(text: &str) -> Result<Envelope, TimingError> {
                 envelope = Some(Envelope {
                     tier: field(&fields, "BEGIN", "tier")?.to_string(),
                     arch: field(&fields, "BEGIN", "arch")?.to_string(),
+                    platform: field(&fields, "BEGIN", "platform")?.to_string(),
+                    qualification: qualification(&fields)?,
                     cycle_source: field(&fields, "BEGIN", "cycle_source")?.to_string(),
                     overhead_cycles: number(&fields, "BEGIN", "overhead_cycles")?,
                     cycles_per_us: optional_factor(&fields)?,
@@ -608,6 +643,39 @@ fn optional_factor(fields: &[(String, String)]) -> Result<Option<u32>, TimingErr
     })
 }
 
+/// Parses `qualification=`, which is either [`UNQUALIFIED`] or a well-formed
+/// `REPORT-YYYY-MM-DD-NN` id.
+///
+/// Nothing else is accepted, and that is the point: a free-text value would let
+/// `qualification=pending` or `qualification=see-below` travel in an envelope
+/// and read, downstream, as though a record existed. `ADR 0005` decision 3 has
+/// exactly two states and so does this field.
+fn qualification(fields: &[(String, String)]) -> Result<String, TimingError> {
+    let value = field(fields, "BEGIN", "qualification")?;
+    if value == UNQUALIFIED {
+        return Ok(value.to_string());
+    }
+    let well_formed = value
+        .strip_prefix("REPORT-")
+        .map(|rest| {
+            let parts: Vec<&str> = rest.split('-').collect();
+            parts.len() == 4
+                && parts[0].len() == 4
+                && parts[1..].iter().all(|part| part.len() == 2)
+                && parts.iter().all(|part| part.bytes().all(|byte| byte.is_ascii_digit()))
+        })
+        .unwrap_or(false);
+    if well_formed {
+        Ok(value.to_string())
+    } else {
+        Err(TimingError::UnexpectedValue {
+            key: "qualification".to_string(),
+            value: value.to_string(),
+            expected: "`none` or a `REPORT-YYYY-MM-DD-NN` id",
+        })
+    }
+}
+
 fn validate_metric(record: &MetricRecord) -> Result<(), TimingError> {
     if record.n == 0 {
         return Err(TimingError::EmptyMetric { key: record.key() });
@@ -629,9 +697,9 @@ fn validate_metric(record: &MetricRecord) -> Result<(), TimingError> {
 mod tests {
     use super::*;
 
-    const BEGIN: &str = "TINYOS-MEAS/1 BEGIN tier=T0 arch=x86_64 cycle_source=rdtsc overhead_cycles=26 cycles_per_us=1000";
-    const METRIC_D07: &str = "TINYOS-MEAS/1 METRIC domain=D07 metric=pool_alloc_free n=10000 dropped=0 warmup=500 min=40 p50=44 p99=60 p99_9=120 max=900 unit=cycles";
-    const METRIC_D04: &str = "TINYOS-MEAS/1 METRIC domain=D04 metric=context_switch n=5000 dropped=0 warmup=100 min=300 p50=340 p99=520 p99_9=900 max=4000 unit=cycles";
+    const BEGIN: &str = "TINYOS-MEAS/2 BEGIN tier=T0 arch=x86_64 platform=qemu-tcg-x86_64 qualification=none cycle_source=rdtsc overhead_cycles=26 cycles_per_us=1000";
+    const METRIC_D07: &str = "TINYOS-MEAS/2 METRIC domain=D07 metric=pool_alloc_free n=10000 dropped=0 warmup=500 min=40 p50=44 p99=60 p99_9=120 max=900 unit=cycles";
+    const METRIC_D04: &str = "TINYOS-MEAS/2 METRIC domain=D04 metric=context_switch n=5000 dropped=0 warmup=100 min=300 p50=340 p99=520 p99_9=900 max=4000 unit=cycles";
 
     fn stream(lines: &[&str]) -> String {
         let mut text = String::new();
@@ -645,7 +713,7 @@ mod tests {
     // Clause 6, happy path: a well-formed stream parses into records.
     #[test]
     fn a_well_formed_stream_parses_into_per_metric_records() {
-        let text = stream(&[BEGIN, METRIC_D07, METRIC_D04, "TINYOS-MEAS/1 END metrics=2"]);
+        let text = stream(&[BEGIN, METRIC_D07, METRIC_D04, "TINYOS-MEAS/2 END metrics=2"]);
         let envelope = parse_stream(&text).expect("stream is well formed");
         assert_eq!(envelope.tier, "T0");
         assert_eq!(envelope.arch, "x86_64");
@@ -664,7 +732,7 @@ mod tests {
     #[test]
     fn an_unknown_timebase_parses_as_no_timebase_not_as_zero() {
         let begin = BEGIN.replace("cycles_per_us=1000", "cycles_per_us=unknown");
-        let text = stream(&[&begin, METRIC_D07, "TINYOS-MEAS/1 END metrics=1"]);
+        let text = stream(&[&begin, METRIC_D07, "TINYOS-MEAS/2 END metrics=1"]);
         assert_eq!(parse_stream(&text).expect("well formed").cycles_per_us, None);
     }
 
@@ -675,7 +743,7 @@ mod tests {
             BEGIN,
             "conformance: cycle source ok (span=812)",
             METRIC_D07,
-            "TINYOS-MEAS/1 END metrics=1",
+            "TINYOS-MEAS/2 END metrics=1",
             "fixture-measure overall_ok=true",
         ]);
         assert_eq!(parse_stream(&text).expect("well formed").metrics.len(), 1);
@@ -690,9 +758,9 @@ mod tests {
     #[test]
     fn an_aarch64_envelope_parses_with_no_arch_specific_parser_change() {
         let text = stream(&[
-            "TINYOS-MEAS/1 BEGIN tier=T1 arch=aarch64 cycle_source=cntvct_el0 overhead_cycles=0 cycles_per_us=54",
-            "TINYOS-MEAS/1 METRIC domain=D04 metric=context_switch n=8 dropped=0 warmup=0 min=10 p50=10 p99=10 p99_9=10 max=10 unit=cycles",
-            "TINYOS-MEAS/1 END metrics=1",
+            "TINYOS-MEAS/2 BEGIN tier=T1 arch=aarch64 platform=rpi5-bcm2712 qualification=none cycle_source=cntvct_el0 overhead_cycles=0 cycles_per_us=54",
+            "TINYOS-MEAS/2 METRIC domain=D04 metric=context_switch n=8 dropped=0 warmup=0 min=10 p50=10 p99=10 p99_9=10 max=10 unit=cycles",
+            "TINYOS-MEAS/2 END metrics=1",
         ]);
         let envelope = parse_stream(&text).expect("an aarch64 stream is well formed");
         assert_eq!(envelope.tier, "T1");
@@ -710,7 +778,7 @@ mod tests {
             "fixture-measure phase 1/5 done",
             BEGIN,
             METRIC_D07,
-            "TINYOS-MEAS/1 END metrics=1",
+            "TINYOS-MEAS/2 END metrics=1",
             "TINYOS-RESULT/1 fixture=measure ok=true",
         ]);
         assert_eq!(parse_result(&text), Ok(RunResult { fixture: "measure".to_string(), ok: true }));
@@ -720,7 +788,7 @@ mod tests {
 
     #[test]
     fn a_stream_with_no_verdict_is_not_evidence() {
-        let text = stream(&[BEGIN, METRIC_D07, "TINYOS-MEAS/1 END metrics=1"]);
+        let text = stream(&[BEGIN, METRIC_D07, "TINYOS-MEAS/2 END metrics=1"]);
         assert_eq!(parse_result(&text), Err(TimingError::MissingResult));
     }
 
@@ -760,7 +828,7 @@ mod tests {
         let text = stream(&[
             BEGIN,
             METRIC_D07,
-            "TINYOS-MEAS/1 END metrics=1",
+            "TINYOS-MEAS/2 END metrics=1",
             "TINYOS-RESULT/1 fixture=measure ok=true",
         ]);
         assert_eq!(parse_stream(&text).expect("well formed").metrics.len(), 1);
@@ -769,16 +837,75 @@ mod tests {
     // Clause 6, the fail-closed cases — each one exactly one error.
     #[test]
     fn an_unknown_envelope_version_is_rejected_not_best_effort_parsed() {
-        let text = stream(&[&BEGIN.replace("/1", "/2"), METRIC_D07, "TINYOS-MEAS/1 END metrics=1"]);
+        let newer =
+            stream(&[&BEGIN.replace("/2", "/3"), METRIC_D07, "TINYOS-MEAS/3 END metrics=1"]);
+        assert_eq!(
+            parse_stream(&newer),
+            Err(TimingError::UnsupportedVersion { found: "TINYOS-MEAS/3".to_string() })
+        );
+        // `TEST-P0-01-07-A` clause 1: the version this parser accepted until
+        // `LE-33` added `platform=` and `qualification=`. A `/1` stream is
+        // *missing provenance*, which is precisely the state that must not be
+        // read as "no problem found" — so it is refused on its version rather
+        // than parsed and silently defaulted.
+        let older = stream(&[
+            &BEGIN.replace("/2", "/1").replace(" platform=qemu-tcg-x86_64 qualification=none", ""),
+            &METRIC_D07.replace("/2", "/1"),
+            "TINYOS-MEAS/1 END metrics=1",
+        ]);
+        assert_eq!(
+            parse_stream(&older),
+            Err(TimingError::UnsupportedVersion { found: "TINYOS-MEAS/1".to_string() })
+        );
+    }
+
+    // `TEST-P0-01-07-A` clause 1: the provenance keys are required, not
+    // optional-with-a-default.
+    #[test]
+    fn a_begin_line_without_platform_or_qualification_is_refused() {
+        let text = stream(&[
+            &BEGIN.replace(" platform=qemu-tcg-x86_64", ""),
+            METRIC_D07,
+            "TINYOS-MEAS/2 END metrics=1",
+        ]);
         assert_eq!(
             parse_stream(&text),
-            Err(TimingError::UnsupportedVersion { found: "TINYOS-MEAS/2".to_string() })
+            Err(TimingError::MissingKey { record: "BEGIN", key: "platform" })
         );
     }
 
     #[test]
+    fn a_qualification_that_is_neither_none_nor_a_report_id_is_refused() {
+        let text = stream(&[
+            &BEGIN.replace("qualification=none", "qualification=pending"),
+            METRIC_D07,
+            "TINYOS-MEAS/2 END metrics=1",
+        ]);
+        assert_eq!(
+            parse_stream(&text),
+            Err(TimingError::UnexpectedValue {
+                key: "qualification".to_string(),
+                value: "pending".to_string(),
+                expected: "`none` or a `REPORT-YYYY-MM-DD-NN` id",
+            })
+        );
+    }
+
+    #[test]
+    fn a_qualification_naming_a_report_id_parses() {
+        let text = stream(&[
+            &BEGIN.replace("qualification=none", "qualification=REPORT-2027-01-01-01"),
+            METRIC_D07,
+            "TINYOS-MEAS/2 END metrics=1",
+        ]);
+        let envelope = parse_stream(&text).expect("a qualified run parses");
+        assert_eq!(envelope.qualification, "REPORT-2027-01-01-01");
+        assert_eq!(envelope.platform, "qemu-tcg-x86_64");
+    }
+
+    #[test]
     fn a_metric_before_any_begin_is_an_error() {
-        let text = stream(&[METRIC_D07, "TINYOS-MEAS/1 END metrics=1"]);
+        let text = stream(&[METRIC_D07, "TINYOS-MEAS/2 END metrics=1"]);
         assert_eq!(parse_stream(&text), Err(TimingError::MissingBegin));
     }
 
@@ -805,7 +932,7 @@ mod tests {
 
     #[test]
     fn a_repeated_begin_is_an_error() {
-        let text = stream(&[BEGIN, BEGIN, METRIC_D07, "TINYOS-MEAS/1 END metrics=1"]);
+        let text = stream(&[BEGIN, BEGIN, METRIC_D07, "TINYOS-MEAS/2 END metrics=1"]);
         assert_eq!(parse_stream(&text), Err(TimingError::RepeatedBegin));
     }
 
@@ -814,15 +941,15 @@ mod tests {
         let text = stream(&[
             BEGIN,
             METRIC_D07,
-            "TINYOS-MEAS/1 END metrics=1",
-            "TINYOS-MEAS/1 END metrics=1",
+            "TINYOS-MEAS/2 END metrics=1",
+            "TINYOS-MEAS/2 END metrics=1",
         ]);
         assert_eq!(parse_stream(&text), Err(TimingError::RepeatedEnd));
     }
 
     #[test]
     fn an_end_count_that_disagrees_with_the_metrics_seen_is_an_error() {
-        let text = stream(&[BEGIN, METRIC_D07, METRIC_D04, "TINYOS-MEAS/1 END metrics=3"]);
+        let text = stream(&[BEGIN, METRIC_D07, METRIC_D04, "TINYOS-MEAS/2 END metrics=3"]);
         assert_eq!(
             parse_stream(&text),
             Err(TimingError::MetricCountMismatch { declared: 3, observed: 2 })
@@ -832,7 +959,7 @@ mod tests {
     #[test]
     fn a_missing_metric_key_is_an_error() {
         let text =
-            stream(&[BEGIN, &METRIC_D07.replace(" p99_9=120", ""), "TINYOS-MEAS/1 END metrics=1"]);
+            stream(&[BEGIN, &METRIC_D07.replace(" p99_9=120", ""), "TINYOS-MEAS/2 END metrics=1"]);
         assert_eq!(
             parse_stream(&text),
             Err(TimingError::MissingKey { record: "METRIC", key: "p99_9" })
@@ -841,7 +968,7 @@ mod tests {
 
     #[test]
     fn an_unknown_metric_key_is_an_error() {
-        let text = stream(&[BEGIN, &format!("{METRIC_D07} p42=7"), "TINYOS-MEAS/1 END metrics=1"]);
+        let text = stream(&[BEGIN, &format!("{METRIC_D07} p42=7"), "TINYOS-MEAS/2 END metrics=1"]);
         assert_eq!(
             parse_stream(&text),
             Err(TimingError::UnknownKey { record: "METRIC", key: "p42".to_string() })
@@ -850,7 +977,7 @@ mod tests {
 
     #[test]
     fn a_duplicated_key_is_an_error() {
-        let text = stream(&[BEGIN, &format!("{METRIC_D07} p50=1"), "TINYOS-MEAS/1 END metrics=1"]);
+        let text = stream(&[BEGIN, &format!("{METRIC_D07} p50=1"), "TINYOS-MEAS/2 END metrics=1"]);
         assert_eq!(
             parse_stream(&text),
             Err(TimingError::DuplicateKey { record: "METRIC", key: "p50".to_string() })
@@ -862,7 +989,7 @@ mod tests {
         let text = stream(&[
             BEGIN,
             &METRIC_D07.replace("p99=60", "p99=sixty"),
-            "TINYOS-MEAS/1 END metrics=1",
+            "TINYOS-MEAS/2 END metrics=1",
         ]);
         assert_eq!(
             parse_stream(&text),
@@ -873,7 +1000,7 @@ mod tests {
     #[test]
     fn a_token_that_is_not_a_key_value_pair_is_an_error() {
         let text =
-            stream(&[BEGIN, &format!("{METRIC_D07} garbage"), "TINYOS-MEAS/1 END metrics=1"]);
+            stream(&[BEGIN, &format!("{METRIC_D07} garbage"), "TINYOS-MEAS/2 END metrics=1"]);
         assert_eq!(
             parse_stream(&text),
             Err(TimingError::MalformedField { record: "METRIC", token: "garbage".to_string() })
@@ -882,7 +1009,7 @@ mod tests {
 
     #[test]
     fn two_metrics_with_the_same_key_are_an_error() {
-        let text = stream(&[BEGIN, METRIC_D07, METRIC_D07, "TINYOS-MEAS/1 END metrics=2"]);
+        let text = stream(&[BEGIN, METRIC_D07, METRIC_D07, "TINYOS-MEAS/2 END metrics=2"]);
         assert_eq!(
             parse_stream(&text),
             Err(TimingError::DuplicateMetric { key: "D07/pool_alloc_free".to_string() })
@@ -894,7 +1021,7 @@ mod tests {
         let text = stream(&[
             BEGIN,
             &METRIC_D07.replace("p99=60", "p99=30"),
-            "TINYOS-MEAS/1 END metrics=1",
+            "TINYOS-MEAS/2 END metrics=1",
         ]);
         assert_eq!(
             parse_stream(&text),
@@ -905,7 +1032,7 @@ mod tests {
     #[test]
     fn a_metric_with_zero_samples_is_an_error() {
         let text =
-            stream(&[BEGIN, &METRIC_D07.replace("n=10000", "n=0"), "TINYOS-MEAS/1 END metrics=1"]);
+            stream(&[BEGIN, &METRIC_D07.replace("n=10000", "n=0"), "TINYOS-MEAS/2 END metrics=1"]);
         assert_eq!(
             parse_stream(&text),
             Err(TimingError::EmptyMetric { key: "D07/pool_alloc_free".to_string() })
@@ -917,7 +1044,7 @@ mod tests {
         let text = stream(&[
             BEGIN,
             &METRIC_D07.replace("unit=cycles", "unit=furlongs"),
-            "TINYOS-MEAS/1 END metrics=1",
+            "TINYOS-MEAS/2 END metrics=1",
         ]);
         assert_eq!(
             parse_stream(&text),
@@ -930,7 +1057,7 @@ mod tests {
 
     #[test]
     fn an_envelope_with_no_metrics_is_an_error() {
-        let text = stream(&[BEGIN, "TINYOS-MEAS/1 END metrics=0"]);
+        let text = stream(&[BEGIN, "TINYOS-MEAS/2 END metrics=0"]);
         assert_eq!(parse_stream(&text), Err(TimingError::NoMetrics));
     }
 
@@ -939,7 +1066,7 @@ mod tests {
         let text = stream(&[
             &BEGIN.replace(" arch=x86_64", ""),
             METRIC_D07,
-            "TINYOS-MEAS/1 END metrics=1",
+            "TINYOS-MEAS/2 END metrics=1",
         ]);
         assert_eq!(
             parse_stream(&text),
@@ -949,7 +1076,7 @@ mod tests {
 
     #[test]
     fn an_unknown_record_kind_is_an_error() {
-        let text = stream(&[BEGIN, "TINYOS-MEAS/1 MEASUREMENT domain=D07", METRIC_D07]);
+        let text = stream(&[BEGIN, "TINYOS-MEAS/2 MEASUREMENT domain=D07", METRIC_D07]);
         assert_eq!(
             parse_stream(&text),
             Err(TimingError::UnknownRecordKind { found: "MEASUREMENT".to_string() })
@@ -961,7 +1088,7 @@ mod tests {
     fn cross_run_comparison_records_per_metric_variance() {
         let run = |p99: u64| {
             let metric = METRIC_D07.replace("p99=60", &format!("p99={p99}"));
-            parse_stream(&stream(&[BEGIN, &metric, "TINYOS-MEAS/1 END metrics=1"]))
+            parse_stream(&stream(&[BEGIN, &metric, "TINYOS-MEAS/2 END metrics=1"]))
                 .expect("well formed")
         };
         let comparisons = compare_runs(&[run(60), run(66), run(63)]).expect("runs are comparable");
@@ -981,7 +1108,7 @@ mod tests {
     #[test]
     fn identical_runs_have_zero_variance() {
         let run = || {
-            parse_stream(&stream(&[BEGIN, METRIC_D07, "TINYOS-MEAS/1 END metrics=1"]))
+            parse_stream(&stream(&[BEGIN, METRIC_D07, "TINYOS-MEAS/2 END metrics=1"]))
                 .expect("well formed")
         };
         let comparisons = compare_runs(&[run(), run()]).expect("runs are comparable");
@@ -990,16 +1117,16 @@ mod tests {
 
     #[test]
     fn runs_measuring_different_metric_sets_are_not_comparable() {
-        let one = parse_stream(&stream(&[BEGIN, METRIC_D07, "TINYOS-MEAS/1 END metrics=1"]))
+        let one = parse_stream(&stream(&[BEGIN, METRIC_D07, "TINYOS-MEAS/2 END metrics=1"]))
             .expect("well formed");
-        let two = parse_stream(&stream(&[BEGIN, METRIC_D04, "TINYOS-MEAS/1 END metrics=1"]))
+        let two = parse_stream(&stream(&[BEGIN, METRIC_D04, "TINYOS-MEAS/2 END metrics=1"]))
             .expect("well formed");
         assert!(matches!(compare_runs(&[one, two]), Err(TimingError::InconsistentRuns { .. })));
     }
 
     #[test]
     fn a_single_run_cannot_establish_run_to_run_variance() {
-        let one = parse_stream(&stream(&[BEGIN, METRIC_D07, "TINYOS-MEAS/1 END metrics=1"]))
+        let one = parse_stream(&stream(&[BEGIN, METRIC_D07, "TINYOS-MEAS/2 END metrics=1"]))
             .expect("well formed");
         assert!(matches!(compare_runs(&[one]), Err(TimingError::InconsistentRuns { .. })));
     }

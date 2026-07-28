@@ -1,6 +1,6 @@
 //! Integrity validation for the 625-test performance catalogue.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
@@ -97,6 +97,61 @@ fn validate_contents(contents: &str) -> Result<CatalogueSummary, String> {
     Ok(CatalogueSummary { test_count: ids.len() })
 }
 
+/// The catalogue `readiness` values naming a subsystem that **does not exist
+/// yet**, so not one of the domain's 25 guardrails can be closed against it.
+///
+/// Handover 25 established the list by refusing to record `PERF-Dnn-G11`
+/// evidence for exactly these readinesses, on the grounds that the absence of a
+/// heap in unwritten code is evidence about nothing. `LE-35` is the rule that
+/// refusal implied and nobody wrote down; [`crate::assurance`] enforces it.
+pub const UNIMPLEMENTED_READINESS: [&str; 4] = ["design", "stand-in-only", "specified", "unbuilt"];
+
+/// Maps each `Dnn` to the `readiness` its catalogue rows declare.
+///
+/// A domain's 25 rows must agree with one another — readiness is a property of
+/// the subsystem, not of an individual guardrail — so disagreement is an error
+/// rather than a value this function picks a winner from.
+pub fn domain_readiness(repo_root: &Path) -> Result<BTreeMap<String, String>, String> {
+    let path = repo_root.join("goals").join("performance").join("catalogue.tsv");
+    let contents = fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    readiness_from_contents(&contents)
+}
+
+fn readiness_from_contents(contents: &str) -> Result<BTreeMap<String, String>, String> {
+    let mut readiness: BTreeMap<String, String> = BTreeMap::new();
+    for (zero_based_index, raw_line) in contents.lines().skip(1).enumerate() {
+        let line_number = zero_based_index + 2;
+        let line = raw_line.trim_end_matches('\r');
+        if line.is_empty() {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() != FIELD_COUNT {
+            return Err(format!(
+                "line {line_number}: expected {FIELD_COUNT} tab-separated fields, found {}",
+                fields.len()
+            ));
+        }
+        let domain = fields[1];
+        let value = fields[6];
+        match readiness.get(domain) {
+            Some(existing) if existing != value => {
+                return Err(format!(
+                    "line {line_number}: `{domain}` declares readiness `{value}` here and \
+                     `{existing}` on an earlier row; readiness is a property of the subsystem and \
+                     must agree across all 25 of a domain's guardrails"
+                ));
+            }
+            Some(_) => {}
+            None => {
+                readiness.insert(domain.to_string(), value.to_string());
+            }
+        }
+    }
+    Ok(readiness)
+}
+
 fn validate_axis_id(value: &str, prefix: char, line_number: usize) -> Result<(), String> {
     let bytes = value.as_bytes();
     if bytes.len() != 3 || bytes[0] != prefix as u8 || !bytes[1..].iter().all(u8::is_ascii_digit) {
@@ -165,6 +220,39 @@ mod tests {
         let fixture = complete_fixture().replace("\tD01\tG01\ttitle\t", "\tD01\tG01\t\t");
         let error = validate_contents(&fixture).expect_err("empty title must fail");
         assert!(error.contains("every field must be non-empty"));
+    }
+
+    // `TEST-P0-01-07-A` clause 3: the readiness lookup the `LE-35` gate reads.
+    #[test]
+    fn readiness_disagreeing_across_one_domains_rows_fails() {
+        let fixture = complete_fixture().replace(
+            "PERF-D01-G02\tD01\tG02\ttitle\tP0\tT0\tprototype\t",
+            "PERF-D01-G02\tD01\tG02\ttitle\tP0\tT0\tdesign\t",
+        );
+        let error = readiness_from_contents(&fixture).expect_err("disagreeing readiness must fail");
+        assert!(error.contains("D01"), "{error}");
+        assert!(error.contains("must agree"), "{error}");
+    }
+
+    #[test]
+    fn committed_catalogue_readiness_matches_what_the_le_35_gate_assumes() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = manifest_dir
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+            .expect("xtask manifest lives at os/src/xtask")
+            .to_path_buf();
+        let readiness = domain_readiness(&repo_root).expect("committed catalogue readiness parses");
+        assert_eq!(readiness.len(), AXIS_SIZE);
+        // Named rather than counted: these are the exact domains Handover 25
+        // refused to record `G11` for, and the gate is only as good as this
+        // list staying honest.
+        assert_eq!(readiness.get("D17").map(String::as_str), Some("design"));
+        assert_eq!(readiness.get("D02").map(String::as_str), Some("unbuilt"));
+        assert_eq!(readiness.get("D10").map(String::as_str), Some("stand-in-only"));
+        assert_eq!(readiness.get("D12").map(String::as_str), Some("specified"));
+        assert_eq!(readiness.get("D01").map(String::as_str), Some("prototype"));
     }
 
     #[test]

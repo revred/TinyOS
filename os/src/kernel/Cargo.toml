@@ -53,7 +53,7 @@ fixture-pool-bench = []
 # Drives the performance domains `FEAT-P1-01`/`FEAT-P1-02` name as measured
 # targets (context switch D04, ready-queue dispatch D05, pool allocation D07,
 # and — since `LE-17` — fault capture/disposition latency D02) through
-# `kernel::measure`, reporting the versioned `TINYOS-MEAS/1` envelope over
+# `kernel::measure`, reporting the versioned `TINYOS-MEAS/2` envelope over
 # COM1 — used only by `xtask measure` / `xtask qemu-x86_64 --fixture=measure`
 # and `TEST-P1-01-01-A`, never enabled in a real boot image. Installs its own
 # fault-only IDT and `tinyos_fault_entry` (replacing `main.rs`'s default) so

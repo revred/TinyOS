@@ -1,0 +1,6 @@
+platform_id	arch	description	firmware	state	qualification_record	recorded_in
+qemu-tcg-x86_64	x86_64	QEMU TCG q35 guest -- the Tier 0 CI gate	qemu-tcg	unqualified	-	2026-07-28
+qemu-tcg-aarch64	aarch64	QEMU TCG -M virt guest	qemu-tcg	unqualified	-	2026-07-28
+host-x86_64	x86_64	The developer or CI host running cargo test	n-a	unqualified	-	2026-07-28
+rpi5-bcm2712	aarch64	Raspberry Pi 5 (BCM2712) -- FEAT-P1-07's board	unknown	unqualified	-	2026-07-28
+jetson-orin-nano-super	aarch64	Jetson Orin Nano Super -- the natural second qualification record per ADR 0005	unknown	unqualified	-	2026-07-28

@@ -22,10 +22,10 @@ QEMU cycle counts calibrate the harness and the regression *mechanism*; they are
 
 | Story | Summary | Status |
 |---|---|---|
-| [`STORY-P1-01-01`](../stories/STORY-P1-01-01.md) | Reusable cycle-calibrated measurement harness (kernel side + xtask parser) | Verified (Tier 0 + Host; assurance `baseline-debt`) |
-| [`STORY-P1-01-02`](../stories/STORY-P1-01-02.md) | Committed baselines + `check-timing-regression` CI gate, proven able to fail | Verified (Tier 0 + Host; assurance `baseline-debt`) |
-| [`STORY-P1-01-03`](../stories/STORY-P1-01-03.md) | AArch64 `CNTVCT_EL0`/`CNTFRQ_EL0` cycle source and timebase — the harness's arch seam, checked with a second implementor before any board exists | Verified (Host; assurance `baseline-debt`) |
-| [`STORY-P1-01-04`](../stories/STORY-P1-01-04.md) | Gate on same-run ratios to a fixed reference workload, so the verdict is about the code rather than about how fast the runner was (`LE-16`/`LE-18`) | Verified (Tier 0 + Host; assurance `baseline-debt`) |
+| [`STORY-P1-01-01`](../stories/STORY-P1-01-01.md) | Reusable cycle-calibrated measurement harness (kernel side + xtask parser) | Functionally Verified (Tier 0 + Host; assurance `baseline-debt`) |
+| [`STORY-P1-01-02`](../stories/STORY-P1-01-02.md) | Committed baselines + `check-timing-regression` CI gate, proven able to fail | Functionally Verified (Tier 0 + Host; assurance `baseline-debt`) |
+| [`STORY-P1-01-03`](../stories/STORY-P1-01-03.md) | AArch64 `CNTVCT_EL0`/`CNTFRQ_EL0` cycle source and timebase — the harness's arch seam, checked with a second implementor before any board exists | Functionally Verified (Host; assurance `baseline-debt`) |
+| [`STORY-P1-01-04`](../stories/STORY-P1-01-04.md) | Gate on same-run ratios to a fixed reference workload, so the verdict is about the code rather than about how fast the runner was (`LE-16`/`LE-18`) | Functionally Verified (Tier 0 + Host; assurance `baseline-debt`) |
 
 ## Containment contract
 

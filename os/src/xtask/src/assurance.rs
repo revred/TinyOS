@@ -4,6 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::{bound_provenance, performance_catalogue};
+
 const CONTAINMENT_HEADER: &str =
     "id\tname\tpurpose\tdefault_authority\tinput_rule\tfailure_rule\trequired_evidence";
 const BOUNDARY_TEST_HEADER: &str =
@@ -40,6 +42,8 @@ const LOOSE_END_FIELD_COUNT: usize = 8;
 const GUARDRAIL_EVIDENCE_HEADER: &str =
     "guardrail_id\tdomain\tstory_id\tevidence_kind\tevidence_path\trecorded_in\tnote";
 const GUARDRAIL_EVIDENCE_FIELD_COUNT: usize = 7;
+const OPEN_DEBT_HEADER: &str = "story_id\tdomain\treadiness\treason\trecorded_in";
+const OPEN_DEBT_FIELD_COUNT: usize = 5;
 /// Crates that ship inside the image, and therefore must contain no heap.
 ///
 /// `xtask` is deliberately absent: it is a host tool, it links `std`, and it
@@ -107,6 +111,28 @@ pub struct AssuranceSummary {
     /// it is; it is never "passed". No Story's assurance state is derived from
     /// this number — that conversion still requires every applicable gate.
     pub guardrail_evidence_count: usize,
+    /// Number of `(Story, domain)` selections initialised as stated open debt
+    /// because the domain's subsystem does not exist yet (`LE-35`).
+    pub open_debt_count: usize,
+    /// Number of measuring platforms in the qualification register.
+    pub platform_count: usize,
+    /// Number of platforms holding a secure-world qualification record.
+    ///
+    /// `ADR 0005` decision 3 states this is zero and that a platform with no
+    /// record is not qualified rather than presumed clean. It is printed
+    /// alongside the total so a reader sees the ratio rather than a bare count.
+    pub qualified_platform_count: usize,
+    /// Number of bound-class evidence rows whose provenance was checked
+    /// (`LE-33`).
+    ///
+    /// Printed even when zero, deliberately. A gate that has never examined
+    /// anything and a gate that examined things and found them clean produce
+    /// the same silence otherwise, and `ADR 0005`'s trap section is the
+    /// argument for never letting those two look alike.
+    pub bound_claim_count: usize,
+    /// Number of Feature Stories-table rows cross-checked against the
+    /// referenced Story's own `Status:` header (`LE-44`).
+    pub feature_story_row_count: usize,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -166,6 +192,13 @@ impl ApplicationPlatformIndex {
 #[derive(Debug, PartialEq, Eq)]
 struct LandingZoneIndex {
     ids: BTreeSet<String>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct GuardrailEvidenceIndex {
+    count: usize,
+    story_domain_pairs: BTreeSet<(String, String)>,
+    bound_rows: Vec<bound_provenance::BoundEvidenceRow>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -327,12 +360,44 @@ pub fn check_assurance_spine(repo_root: &Path) -> Result<AssuranceSummary, Strin
     let evidence_path = repo_root.join("goals").join("assurance").join("guardrail-evidence.tsv");
     let evidence_contents = fs::read_to_string(&evidence_path)
         .map_err(|error| format!("failed to read {}: {error}", evidence_path.display()))?;
-    let guardrail_evidence_count = validate_guardrail_evidence(&evidence_contents, &contracts)?;
+    let evidence = validate_guardrail_evidence(&evidence_contents, &contracts)?;
+
+    // `LE-35`: a domain whose subsystem does not exist yet cannot be selected
+    // as a satisfiable obligation, only as stated open debt.
+    let readiness = performance_catalogue::domain_readiness(repo_root)?;
+    let open_debt_path = repo_root.join("goals").join("assurance").join("open-debt.tsv");
+    let open_debt_contents = fs::read_to_string(&open_debt_path)
+        .map_err(|error| format!("failed to read {}: {error}", open_debt_path.display()))?;
+    let open_debt = validate_open_debt(
+        &open_debt_contents,
+        &contracts,
+        &readiness,
+        &evidence.story_domain_pairs,
+    )?;
+    validate_open_debt_coverage(&contracts, &readiness, &open_debt)?;
+
+    // `LE-33`: a bound-class gate cannot be closed from a source `ADR 0004` or
+    // `ADR 0005` disqualifies. The platform register is read first because a
+    // platform absent from it is unqualified, never presumed clean.
+    let platform_path = repo_root.join("goals").join("assurance").join("qualified-platforms.tsv");
+    let platform_contents = fs::read_to_string(&platform_path)
+        .map_err(|error| format!("failed to read {}: {error}", platform_path.display()))?;
+    let platforms = bound_provenance::validate_platforms(&platform_contents, &report_files)?;
+    let bound_claim_count =
+        bound_provenance::check_bound_evidence(repo_root, &evidence.bound_rows, &platforms)?;
 
     let statuses = validate_status_headers(repo_root)?;
+    // `LE-44`: the headers above are individually well-formed; this is the
+    // check that they agree with what their Features say about them.
+    let feature_story_row_count = validate_feature_story_tables(repo_root, &statuses)?;
 
     Ok(AssuranceSummary {
-        guardrail_evidence_count,
+        guardrail_evidence_count: evidence.count,
+        open_debt_count: open_debt.len(),
+        platform_count: platforms.count(),
+        qualified_platform_count: platforms.qualified_count(),
+        bound_claim_count,
+        feature_story_row_count,
         feature_count: feature_contracts.features.len(),
         story_count: contracts.stories.len(),
         containment_class_count: containment_classes.len(),
@@ -1215,7 +1280,10 @@ fn validate_loose_ends(contents: &str) -> Result<LooseEndIndex, String> {
 ///
 /// Clause 2: no aggregate is computed here and no Story state is derived from
 /// these rows. The count is a count of evidence, not a score.
-fn validate_guardrail_evidence(contents: &str, contracts: &ContractIndex) -> Result<usize, String> {
+fn validate_guardrail_evidence(
+    contents: &str,
+    contracts: &ContractIndex,
+) -> Result<GuardrailEvidenceIndex, String> {
     let mut lines = contents.lines();
     let header = lines
         .next()
@@ -1228,6 +1296,8 @@ fn validate_guardrail_evidence(contents: &str, contracts: &ContractIndex) -> Res
     }
 
     let mut seen = BTreeSet::new();
+    let mut story_domain_pairs = BTreeSet::new();
+    let mut bound_rows = Vec::new();
     for (zero_based_index, raw_line) in lines.enumerate() {
         let line_number = zero_based_index + 2;
         let fields = non_empty_tsv_fields(
@@ -1272,9 +1342,139 @@ fn validate_guardrail_evidence(contents: &str, contracts: &ContractIndex) -> Res
                  from `{story_id}`"
             ));
         }
+        story_domain_pairs.insert((story_id.to_string(), domain.to_string()));
+
+        // Bound-class rows are handed to `bound_provenance`, which is where
+        // `ADR 0004`'s and `ADR 0005`'s refusals live. Filtering here rather
+        // than there keeps the register's parser in one place.
+        if bound_provenance::is_bound_class(guardrail_id) {
+            bound_rows.push(bound_provenance::BoundEvidenceRow {
+                guardrail_id: guardrail_id.to_string(),
+                story_id: story_id.to_string(),
+                evidence_path: fields[4].to_string(),
+            });
+        }
     }
 
-    Ok(seen.len())
+    Ok(GuardrailEvidenceIndex { count: seen.len(), story_domain_pairs, bound_rows })
+}
+
+/// Validates `goals/assurance/open-debt.tsv` — `LE-35`'s register.
+///
+/// The rule this enforces was set as a precedent by Handover 25 and never
+/// written down: **selecting a performance domain pulls all 25 of its
+/// guardrails into the selecting Story's contract, and where the subsystem does
+/// not exist not one of them can be closed.** Left implicit, the contract
+/// presents as satisfiable and the cheapest lie available becomes recording all
+/// 25.
+///
+/// Both directions are refused, and the second matters as much as the first: a
+/// debt row for a domain that *is* implemented would let debt excuse a real
+/// obligation.
+fn validate_open_debt(
+    contents: &str,
+    contracts: &ContractIndex,
+    readiness: &BTreeMap<String, String>,
+    evidence_pairs: &BTreeSet<(String, String)>,
+) -> Result<BTreeSet<(String, String)>, String> {
+    let mut lines = contents.lines();
+    let header = lines
+        .next()
+        .ok_or_else(|| "open-debt register is empty".to_string())?
+        .trim_end_matches('\r');
+    if header != OPEN_DEBT_HEADER {
+        return Err(format!("unexpected open-debt header; expected exactly `{OPEN_DEBT_HEADER}`"));
+    }
+
+    let mut pairs = BTreeSet::new();
+    for (zero_based_index, raw_line) in lines.enumerate() {
+        let line_number = zero_based_index + 2;
+        let fields =
+            non_empty_tsv_fields(raw_line, line_number, OPEN_DEBT_FIELD_COUNT, "open-debt")?;
+
+        let story_id = fields[0];
+        let domain = fields[1];
+        let declared_readiness = fields[2];
+        validate_domain_id(domain, line_number)?;
+
+        let Some(contract) = contracts.details_by_story.get(story_id) else {
+            return Err(format!("open-debt line {line_number}: `{story_id}` has no contract row"));
+        };
+        if !contract.performance_domains.contains(domain) {
+            return Err(format!(
+                "open-debt line {line_number}: `{story_id}` records debt in `{domain}` but its \
+                 contract selects {}",
+                join_owned_ids(&contract.performance_domains)
+            ));
+        }
+
+        let Some(actual_readiness) = readiness.get(domain) else {
+            return Err(format!(
+                "open-debt line {line_number}: `{domain}` is not a catalogue domain"
+            ));
+        };
+        if declared_readiness != actual_readiness {
+            return Err(format!(
+                "open-debt line {line_number}: `{domain}` is recorded at readiness \
+                 `{declared_readiness}` but the catalogue says `{actual_readiness}`"
+            ));
+        }
+        if !performance_catalogue::UNIMPLEMENTED_READINESS.contains(&actual_readiness.as_str()) {
+            return Err(format!(
+                "open-debt line {line_number}: `{story_id}` records `{domain}` as open debt, but \
+                 `{domain}` is at readiness `{actual_readiness}` and its guardrails are real \
+                 obligations. Debt may name a subsystem that does not exist; it may not excuse \
+                 one that does"
+            ));
+        }
+
+        if !pairs.insert((story_id.to_string(), domain.to_string())) {
+            return Err(format!(
+                "open-debt line {line_number}: duplicate debt row for `{story_id}` / `{domain}`"
+            ));
+        }
+        // A gate cannot be simultaneously unclosable and closed. This is the
+        // check that stops the register pair from drifting into a contradiction
+        // nobody reading either file alone would notice.
+        if evidence_pairs.contains(&(story_id.to_string(), domain.to_string())) {
+            return Err(format!(
+                "open-debt line {line_number}: `{story_id}` records `{domain}` as open debt and \
+                 also files guardrail evidence in it. A domain whose subsystem does not exist \
+                 cannot have produced evidence"
+            ));
+        }
+    }
+
+    Ok(pairs)
+}
+
+/// Refuses a Story contract that selects a domain whose subsystem does not
+/// exist without initialising it as stated open debt (`LE-35`, the forward
+/// direction).
+fn validate_open_debt_coverage(
+    contracts: &ContractIndex,
+    readiness: &BTreeMap<String, String>,
+    debt: &BTreeSet<(String, String)>,
+) -> Result<(), String> {
+    for (story_id, contract) in &contracts.details_by_story {
+        for domain in &contract.performance_domains {
+            let Some(actual) = readiness.get(domain) else {
+                continue;
+            };
+            if !performance_catalogue::UNIMPLEMENTED_READINESS.contains(&actual.as_str()) {
+                continue;
+            }
+            if !debt.contains(&(story_id.clone(), domain.clone())) {
+                return Err(format!(
+                    "story-contracts: `{story_id}` selects `{domain}`, whose readiness is \
+                     `{actual}` — the subsystem does not exist, so not one of its 25 guardrails \
+                     can be closed. Selecting it initialises stated open debt: add a row to \
+                     goals/assurance/open-debt.tsv (LE-35)"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Fails if any shipped crate could allocate.
@@ -1547,6 +1747,169 @@ fn validate_status_headers(repo_root: &Path) -> Result<Vec<ArtifactStatus>, Stri
 /// Reads every artifact status for `list-status`.
 pub fn artifact_statuses(repo_root: &Path) -> Result<Vec<ArtifactStatus>, String> {
     validate_status_headers(repo_root)
+}
+
+/// Extracts the Story id and status cell from one Feature Stories-table row.
+///
+/// Rows look like `| [`STORY-P1-07-01`](../stories/….md) | summary | status |`.
+/// Anything that is not such a row — the header, the `|---|` rule, prose
+/// containing a pipe — yields `None` rather than an error, because a Feature's
+/// body is prose and only this one table shape is constrained.
+fn parse_feature_story_row(line: &str) -> Option<(String, String)> {
+    let line = line.trim();
+    if !line.starts_with("| [`STORY-") {
+        return None;
+    }
+    let cells: Vec<&str> = line.trim_matches('|').split('|').map(str::trim).collect();
+    if cells.len() < 3 {
+        return None;
+    }
+    let id = cells[0].trim_start_matches("[`").split('`').next()?.to_string();
+    Some((id, cells[cells.len() - 1].to_string()))
+}
+
+/// Every `criterion N` / `criteria N and M` number a status cell or header
+/// mentions.
+///
+/// A set, not a list: `criteria 3 and 4` and `criteria 4 and 3` say the same
+/// thing, and a check that disagreed about that would be noise rather than a
+/// gate.
+fn criterion_numbers(text: &str) -> BTreeSet<u32> {
+    let lowered = text.to_ascii_lowercase();
+    let mut numbers = BTreeSet::new();
+    let mut rest = lowered.as_str();
+    while let Some(position) = rest.find("criteri") {
+        rest = &rest[position..];
+        let after_keyword = match (rest.strip_prefix("criteria"), rest.strip_prefix("criterion")) {
+            (Some(tail), _) => tail,
+            (None, Some(tail)) => tail,
+            (None, None) => {
+                rest = &rest["criteri".len()..];
+                continue;
+            }
+        };
+        // Numbers run until the first token that is neither a number nor one of
+        // the words that join them, so `criteria 3 and 4 need a board` stops at
+        // `need` rather than swallowing the sentence.
+        for token in after_keyword.split(|c: char| c.is_whitespace() || c == ',') {
+            let token = token.trim_matches(|c: char| !c.is_ascii_alphanumeric());
+            if token.is_empty() || token == "and" {
+                continue;
+            }
+            match token.parse::<u32>() {
+                Ok(number) => {
+                    numbers.insert(number);
+                }
+                Err(_) => break,
+            }
+        }
+        rest = after_keyword;
+    }
+    numbers
+}
+
+/// Cross-checks every Feature Stories-table row against the referenced Story's
+/// own `Status:` header — `LE-44`.
+///
+/// `check-assurance-spine` already validated all 84 status headers, and already
+/// read every Feature document; what it never did was compare the two. So a
+/// Feature and its Story could disagree about a Story's state indefinitely with
+/// every gate green, which is exactly what happened twice: `FEAT-P1-07` said
+/// `STORY-P1-07-01` needed a board for *"criteria 2 and 4"* where the Story said
+/// 3 and 4 — understating it on precisely the criterion that produces `Q1`
+/// qualification evidence — and `FEAT-P1-03` recorded `STORY-P1-03-02` as
+/// `Verified` for four days while the Story's own header still read
+/// `In progress`.
+///
+/// Two things are compared and nothing else. The **state word exactly**:
+/// `Functionally Verified` and `Verified` are distinct states in this project's
+/// vocabulary, one carrying assurance debt whose reader will not go looking for
+/// it, so they do not satisfy each other. And the **criterion numbers as a
+/// set**. Everything else in both cells stays free prose.
+fn validate_feature_story_tables(
+    repo_root: &Path,
+    statuses: &[ArtifactStatus],
+) -> Result<usize, String> {
+    let by_id: BTreeMap<&str, &ArtifactStatus> =
+        statuses.iter().map(|status| (status.id.as_str(), status)).collect();
+
+    let feature_dir = repo_root.join("goals").join("features");
+    let mut paths = Vec::new();
+    collect_markdown(&feature_dir, &mut paths)?;
+    paths.sort();
+
+    let mut checked = 0;
+    for file in paths {
+        let Some(stem) = file.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        if !stem.starts_with("FEAT-") {
+            continue;
+        }
+        let contents = fs::read_to_string(&file)
+            .map_err(|error| format!("failed to read {}: {error}", file.display()))?;
+        for line in contents.lines() {
+            let Some((story_id, cell)) = parse_feature_story_row(line) else {
+                continue;
+            };
+            let Some(status) = by_id.get(story_id.as_str()) else {
+                return Err(format!(
+                    "{stem}: Stories table names `{story_id}`, which has no Story document"
+                ));
+            };
+            compare_feature_story_row(stem, &story_id, &cell, status)?;
+            checked += 1;
+        }
+    }
+
+    if checked == 0 {
+        return Err("no Feature Stories-table rows found to cross-check".to_string());
+    }
+    Ok(checked)
+}
+
+/// One Feature-table row against one Story header — the comparison itself,
+/// separated from the file walk so it can be driven directly by tests.
+///
+/// `TEST-P0-01-07-A` clause 2 is why: against the committed tree this function
+/// returns `Ok` for all 59 rows, so a green run says nothing about whether it
+/// can reject. The tests supply the disagreements the tree no longer has.
+fn compare_feature_story_row(
+    feature: &str,
+    story_id: &str,
+    cell: &str,
+    status: &ArtifactStatus,
+) -> Result<(), String> {
+    // Some tables bold the state and some do not; both are prose choices, so
+    // the cell is normalised to the header shape rather than one of them being
+    // declared wrong.
+    let normalised = format!("Status: **{}", cell.trim_start_matches("**"));
+    let cell_state = parse_status_line(&normalised)
+        .map_err(|error| {
+            format!(
+                "{feature}: the Stories-table status for `{story_id}` (`{cell}`) does not open \
+                 with a known state: {error}"
+            )
+        })?
+        .0;
+    if cell_state != status.state {
+        return Err(format!(
+            "{feature}: Stories table records `{story_id}` as `{cell_state}`, but that Story's \
+             own `Status:` header says `{}`. The Story is authoritative about its own state \
+             (LE-44)",
+            status.state
+        ));
+    }
+
+    let table_criteria = criterion_numbers(cell);
+    let story_criteria = criterion_numbers(&status.detail);
+    if table_criteria != story_criteria {
+        return Err(format!(
+            "{feature}: Stories table says `{story_id}` blocks on criteria {table_criteria:?}, \
+             but that Story's own header says {story_criteria:?} (LE-44)"
+        ));
+    }
+    Ok(())
 }
 
 fn validate_numbered_context_id(
@@ -2588,6 +2951,230 @@ mod tests {
         format!("{guardrail}\t{domain}\t{story}\tstructural\tpath\t2026-07-28\tnote\n")
     }
 
+    // ---- `TEST-P0-01-07-A` clause 3: `LE-35`, the open-debt rule -----------
+    //
+    // Every test here is a positive control. Against the committed tree the
+    // debt register is complete, so `check-assurance-spine` returning green
+    // proves nothing about whether these refusals work.
+
+    /// Two Stories: one selecting an implemented domain, one selecting a
+    /// design-readiness domain that therefore owes stated debt.
+    fn debt_contracts() -> ContractIndex {
+        let fixture = format!(
+            "{CONTRACT_HEADER}\n\
+             STORY-P0-01-01\tFEAT-P0-01\tD01\tSEC-19\tC0\tbaseline-debt\trationale\n\
+             STORY-P0-02-01\tFEAT-P0-02\tD05\tSEC-19\tC0\tbaseline-debt\trationale\n"
+        );
+        let security = SecurityIndex {
+            controls: BTreeSet::from(["SEC-19".to_string()]),
+            classes_by_control: BTreeMap::from([(
+                "SEC-19".to_string(),
+                BTreeSet::from(["C0".to_string()]),
+            )]),
+        };
+        let classes = BTreeSet::from(["C0".to_string()]);
+        let feature_classes = BTreeMap::from([
+            ("FEAT-P0-01".to_string(), BTreeSet::from(["C0".to_string()])),
+            ("FEAT-P0-02".to_string(), BTreeSet::from(["C0".to_string()])),
+        ]);
+        validate_story_contracts(&fixture, &security, &classes, &feature_classes)
+            .expect("fixture contracts are valid")
+    }
+
+    /// `D01` is built; `D05` stands in here for a subsystem that is not.
+    fn debt_readiness() -> BTreeMap<String, String> {
+        BTreeMap::from([
+            ("D01".to_string(), "prototype".to_string()),
+            ("D05".to_string(), "design".to_string()),
+        ])
+    }
+
+    fn debt_register(rows: &str) -> String {
+        format!("{OPEN_DEBT_HEADER}\n{rows}")
+    }
+
+    #[test]
+    fn selecting_a_design_readiness_domain_without_stating_debt_is_refused() {
+        let debt = validate_open_debt(
+            &debt_register(""),
+            &debt_contracts(),
+            &debt_readiness(),
+            &BTreeSet::new(),
+        )
+        .expect("an empty register is well-formed");
+        let error = validate_open_debt_coverage(&debt_contracts(), &debt_readiness(), &debt)
+            .expect_err("an undeclared design selection must be refused");
+        assert!(error.contains("STORY-P0-02-01"), "{error}");
+        assert!(error.contains("readiness is `design`"), "{error}");
+    }
+
+    /// The acceptance case. Without it every refusal below would also pass
+    /// against a validator that refused unconditionally.
+    #[test]
+    fn a_design_readiness_selection_with_a_matching_debt_row_is_accepted() {
+        let rows = "STORY-P0-02-01\tD05\tdesign\tthe subsystem does not exist\t2026-07-28\n";
+        let debt = validate_open_debt(
+            &debt_register(rows),
+            &debt_contracts(),
+            &debt_readiness(),
+            &BTreeSet::new(),
+        )
+        .expect("a matching debt row is exactly what the rule asks for");
+        assert_eq!(debt.len(), 1);
+        validate_open_debt_coverage(&debt_contracts(), &debt_readiness(), &debt)
+            .expect("coverage is complete");
+    }
+
+    #[test]
+    fn debt_recorded_against_an_implemented_domain_is_refused() {
+        let rows = "STORY-P0-01-01\tD01\tprototype\tnot really debt\t2026-07-28\n";
+        let error = validate_open_debt(
+            &debt_register(rows),
+            &debt_contracts(),
+            &debt_readiness(),
+            &BTreeSet::new(),
+        )
+        .expect_err("debt may not excuse a real obligation");
+        assert!(error.contains("may not excuse one that does"), "{error}");
+    }
+
+    #[test]
+    fn a_debt_row_disagreeing_with_the_catalogue_readiness_is_refused() {
+        let rows = "STORY-P0-02-01\tD05\tunbuilt\twrong readiness\t2026-07-28\n";
+        let error = validate_open_debt(
+            &debt_register(rows),
+            &debt_contracts(),
+            &debt_readiness(),
+            &BTreeSet::new(),
+        )
+        .expect_err("a drifted readiness must be refused");
+        assert!(error.contains("the catalogue says `design`"), "{error}");
+    }
+
+    #[test]
+    fn debt_in_a_domain_the_story_does_not_select_is_refused() {
+        let rows = "STORY-P0-01-01\tD05\tdesign\tnot selected\t2026-07-28\n";
+        let error = validate_open_debt(
+            &debt_register(rows),
+            &debt_contracts(),
+            &debt_readiness(),
+            &BTreeSet::new(),
+        )
+        .expect_err("debt in an unselected domain must be refused");
+        assert!(error.contains("its contract selects"), "{error}");
+    }
+
+    #[test]
+    fn a_pair_that_is_both_open_debt_and_evidenced_is_refused() {
+        let rows = "STORY-P0-02-01\tD05\tdesign\tthe subsystem does not exist\t2026-07-28\n";
+        let evidenced = BTreeSet::from([("STORY-P0-02-01".to_string(), "D05".to_string())]);
+        let error = validate_open_debt(
+            &debt_register(rows),
+            &debt_contracts(),
+            &debt_readiness(),
+            &evidenced,
+        )
+        .expect_err("a gate cannot be unclosable and closed at once");
+        assert!(error.contains("cannot have produced evidence"), "{error}");
+    }
+
+    // ---- `TEST-P0-01-07-A` clause 5: `LE-44`, Feature/Story agreement ------
+
+    fn status(state: &str, detail: &str) -> ArtifactStatus {
+        ArtifactStatus {
+            id: "STORY-P1-07-01".to_string(),
+            state: state.to_string(),
+            detail: detail.to_string(),
+        }
+    }
+
+    #[test]
+    fn a_feature_story_row_parses_its_id_and_status_cell() {
+        let row = "| [`STORY-P1-07-01`](../stories/STORY-P1-07-01.md) | summary | In progress — \
+                   criteria 3 and 4 need a board |";
+        let (id, cell) = parse_feature_story_row(row).expect("a Stories-table row parses");
+        assert_eq!(id, "STORY-P1-07-01");
+        assert!(cell.starts_with("In progress"), "{cell}");
+    }
+
+    #[test]
+    fn a_table_rule_and_ordinary_prose_are_not_story_rows() {
+        assert!(parse_feature_story_row("|---|---|---|").is_none());
+        assert!(parse_feature_story_row("Order matters | and is not negotiable").is_none());
+    }
+
+    #[test]
+    fn criterion_numbers_are_a_set_and_stop_at_the_first_non_number() {
+        assert_eq!(criterion_numbers("criteria 3 and 4 need a board"), BTreeSet::from([3, 4]));
+        assert_eq!(criterion_numbers("criterion 2 needs a board"), BTreeSet::from([2]));
+        assert_eq!(criterion_numbers("criteria 4 and 3"), BTreeSet::from([3, 4]));
+        assert!(criterion_numbers("Verified (Tier 0 + Host)").is_empty());
+    }
+
+    /// `LE-44`'s originating instance, in the direction it actually occurred:
+    /// the Feature understated which criteria a board session must close, on
+    /// precisely the criterion that produces `Q1` qualification evidence.
+    #[test]
+    fn a_feature_disagreeing_about_criteria_is_refused() {
+        let error = compare_feature_story_row(
+            "FEAT-P1-07",
+            "STORY-P1-07-01",
+            "In progress — host half Green, criteria 2 and 4 need a board",
+            &status("In progress", "host-testable half Green; criteria 3 and 4 blocked on a board"),
+        )
+        .expect_err("a criteria disagreement must be refused");
+        assert!(error.contains("{2, 4}"), "{error}");
+        assert!(error.contains("{3, 4}"), "{error}");
+    }
+
+    /// The sharper instance this check found on the committed tree:
+    /// `FEAT-P1-03` recorded `STORY-P1-03-02` as `Verified` for four days while
+    /// the Story's own header still read `In progress`.
+    #[test]
+    fn a_feature_disagreeing_about_the_state_word_is_refused() {
+        let error = compare_feature_story_row(
+            "FEAT-P1-03",
+            "STORY-P1-03-02",
+            "Verified (Tier 0 + Host; assurance `baseline-debt`)",
+            &status("In progress", "acceptance criteria hardened after pre-implementation review"),
+        )
+        .expect_err("a state disagreement must be refused");
+        assert!(error.contains("records `STORY-P1-03-02` as `Verified`"), "{error}");
+    }
+
+    /// `Functionally Verified` carries assurance debt that a reader of plain
+    /// `Verified` will not go looking for. They are distinct states in this
+    /// project's own vocabulary and do not satisfy each other.
+    #[test]
+    fn functionally_verified_does_not_satisfy_verified() {
+        let error = compare_feature_story_row(
+            "FEAT-P1-01",
+            "STORY-P1-01-01",
+            "Verified (Tier 0 + Host; assurance `baseline-debt`)",
+            &status("Functionally Verified", "assurance state `baseline-debt`"),
+        )
+        .expect_err("the two states are not interchangeable");
+        assert!(error.contains("Functionally Verified"), "{error}");
+    }
+
+    #[test]
+    fn an_agreeing_row_is_accepted_whether_or_not_the_cell_is_bolded() {
+        compare_feature_story_row(
+            "FEAT-P1-07",
+            "STORY-P1-07-01",
+            "In progress — host half Green, criteria 3 and 4 need a board",
+            &status("In progress", "host-testable half Green; criteria 3 and 4 blocked on a board"),
+        )
+        .expect("agreement is accepted");
+        compare_feature_story_row(
+            "FEAT-P1-04",
+            "STORY-P1-04-01",
+            "**Verified** (Tier 0 + Host, 2026-07-28; assurance `baseline-debt`)",
+            &status("Verified", "Tier 0 + Host — assurance `baseline-debt`"),
+        )
+        .expect("a bolded cell is a prose choice, not a defect");
+    }
+
     // `TEST-P0-01-05-A` clause 1.
     #[test]
     fn guardrail_evidence_counts_valid_rows() {
@@ -2596,9 +3183,10 @@ mod tests {
             evidence_row("PERF-D01-G11", "D01", "STORY-P0-01-01"),
             evidence_row("PERF-D05-G11", "D05", "STORY-P0-02-01"),
         );
-        let count = validate_guardrail_evidence(&fixture, &evidence_contracts())
+        let evidence = validate_guardrail_evidence(&fixture, &evidence_contracts())
             .expect("valid register passes");
-        assert_eq!(count, 2);
+        assert_eq!(evidence.count, 2);
+        assert!(evidence.bound_rows.is_empty(), "no G11 row is bound-class");
     }
 
     // `TEST-P0-01-05-A` clause 1: the check the register exists for. Evidence

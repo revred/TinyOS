@@ -10,7 +10,7 @@
 //! `RDTSC` — `hal_x86_64::tsc::Tsc` does), the buffers are
 //! [`kernel::measure::Samples`], the percentiles are
 //! [`kernel::measure::Samples::summarize`], and the output is the versioned
-//! `TINYOS-MEAS/1` envelope `xtask measure` parses. The fixture's own code is
+//! `TINYOS-MEAS/2` envelope `xtask measure` parses. The fixture's own code is
 //! therefore *only* the three workloads plus their self-consistency checks —
 //! which is the point of the Story: a new domain becomes a phase function,
 //! not a new copy of a measurement harness.
@@ -718,6 +718,8 @@ pub fn run() -> bool {
     let environment = Environment {
         tier: "T0",
         arch: "x86_64",
+        platform: "qemu-tcg-x86_64",
+        qualification: kernel::measure::UNQUALIFIED,
         cycle_source: Tsc::NAME,
         overhead_cycles: calibration.overhead_cycles(),
         cycles_per_us: timebase.cycles_per_us(),

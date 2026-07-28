@@ -9,10 +9,12 @@
 #![forbid(unsafe_code)]
 
 mod assurance;
+mod bound_provenance;
 mod gate;
 mod governance;
 mod performance_catalogue;
 mod probe_pe;
+mod spine_files;
 mod timing;
 mod txe;
 
@@ -30,7 +32,7 @@ enum XtaskExit {
     HarnessError = 2,
 }
 
-/// A fixture that emits a `TINYOS-MEAS/1` envelope, identified by what has
+/// A fixture that emits a `TINYOS-MEAS/2` envelope, identified by what has
 /// to be built to run it.
 ///
 /// Previously this was just a Cargo feature name, because every measurable
@@ -227,7 +229,7 @@ const FIXTURES: &[Fixture] = &[
         feature: Some("fixture-measure"),
         expects_failure: false,
         owning_test: "TEST-P1-01-01-A",
-        summary: "Measurement harness emits a parseable TINYOS-MEAS/1 envelope",
+        summary: "Measurement harness emits a parseable TINYOS-MEAS/2 envelope",
     },
     Fixture {
         name: "fault",
@@ -397,6 +399,10 @@ const SUBCOMMANDS: &[Subcommand] = &[
         name: "check-assurance-spine",
         summary: "Validate contracts, loose ends and the Story/Feature join",
     },
+    Subcommand {
+        name: "check-spine-files",
+        summary: "Fast: header, field count and id uniqueness on every hand-edited spine TSV",
+    },
     Subcommand { name: "check-crate-sizes", summary: "Enforce the 20,000-LOC crate ceiling" },
     Subcommand { name: "check-image-size", summary: "Enforce the system-image size ceiling" },
     Subcommand {
@@ -548,6 +554,32 @@ fn main() -> ExitCode {
                 }
             }
         }
+        // `LE-36`. Deliberately its own subcommand rather than a flag on
+        // `check-assurance-spine`: rule 8 asks for something a session will
+        // actually run between two edits, and a flag on a slow command is a
+        // slow command.
+        "check-spine-files" => {
+            let result = os_root().and_then(|root| {
+                let repo_root = root.parent().ok_or_else(|| {
+                    format!("could not resolve repository root from {}", root.display())
+                })?;
+                spine_files::check_spine_files(repo_root)
+            });
+            match result {
+                Ok(summary) => {
+                    println!(
+                        "spine-files-check: {} files, {} rows — headers agree, no consumed \
+                         separators, no duplicate keys, ids contiguous",
+                        summary.file_count, summary.row_count
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(message) => {
+                    eprintln!("xtask: spine file invalid: {message}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         "check-assurance-spine" => {
             let result = os_root().and_then(|root| {
                 let repo_root = root.parent().ok_or_else(|| {
@@ -558,7 +590,7 @@ fn main() -> ExitCode {
             match result {
                 Ok(summary) => {
                     println!(
-                        "assurance-spine-check: {} Features, {} Stories, {} Tests, {} Reports, {} containment classes, {} boundary tests, {} security controls, {} Protection Domain contracts, {} code-admission gates, {} class communication pairs, {} application/platform targets, {} landing zones, {} selected Story/performance contracts, {} selected application/performance contracts, {} loose ends ({} open), {} status headers, {} release gates with evidence",
+                        "assurance-spine-check: {} Features, {} Stories, {} Tests, {} Reports, {} containment classes, {} boundary tests, {} security controls, {} Protection Domain contracts, {} code-admission gates, {} class communication pairs, {} application/platform targets, {} landing zones, {} selected Story/performance contracts, {} selected application/performance contracts, {} loose ends ({} open), {} status headers, {} release gates with evidence, {} open-debt selections, {} platforms ({} qualified), {} bound claims checked, {} Feature/Story status rows agree",
                         summary.feature_count,
                         summary.story_count,
                         summary.test_count,
@@ -576,7 +608,12 @@ fn main() -> ExitCode {
                         summary.loose_end_count,
                         summary.open_loose_end_count,
                         summary.status_header_count,
-                        summary.guardrail_evidence_count
+                        summary.guardrail_evidence_count,
+                        summary.open_debt_count,
+                        summary.platform_count,
+                        summary.qualified_platform_count,
+                        summary.bound_claim_count,
+                        summary.feature_story_row_count
                     );
                     ExitCode::SUCCESS
                 }

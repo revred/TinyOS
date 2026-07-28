@@ -21,7 +21,7 @@
 //!   of trusting the caller's index arithmetic;
 //! - percentiles come from the one shared, host-unit-tested implementation
 //!   rather than a second copy that could drift from it;
-//! - output is the versioned `TINYOS-MEAS/1` envelope that
+//! - output is the versioned `TINYOS-MEAS/2` envelope that
 //!   `cargo run -p xtask -- measure` parses and fails closed on, replacing
 //!   prose lines that only a human could read — which is what made this
 //!   fixture's numbers reachable *only* by invoking QEMU by hand with
@@ -554,6 +554,8 @@ pub fn run() -> bool {
     let environment = Environment {
         tier: "T0",
         arch: "x86_64",
+        platform: "qemu-tcg-x86_64",
+        qualification: kernel::measure::UNQUALIFIED,
         cycle_source: Tsc::NAME,
         overhead_cycles: calibration.overhead_cycles(),
         cycles_per_us: timebase.cycles_per_us(),

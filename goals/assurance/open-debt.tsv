@@ -1,0 +1,25 @@
+story_id	domain	readiness	reason	recorded_in
+STORY-P0-01-01	D25	design	Combined system and footprint is a whole-system composition domain with no composed system behind it; a boot Story cannot close a combined-workload guardrail	2026-07-28
+STORY-P0-01-02	D25	design	Combined system and footprint is a whole-system composition domain with no composed system behind it; a CI-pipeline Story measures no composed workload	2026-07-28
+STORY-P0-03-02	D25	design	Combined system and footprint is a whole-system composition domain with no composed system behind it	2026-07-28
+STORY-P0-04-01	D22	design	Opt-in driver lifecycle does not exist: there is no driver model, no opt-in mechanism and no lifecycle to measure	2026-07-28
+STORY-P0-04-02	D02	unbuilt	Interrupt entry and exit is unbuilt as a measured path; the local APIC exists but no entry/exit instrumentation does, and LE-17 tracked the same absence from the fault side	2026-07-28
+STORY-P0-04-03	D22	design	Opt-in driver lifecycle does not exist; PCI enumeration is read-only discovery, not a driver lifecycle	2026-07-28
+STORY-P0-05-03	D10	stand-in-only	ACI capability decision is a stand-in: the policy engine is specified in the README and not implemented, so a decision latency has nothing to decide	2026-07-28
+STORY-P0-05-03	D14	stand-in-only	Storage and file access is a stand-in: no storage stack, no filesystem and no block device exist	2026-07-28
+STORY-P0-05-04	D25	design	Combined system and footprint is a whole-system composition domain with no composed system behind it	2026-07-28
+STORY-P0-07-01	D12	specified	Local IPC message channel is specified, not built as a measurable subsystem; the Story proves a functional message path, and the 25 guardrails ask about a channel that does not exist	2026-07-28
+STORY-P0-07-02	D13	specified	Shared-memory grant is specified, not built as a measurable subsystem; grant and revoke are functional mechanisms with no measured grant path behind them	2026-07-28
+STORY-P0-08-01	D25	design	Combined system and footprint is a whole-system composition domain with no composed system behind it	2026-07-28
+STORY-P1-01-04	D02	unbuilt	Interrupt entry and exit is unbuilt as a measured path; the ratio gate measures dispatch and pool composition, never interrupt entry	2026-07-28
+STORY-P1-02-01	D02	unbuilt	Interrupt entry and exit is unbuilt as a measured path; the fault handlers exist but LE-17 closed on a fault-latency fixture, not on an entry/exit measurement	2026-07-28
+STORY-P1-02-02	D02	unbuilt	Interrupt entry and exit is unbuilt as a measured path; IST stack switching is a containment mechanism, not an instrumented entry path	2026-07-28
+STORY-P1-07-02	D02	unbuilt	Interrupt entry and exit is unbuilt as a measured path, and on AArch64 the vectors themselves do not yet exist on silicon (LE-38 also open against this Story's mechanism)	2026-07-28
+STORY-P1-07-04	D02	unbuilt	Interrupt entry and exit is unbuilt as a measured path; this Story builds the GIC tick and does not instrument entry cost	2026-07-28
+STORY-P1-07-06	D02	unbuilt	Interrupt entry and exit is unbuilt as a measured path; under ADR 0005 this Story produces mechanism evidence and the first Q3 campaign, not a bound of any kind	2026-07-28
+STORY-P9-01-01	D25	design	Combined system and footprint is a whole-system composition domain with no composed system behind it	2026-07-28
+STORY-P9-02-01	D25	design	Combined system and footprint is a whole-system composition domain with no composed system behind it	2026-07-28
+STORY-P9-03-01	D25	design	Combined system and footprint is a whole-system composition domain with no composed system behind it	2026-07-28
+STORY-P9-04-01	D25	design	Combined system and footprint is a whole-system composition domain with no composed system behind it	2026-07-28
+STORY-P9-05-01	D25	design	Combined system and footprint is a whole-system composition domain with no composed system behind it	2026-07-28
+STORY-P9-07-01	D25	design	Combined system and footprint is a whole-system composition domain with no composed system behind it	2026-07-28
