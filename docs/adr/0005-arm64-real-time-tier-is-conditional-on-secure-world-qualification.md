@@ -225,3 +225,37 @@ Concretely: a Q3 campaign is not admissible unless the same instrumentation has 
 known length. A zero from an instrument never shown to produce a non-zero is not a measurement of
 zero. It is an absence of measurement, and the two are indistinguishable in the Report unless the
 positive control is recorded alongside.
+
+### Added 2026-07-28: this rule was derived three times independently before it was written down
+
+The paragraph above cited one source. That understated it, and the understatement matters, because a
+rule asserted once invites the question *"says who?"* while a rule three separate sessions arrived at
+from three different directions is a property of the work rather than an author's preference. The
+three arrivals, each verifiable in this repository:
+
+1. **The `.org` vector-table guard**, [Handover 27](../../session/hand-2026-07-28/27-story-p1-07-02-host-half.md)
+   §"Four things a reviewer should look at first", item 1 — the AArch64 exception table is code, sixteen slots of 128 bytes, and an entry that overflows
+   its slot silently displaces every entry after it. The guard against that was **proven able to
+   fail** before it was trusted: the entry body was temporarily padded past 128 bytes and the build
+   rejected it with `invalid .org offset '128' (at offset '204')`. *"A gate nobody has watched fail is
+   a gate nobody has tested."*
+2. **The SIMD detector**, [Handover 30](../../session/hand-2026-07-28/30-d09-measured-and-two-corrections-verified.md)
+   §"Two corrections verified, and one improved" — an external audit reported `CPACR_EL1` as an uninitialised trap, and
+   the refutation rested on a detector reporting zero SIMD instructions across the AArch64 image.
+   **The detector was self-tested before its negative was believed**: it fires on `v1.16b`, `q0`, `d0`
+   and `fadd s0`, and correctly ignores `add x1`. *"A zero from an unexercised detector would have
+   been the same class of error as the finding being corrected."*
+3. **`Q3`'s positive control**, this ADR — a residency campaign that observes no secure-world
+   excursion, from an instrument never shown to observe one.
+
+The first two were build-time and static-analysis problems; the third is a timing measurement on
+hardware. Nothing about the domains is shared. What is shared is the failure mode: **a negative
+result is the cheapest thing any instrument can produce, and it is indistinguishable from a broken
+instrument until the instrument has been made to produce a positive.**
+
+**This addition changes no decision, no clause, and nothing any document cites.** It is provenance for
+a rule already stated above, recorded in
+[`37-adr-0005-provenance.md`](../../session/hand-2026-07-28/37-adr-0005-provenance.md) because editing
+an accepted ADR's body — rather than its status header — is not something to do silently. Two prior
+sessions recommended this paragraph and both declined to take it for exactly that reason; it is taken
+here on the owner's explicit instruction.
