@@ -51,7 +51,8 @@ struct MeasurableTarget {
 /// A *separate namespace* from [`FIXTURES`], which `qemu-x86_64` accepts.
 /// `dispatch` and `dispatch-measure` are the two names for the same binary,
 /// one per subcommand. `list-fixtures` prints both sets for this reason.
-const MEASURABLE_FIXTURES: &[&str] = &["measure", "measure-regression", "pool-bench", "dispatch"];
+const MEASURABLE_FIXTURES: &[&str] =
+    &["measure", "measure-regression", "pool-bench", "dispatch", "pe-measure"];
 
 /// Maps a `--fixture=` value to what must be built, or `None` if that
 /// fixture emits no measurement envelope.
@@ -77,6 +78,9 @@ fn measurable_fixture(name: &str) -> Option<MeasurableTarget> {
             binary: "dispatch-measure-fixture",
             feature: None,
         }),
+        "pe-measure" => {
+            Some(MeasurableTarget { package: "exec", binary: "pe-measure-fixture", feature: None })
+        }
         _ => None,
     }
 }
@@ -278,6 +282,15 @@ const FIXTURES: &[Fixture] = &[
         expects_failure: false,
         owning_test: "TEST-P1-03-03-A",
         summary: "D04 same-space vs cross-space dispatch cost",
+    },
+    Fixture {
+        name: "pe-measure",
+        package: "exec",
+        binary: "pe-measure-fixture",
+        feature: None,
+        expects_failure: false,
+        owning_test: "TEST-P0-01-06-A",
+        summary: "D09 PE64 parse and import validation, accept and denial paths",
     },
     // The system image (`STORY-P1-03-03`): the real boot path that discovers
     // hardware, installs W^X address spaces, and schedules a real loaded task.

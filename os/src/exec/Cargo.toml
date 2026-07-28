@@ -85,6 +85,16 @@ test = false
 bench = false
 
 [[bin]]
+# `STORY-P0-01-06`: the D09 PE64 parse/import-validation measurement, against
+# the same real `blue-sharc.txe` artifact `blue-sharc-fixture` loads. Outside
+# the gated `measure` envelope on purpose — see the fixture's own doc comment
+# and `TEST-P0-01-06-A` clause 3.
+name = "pe-measure-fixture"
+path = "src/fixture_pe_measure_main.rs"
+test = false
+bench = false
+
+[[bin]]
 # `STORY-P1-03-03`: the D04 same-space vs cross-space dispatch measurement
 # `FEAT-P1-03`'s exit criteria have asked for since `STORY-P1-03-01`.
 # Reports through the same TINYOS-MEAS/1 envelope `xtask measure` parses.
