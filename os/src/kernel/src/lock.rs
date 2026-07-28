@@ -151,6 +151,25 @@ impl PriorityInheritingLock {
     /// into `journal`, `TARGET` `task`'s task-pool index and `COST` the
     /// restored-to priority value — no spoor is stamped when there was
     /// nothing to restore (`STORY-P0-06-03`).
+    ///
+    /// # Known defect: this restore does not compose with a WCET degrade
+    ///
+    /// `LE-22`. `original_priority` is a value captured at boost time, and the
+    /// restore below writes it back **unconditionally**. If
+    /// [`crate::wcet`] degraded the holder's priority while it held this lock,
+    /// that degrade is a decision made by a different subsystem about the same
+    /// quantity, and this line silently discards it — the task leaves `unlock`
+    /// at the priority it had *before* the overrun that degraded it.
+    ///
+    /// The converse also holds: degrading a boosted holder discards a boost a
+    /// waiter is depending on for progress.
+    ///
+    /// The registered fix shape is a **dynamic effective priority** —
+    /// `effective = max(base after any degrade, highest waiter priority)`,
+    /// evaluated on demand — rather than a stored value replayed later. The
+    /// bug is storing a decision that two subsystems can both change. Do not
+    /// "fix" this by making the restore conditional; that reintroduces the
+    /// same defect with a narrower trigger.
     pub fn unlock<const N: usize, const J: usize>(
         &mut self,
         scheduler: &mut Scheduler<N>,

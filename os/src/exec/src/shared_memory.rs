@@ -237,6 +237,27 @@ pub fn grant<
         // Already validated present above; re-reading here (rather than
         // collecting into a fixed-size buffer up front) avoids needing a
         // `pages`-sized scratch array for an arbitrary caller-chosen count.
+        //
+        // THE INVARIANT THIS RESTS ON, stated because it was unstated (`LE-40`):
+        // the re-read returns what the validation loop saw because `owner_space`
+        // is held here as a SHARED borrow (`&AddressSpace<'_, OWNER_FRAMES>`),
+        // so no `&mut` can alias it, and this kernel is single-core with no
+        // page-table mutation from an interrupt path. There is therefore no
+        // window between check and use — this is not a TOCTOU, and it was once
+        // reported as one.
+        //
+        // TWO THINGS WOULD INVALIDATE IT, SILENTLY:
+        //   1. SMP. Another core mutating the owner's tables makes the `expect`
+        //      below reachable, and it panics rather than failing closed.
+        //   2. Page-table structure shared between the two spaces covering
+        //      `owner_virt` — `attach_shared_pd` makes that possible in
+        //      principle. No reachable case has been constructed, and Rust's
+        //      borrow rules already prevent the obvious one.
+        //
+        // The `expect` is the only one on a non-test path in this file, and it
+        // sits in a function that already returns `Result<_, SharedMemoryError>`
+        // — so failing closed costs one line. That change is `LE-40`'s open
+        // half and must land BEFORE any SMP work, not after it.
         let owner_page = owner_space
             .translate(owner_virt + offset)
             .expect("validated present in the loop above");

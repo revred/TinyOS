@@ -354,6 +354,16 @@ fn apply<const N: usize, const J: usize>(
             scheduler.set_state(task, TaskState::Ready);
         }
         OverrunDisposition::DegradeTo(floor) => {
+            // KNOWN DEFECT (`LE-22`): this degrade does not compose with
+            // priority inheritance. If `task` currently holds a
+            // `PriorityInheritingLock` and was boosted by a waiter, writing
+            // `floor` here discards a boost that waiter depends on for
+            // progress; and the matching `unlock` will later restore the
+            // pre-boost priority unconditionally, discarding *this* degrade.
+            // Two subsystems both write one quantity, and whichever writes
+            // last wins silently. See `crate::lock::PriorityInheritingLock::unlock`
+            // for the paired half and the registered fix shape (a dynamic
+            // effective priority, not a stored value replayed later).
             scheduler.set_priority(task, floor);
             reset_budget_window(scheduler, journal, task);
             scheduler.set_state(task, TaskState::Ready);
