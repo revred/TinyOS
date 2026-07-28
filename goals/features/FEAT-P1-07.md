@@ -27,7 +27,7 @@ The one thing that looks like scope creep and is not: **`STORY-P1-07-03`'s MMU**
 
 | Story | Summary | Status |
 |---|---|---|
-| [`STORY-P1-07-01`](../stories/STORY-P1-07-01.md) | AArch64 target spec, boot stub, `EL2 → EL1`, PL011 UART, first byte on the wire | In progress — host half Green, criteria 2 and 4 need a board |
+| [`STORY-P1-07-01`](../stories/STORY-P1-07-01.md) | AArch64 target spec, boot stub, `EL2 → EL1`, PL011 UART, first byte on the wire | In progress — host half Green, criteria 3 and 4 need a board |
 | [`STORY-P1-07-02`](../stories/STORY-P1-07-02.md) | Exception vectors; a synchronous fault prints a decoded `ESR_EL1` instead of hanging | In progress — host half Green, criterion 2 needs a board |
 | [`STORY-P1-07-03`](../stories/STORY-P1-07-03.md) | Flat identity MMU, Normal cacheable RAM, Device MMIO, caches on — explicitly *not* address spaces | Specified |
 | [`STORY-P1-07-04`](../stories/STORY-P1-07-04.md) | GIC + generic-timer periodic tick; `LE-15` resolved by the `PMCCNTR_EL0`/`CNTVCT_EL0` split | Specified |
