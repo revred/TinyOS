@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::{bound_provenance, performance_catalogue};
+use crate::{bound_provenance, dashboard, performance_catalogue};
 
 const CONTAINMENT_HEADER: &str =
     "id\tname\tpurpose\tdefault_authority\tinput_rule\tfailure_rule\trequired_evidence";
@@ -133,6 +133,13 @@ pub struct AssuranceSummary {
     /// Number of Feature Stories-table rows cross-checked against the
     /// referenced Story's own `Status:` header (`LE-44`).
     pub feature_story_row_count: usize,
+    /// Number of dashboard Story status badges cross-checked against
+    /// `list-status` (`LE-30`).
+    ///
+    /// The generated stat tiles and the spine-count sentence are checked on
+    /// the same pass and have nothing to count -- they either match or the
+    /// run fails -- so this is the one dashboard figure worth printing.
+    pub dashboard_badge_count: usize,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -219,8 +226,33 @@ impl CharterContractIndex {
     }
 }
 
+/// Whether a spine run also holds `goals/index.html` to the numbers it just
+/// computed.
+///
+/// `Skip` exists for exactly one caller and the reason is a usability trap:
+/// `emit-dashboard` prints the block that *fixes* a stale page, so if it ran
+/// the dashboard check it would refuse to run precisely when it is needed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DashboardPolicy {
+    Check,
+    Skip,
+}
+
 /// Validates both catalogues and the Story-level join relative to `repo_root`.
 pub fn check_assurance_spine(repo_root: &Path) -> Result<AssuranceSummary, String> {
+    walk_spine(repo_root, DashboardPolicy::Check).map(|(summary, _)| summary)
+}
+
+/// The spine numbers `goals/index.html` renders, without holding the page to
+/// them -- what `emit-dashboard` needs in order to print a correct block.
+pub fn dashboard_facts(repo_root: &Path) -> Result<dashboard::DashboardFacts, String> {
+    walk_spine(repo_root, DashboardPolicy::Skip).map(|(_, facts)| facts)
+}
+
+fn walk_spine(
+    repo_root: &Path,
+    dashboard_policy: DashboardPolicy,
+) -> Result<(AssuranceSummary, dashboard::DashboardFacts), String> {
     crate::performance_catalogue::check_catalogue(repo_root)
         .map_err(|error| format!("performance catalogue: {error}"))?;
 
@@ -391,32 +423,74 @@ pub fn check_assurance_spine(repo_root: &Path) -> Result<AssuranceSummary, Strin
     // check that they agree with what their Features say about them.
     let feature_story_row_count = validate_feature_story_tables(repo_root, &statuses)?;
 
-    Ok(AssuranceSummary {
-        guardrail_evidence_count: evidence.count,
-        open_debt_count: open_debt.len(),
-        platform_count: platforms.count(),
-        qualified_platform_count: platforms.qualified_count(),
-        bound_claim_count,
-        feature_story_row_count,
-        feature_count: feature_contracts.features.len(),
-        story_count: contracts.stories.len(),
-        containment_class_count: containment_classes.len(),
-        boundary_test_count: boundary_tests.len(),
-        security_control_count: security.controls.len(),
-        protection_domain_contract_count: protection_domains.len(),
-        code_admission_gate_count: code_admission.len(),
-        class_communication_pair_count: class_communication_pairs.len(),
-        application_platform_count: application_platforms.len(),
-        landing_zone_count: landing_zones.len(),
-        selected_application_performance_contracts: application_platforms
-            .selected_performance_contracts,
-        selected_performance_contracts: contracts.selected_performance_contracts,
-        test_count: test_files.len(),
-        report_count: report_files.len(),
-        loose_end_count: loose_ends.ids.len(),
-        open_loose_end_count: loose_ends.open_count,
-        status_header_count: statuses.len(),
-    })
+    // `LE-30`: and this is the check that the page a reader meets first agrees
+    // with all of the above. Nine sessions hand-synced it; none of them was
+    // wrong on purpose, which is the argument for a machine rather than a
+    // tenth careful reader.
+    let in_play_domains: BTreeSet<String> = contracts
+        .details_by_story
+        .values()
+        .flat_map(|contract| contract.performance_domains.iter().cloned())
+        .collect();
+    let reach = performance_catalogue::release_gate_reach(repo_root, &in_play_domains)?;
+    let assurance_verified =
+        contracts.details_by_story.values().filter(|contract| contract.state == "verified").count();
+    let facts = dashboard::DashboardFacts {
+        catalogue_cells: PERFORMANCE_GUARDRAILS_PER_DOMAIN * PERFORMANCE_GUARDRAILS_PER_DOMAIN,
+        containment_classes: containment_classes.len(),
+        boundary_tests: boundary_tests.len(),
+        protection_domains: protection_domains.len(),
+        code_admission_gates: code_admission.len(),
+        class_paths: class_communication_pairs.len(),
+        stories: contracts.stories.len(),
+        security_controls: security.controls.len(),
+        application_targets: application_platforms.len(),
+        landing_zones: landing_zones.len(),
+        assurance_verified,
+        evidenced_gates: evidence.count,
+        in_play_gates: reach.in_play,
+        reachable_gates: reach.reachable,
+        features: feature_contracts.features.len(),
+        tests: test_files.len(),
+        reports: report_files.len(),
+        loose_ends: loose_ends.ids.len(),
+        open_loose_ends: loose_ends.open_count,
+    };
+    let dashboard_summary = match dashboard_policy {
+        DashboardPolicy::Check => dashboard::check_dashboard(repo_root, &facts, &statuses)?,
+        DashboardPolicy::Skip => dashboard::DashboardSummary { badges_checked: 0 },
+    };
+
+    Ok((
+        AssuranceSummary {
+            guardrail_evidence_count: evidence.count,
+            open_debt_count: open_debt.len(),
+            platform_count: platforms.count(),
+            qualified_platform_count: platforms.qualified_count(),
+            bound_claim_count,
+            feature_story_row_count,
+            dashboard_badge_count: dashboard_summary.badges_checked,
+            feature_count: feature_contracts.features.len(),
+            story_count: contracts.stories.len(),
+            containment_class_count: containment_classes.len(),
+            boundary_test_count: boundary_tests.len(),
+            security_control_count: security.controls.len(),
+            protection_domain_contract_count: protection_domains.len(),
+            code_admission_gate_count: code_admission.len(),
+            class_communication_pair_count: class_communication_pairs.len(),
+            application_platform_count: application_platforms.len(),
+            landing_zone_count: landing_zones.len(),
+            selected_application_performance_contracts: application_platforms
+                .selected_performance_contracts,
+            selected_performance_contracts: contracts.selected_performance_contracts,
+            test_count: test_files.len(),
+            report_count: report_files.len(),
+            loose_end_count: loose_ends.ids.len(),
+            open_loose_end_count: loose_ends.open_count,
+            status_header_count: statuses.len(),
+        },
+        facts,
+    ))
 }
 
 fn validate_security_charter_document(contents: &str) -> Result<(), String> {

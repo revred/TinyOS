@@ -10,6 +10,7 @@
 
 mod assurance;
 mod bound_provenance;
+mod dashboard;
 mod gate;
 mod governance;
 mod performance_catalogue;
@@ -400,6 +401,10 @@ const SUBCOMMANDS: &[Subcommand] = &[
         summary: "Validate contracts, loose ends and the Story/Feature join",
     },
     Subcommand {
+        name: "emit-dashboard",
+        summary: "Print goals/index.html's generated stat-tile block from live spine data",
+    },
+    Subcommand {
         name: "check-spine-files",
         summary: "Fast: header, field count and id uniqueness on every hand-edited spine TSV",
     },
@@ -554,6 +559,27 @@ fn main() -> ExitCode {
                 }
             }
         }
+        // `LE-30`. Prints the block; it deliberately does *not* write the file.
+        // A command that rewrites the page a reader meets first should be one
+        // someone chose to apply, and the diff is the review.
+        "emit-dashboard" => {
+            let result = os_root().and_then(|root| {
+                let repo_root = root.parent().ok_or_else(|| {
+                    format!("could not resolve repository root from {}", root.display())
+                })?;
+                assurance::dashboard_facts(repo_root)
+            });
+            match result {
+                Ok(facts) => {
+                    println!("{}", dashboard::emit_stat_row(&facts));
+                    ExitCode::SUCCESS
+                }
+                Err(message) => {
+                    eprintln!("xtask: could not read the spine: {message}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         // `LE-36`. Deliberately its own subcommand rather than a flag on
         // `check-assurance-spine`: rule 8 asks for something a session will
         // actually run between two edits, and a flag on a slow command is a
@@ -590,7 +616,7 @@ fn main() -> ExitCode {
             match result {
                 Ok(summary) => {
                     println!(
-                        "assurance-spine-check: {} Features, {} Stories, {} Tests, {} Reports, {} containment classes, {} boundary tests, {} security controls, {} Protection Domain contracts, {} code-admission gates, {} class communication pairs, {} application/platform targets, {} landing zones, {} selected Story/performance contracts, {} selected application/performance contracts, {} loose ends ({} open), {} status headers, {} release gates with evidence, {} open-debt selections, {} platforms ({} qualified), {} bound claims checked, {} Feature/Story status rows agree",
+                        "assurance-spine-check: {} Features, {} Stories, {} Tests, {} Reports, {} containment classes, {} boundary tests, {} security controls, {} Protection Domain contracts, {} code-admission gates, {} class communication pairs, {} application/platform targets, {} landing zones, {} selected Story/performance contracts, {} selected application/performance contracts, {} loose ends ({} open), {} status headers, {} release gates with evidence, {} open-debt selections, {} platforms ({} qualified), {} bound claims checked, {} Feature/Story status rows agree, {} dashboard badges agree",
                         summary.feature_count,
                         summary.story_count,
                         summary.test_count,
@@ -613,7 +639,8 @@ fn main() -> ExitCode {
                         summary.platform_count,
                         summary.qualified_platform_count,
                         summary.bound_claim_count,
-                        summary.feature_story_row_count
+                        summary.feature_story_row_count,
+                        summary.dashboard_badge_count
                     );
                     ExitCode::SUCCESS
                 }

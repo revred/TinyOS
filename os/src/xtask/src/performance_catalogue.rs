@@ -152,6 +152,78 @@ fn readiness_from_contents(contents: &str) -> Result<BTreeMap<String, String>, S
     Ok(readiness)
 }
 
+/// How many release gates are in play, and how many of them a board would move.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReleaseGateReach {
+    /// Release gates in the domains at least one Story selects — the
+    /// denominator the dashboard has always shown.
+    pub in_play: usize,
+    /// Of those, the ones whose tier names `Host` or `T0`: reachable with the
+    /// hardware this project already has.
+    pub reachable: usize,
+    /// Of those, the ones naming only `T1`/`T2`: a board moves these and
+    /// nothing else does.
+    pub hardware_only: usize,
+}
+
+/// Splits the in-play release gates into what a board would move and what it
+/// would not.
+///
+/// The distinction was computed by hand in
+/// `session/hand-2026-07-28/41A-the-dashboard-as-a-work-order.md` and is
+/// derived here instead, because a ratio that argues about where effort should
+/// go is exactly the kind of number that must not be an assertion in a
+/// document nobody re-checks (`LE-30`).
+///
+/// `G24`/`G25` are excluded by the `gate` column: they are *claim* gates
+/// (Linux and RTOS comparisons) that run only after the absolute release gates
+/// pass, so they are not part of the release denominator.
+pub fn release_gate_reach(
+    repo_root: &Path,
+    in_play_domains: &BTreeSet<String>,
+) -> Result<ReleaseGateReach, String> {
+    let path = repo_root.join("goals").join("performance").join("catalogue.tsv");
+    let contents = fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    reach_from_contents(&contents, in_play_domains)
+}
+
+fn reach_from_contents(
+    contents: &str,
+    in_play_domains: &BTreeSet<String>,
+) -> Result<ReleaseGateReach, String> {
+    let mut reach = ReleaseGateReach { in_play: 0, reachable: 0, hardware_only: 0 };
+    for (zero_based_index, raw_line) in contents.lines().skip(1).enumerate() {
+        let line = raw_line.trim_end_matches('\r');
+        if line.is_empty() {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() != FIELD_COUNT {
+            return Err(format!(
+                "line {}: expected {FIELD_COUNT} tab-separated fields, found {}",
+                zero_based_index + 2,
+                fields.len()
+            ));
+        }
+        if !in_play_domains.contains(fields[1]) || fields[7] != "release" {
+            continue;
+        }
+        reach.in_play += 1;
+        let tier = fields[5];
+        // `HIL` is deliberately *not* treated as reachable. The HIL rigs are
+        // CAN/USB hardware-in-the-loop deferred to Phase 3 and this project has
+        // none, so a `Host+T0+HIL` row is reachable on the strength of its
+        // `Host`/`T0` half and a `T1+T2+HIL` row is not reachable at all.
+        if tier.contains("Host") || tier.contains("T0") {
+            reach.reachable += 1;
+        } else {
+            reach.hardware_only += 1;
+        }
+    }
+    Ok(reach)
+}
+
 fn validate_axis_id(value: &str, prefix: char, line_number: usize) -> Result<(), String> {
     let bytes = value.as_bytes();
     if bytes.len() != 3 || bytes[0] != prefix as u8 || !bytes[1..].iter().all(u8::is_ascii_digit) {
@@ -253,6 +325,45 @@ mod tests {
         assert_eq!(readiness.get("D10").map(String::as_str), Some("stand-in-only"));
         assert_eq!(readiness.get("D12").map(String::as_str), Some("specified"));
         assert_eq!(readiness.get("D01").map(String::as_str), Some("prototype"));
+    }
+
+    // `TEST-P0-01-08-A` clause 1: the reachability split, checked against the
+    // hand count in Handover 41A §2 — 391 in play, 345 reachable, 46 needing a
+    // board. That document did the arithmetic by hand and asked for it to be
+    // verified rather than trusted; this is the verification, and from here it
+    // is derived rather than asserted.
+    #[test]
+    fn committed_catalogue_reachability_matches_the_hand_count_in_41a() {
+        let in_play: BTreeSet<String> = [
+            "D01", "D02", "D03", "D04", "D05", "D06", "D07", "D08", "D09", "D10", "D11", "D12",
+            "D13", "D14", "D22", "D24", "D25",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+        let reach =
+            release_gate_reach(&repo_root(), &in_play).expect("committed catalogue is readable");
+        assert_eq!(reach.in_play, 391, "17 in-play domains x 23 release guardrails");
+        assert_eq!(reach.reachable, 345, "Host or T0 in tier");
+        assert_eq!(reach.hardware_only, 46, "T1/T2 only — a board moves these and nothing else");
+        assert_eq!(reach.reachable + reach.hardware_only, reach.in_play);
+    }
+
+    #[test]
+    fn claim_gates_are_excluded_from_the_release_denominator() {
+        let one = BTreeSet::from(["D01".to_string()]);
+        let reach = release_gate_reach(&repo_root(), &one).expect("catalogue is readable");
+        // 25 guardrails, of which G24 and G25 are `claim`.
+        assert_eq!(reach.in_play, 23);
+    }
+
+    fn repo_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+            .expect("xtask manifest lives at os/src/xtask")
+            .to_path_buf()
     }
 
     #[test]
