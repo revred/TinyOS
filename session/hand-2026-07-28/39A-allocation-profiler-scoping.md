@@ -85,9 +85,48 @@ And `G11`'s target column already anticipates the TinyOS shape, verbatim:
 
 **`allocations_per_operation` is Sharc's `allocs/node`.** The catalogue independently specified the same
 normalisation, and it already separates *heap must be zero* from *pool claims are counted*. All 50 rows
-are `status: specified` and none has an instrument — as are all 625, so this is unbuilt work rather than
-a defect, and **no loose end is registered for it.** What it means is that the tool has 50 waiting
-customers rather than a hypothetical one.
+are `status: specified` — as are all 625, so this is unbuilt work rather than a defect, and **no loose
+end is registered for it.**
+
+### Corrected 2026-07-28: it is not 50 rows, and the heap half needs no instrument ever
+
+**This section originally claimed 50 waiting customers. That is wrong, and a long-running analysis pass
+caught it.** `goals/assurance/guardrail-evidence.tsv` was not consulted when the paragraph above was
+written. It should have been. What it actually holds:
+
+| | Count |
+| --- | --- |
+| Release gates with dated evidence, total | **11** |
+| Of those, `G11` | **10**, all `structural` |
+| Of those, `G12` | **0** |
+
+The ten `G11` rows are closed with this reasoning, quoted from the register:
+
+> *"No heap exists: every shipped crate is `no_std` with no `global_allocator` and no `alloc` outside
+> `cfg(test)`, enforced by `check-assurance-spine`. **Stronger than the guardrail asks** — zero
+> allocations in every state, not only steady state."*
+
+**That is a better result than any profiler could produce, and it was available all along.** It is
+compiler-and-gate-enforced rather than benchmark-observed, so it holds in *every* state rather than the
+steady state the guardrail settles for. The argument is also a property of the crates rather than of the
+domain, so the remaining 15 `G11` domains are claimable at **zero instrument cost** — they need a Story
+to claim them, not a tool.
+
+**So the instrument's real customers are narrower and sharper than this document first said:**
+
+1. **`G11`'s second clause — *"pool claims are separately counted."*** The structural no-heap argument
+   says nothing whatever about pool claims, and nothing in the register counts them. **This is the
+   genuine gap, and it is exactly the subject §2 identified independently.**
+2. **`G12` — *"allocation and reclamation latency"* — 0 of 25**, and this is where it gets interesting:
+   `G12` is a **latency** guardrail. It therefore sits squarely inside `ADR 0005`, so a reclamation-latency
+   *bound* is quotable only from a qualified platform, of which there are none. **`G12` cannot close as a
+   bound on Tier 0 at all**, which means the instrument's counting half is deliverable now and its timing
+   half is gated behind the same hardware wall as everything else in this project.
+
+**The correction strengthens the conclusion rather than weakening it.** §9 says do not port the
+`GlobalAlloc` counter; the reason is now stronger than "there is no heap to count" — the heap question is
+**already answered, better, by the compiler**. What is unmeasured is pool claims and reclaim latency.
+Ranking note for §9: the *countable* half is unblocked, the *latency* half is not.
 
 ## 4. The first real customer, and it is already open
 
