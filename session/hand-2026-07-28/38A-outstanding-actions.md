@@ -23,6 +23,7 @@ session available by a wide margin, unchanged since Handover 26 §"If an adapter
 | **W2** | **The `-M virt` fixture.** Four decisions first, §2 below | 34 step 2; 31 | Nothing. This is the best unblocked work |
 | **W3** | **`LE-23`** — re-record the timing baseline from a CI run. **`LE-24` may come free, and `LE-42` depends on it** | 34 step 3 | Nothing |
 | **W4** | **`LE-30`** — generate the dashboards from `list-status` | 34 step 4 | Nothing |
+| **W5** | **The allocation / pool-claim profiler**, adopted as a *pattern* from Sharc.Blue. **Unranked — see below** | [39A](39A-allocation-profiler-scoping.md) | Five decisions, 39A §7 |
 
 **On W1, and this is the part `ADR 0005` changed:** it is **criteria 3 and 4**, not 2 and 4 — criterion
 2 is the host-testable stack/`.bss`/`EL2 → EL1` drop. That correction is `LE-44`. Criterion 3 is
@@ -32,6 +33,17 @@ successful capture be written up as one.
 
 **On W4:** `goals/index.html` has now been hand-edited by **seven consecutive sessions**. `LE-44` is a
 second argument for the same row — both are hand-maintained cross-references with no machine behind them.
+
+**On W5, and its ranking is deliberately left open.** [39A](39A-allocation-profiler-scoping.md) scopes it.
+The instrument is **not** a `GlobalAlloc` port — `validate_no_heap` forbids one in all six shipped crates
+and there would be no heap to count — it is a pool-claim and bounded-resource census carrying Sharc's
+two-atomics-never-written-in-ship design. **The argument for ranking it above W3/W4:** `G11` and `G12`
+already exist across all 25 performance domains, so it is the missing instrument for **50 already-specified
+release gates**, and it is the only proposed work that would *explain* `LE-42`'s 17.6–39.1× `D09`
+overshoot rather than re-measure it. **The argument against:** `LE-33`'s second condition should arguably
+land first, so numbers this tool produces cannot be promoted into bounds by a gate that does not yet
+exist. **`G11`'s target is zero, and a zero is the cheapest thing any counter can produce** — 39A §5 makes
+the positive control a Red clause, which is trap 7's fourth arrival.
 
 ## 2. The four decisions `-M virt` needs first
 
