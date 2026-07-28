@@ -1,8 +1,17 @@
 # ADR 0004 — ARM64 Is the Real-Time Tier; x86_64 Keeps Throughput and Rich-Workload Claims
 
-Status: **Accepted**
+Status: **Superseded by [`ADR 0005`](0005-arm64-real-time-tier-is-conditional-on-secure-world-qualification.md)** (2026-07-28)
 Date: 2026-07-28
 Introduced in: [`session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md`](../../session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md) §7.1, confirmed by the user and recorded in [`19-feat-p1-07-acceptance-and-spine.md`](../../session/hand-2026-07-28/19-feat-p1-07-acceptance-and-spine.md)
+
+> **Superseded, and this body is preserved unedited below.** `LE-39` found that the sentence
+> *"Interrupt masking at `EL1` means what it says"* (in Context, last paragraph) is not true against a
+> GIC with secure interrupt groups routed to `EL3` by `SCR_EL3.FIQ` — structurally the same hole this
+> ADR disqualifies x86_64 for. [`ADR 0005`](0005-arm64-real-time-tier-is-conditional-on-secure-world-qualification.md)
+> supersedes this document and makes the ARM64 real-time tier **conditional on per-platform
+> secure-world qualification** rather than automatic. This ADR's case against x86_64 is unchanged and
+> is restated there in full. **No measurement is invalidated by either document.** Nothing here is
+> edited beyond this note, because `README.md`, `EPIC-P1` and the Handover series cite this text.
 
 ## Context
 
