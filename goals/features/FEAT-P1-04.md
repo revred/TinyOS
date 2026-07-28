@@ -1,6 +1,6 @@
 # FEAT-P1-04 — Timer-Driven Preemption, Deadline Monitor & WCET Watchdog
 
-Status: **Complete — 3 of 3 Stories Verified** (assurance `baseline-debt`; `LE-09` hardware debt open, and the Feature's title names a deadline monitor this Feature does not deliver — see below). Reopened 2026-07-28 for `STORY-P1-04-03`: the Feature's two Verified Stories described mechanisms the shipping image did not run, which is a gap in the Feature's own claim rather than a follow-on to it.
+Status: **Complete — 3 of 3 Stories Verified, reopened 2026-07-28 for `STORY-P1-04-04`** (assurance `baseline-debt`; `LE-09` hardware debt open, and the Feature's title names a deadline monitor this Feature does not deliver — see below). Reopened 2026-07-28 for `STORY-P1-04-03`: the Feature's two Verified Stories described mechanisms the shipping image did not run, which is a gap in the Feature's own claim rather than a follow-on to it.
 Epic: [`EPIC-P1`](../epics/EPIC-P1.md)
 Introduced in: [`session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md`](../../session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md)
 
@@ -23,6 +23,7 @@ Give the scheduler its teeth (Goals **G-RT-1**, **G-RT-3**): `EPIC-P0` left a co
 | [`STORY-P1-04-01`](../stories/STORY-P1-04-01.md) | Timer-driven preemption: tick → interrupt-driven dispatch, priority-inheritance under real preemption | **Verified** (Tier 0 + Host, 2026-07-28, `REPORT-2026-07-28-03`; assurance `baseline-debt`) |
 | [`STORY-P1-04-02`](../stories/STORY-P1-04-02.md) | Deadline monitor & WCET watchdog on the real timer; overrun → declared fault policy | **Verified** (Tier 0 + Host, 2026-07-28, `REPORT-2026-07-28-04`; assurance `baseline-debt`) |
 | [`STORY-P1-04-03`](../stories/STORY-P1-04-03.md) | Preemption and WCET enforcement on the shipping `os` image; the workload's overrun declaration made a decision | **Verified** (Tier 0 + Host, 2026-07-28, `REPORT-2026-07-28-05`; assurance `baseline-debt`) |
+| [`STORY-P1-04-04`](../stories/STORY-P1-04-04.md) | Degrade and priority inheritance compose: one effective priority derived from a task's own and its inherited, never stored (`LE-22`) | Functionally Verified (Host; assurance `baseline-debt`) |
 
 `STORY-P1-04-01` closed `LE-01` (priority inheritance's behavioural proof, open since `EPIC-P0`) and `LE-14` (extended-state save/restore — in the ISR stub, so it covers every tick rather than only preempting ones). `STORY-P1-04-02` closed `LE-02`: `wcet::record_tick` is driven by the real timer, and an overrun trips the policy the task declared at creation. `STORY-P1-04-03` closed `LE-20`: all of it now runs in the binary this project ships.
 

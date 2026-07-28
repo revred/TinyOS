@@ -4,7 +4,7 @@
 //! `README.md` Design Pillar 1 and Goal `G-RT-1` both name explicitly: when
 //! a higher-priority task contends for a lock a lower-priority task
 //! already holds, the holder is temporarily boosted to the waiter's
-//! priority (via [`Scheduler::set_priority`]) so a *third*, medium-priority
+//! priority (via [`Scheduler::inherit_priority`]) so a *third*, medium-priority
 //! task can't keep preempting the holder and starving the high-priority
 //! waiter indefinitely. The boost is released — the holder's priority
 //! restored to what it was before contention — the moment the lock is
@@ -75,17 +75,13 @@ pub enum LockError {
 /// [`LockError::AlreadyLocked`] rather than blocking itself.
 pub struct PriorityInheritingLock {
     holder: Option<TaskId>,
-    /// The holder's priority *before* any inheritance boost, recorded the
-    /// first time contention boosts it — `None` means either unlocked, or
-    /// locked but never yet contended (so nothing to restore).
-    original_priority: Option<Priority>,
 }
 
 impl PriorityInheritingLock {
     /// Creates an unlocked lock. `const fn`: usable in a `static`
     /// initializer, no heap allocation.
     pub const fn new() -> Self {
-        PriorityInheritingLock { holder: None, original_priority: None }
+        PriorityInheritingLock { holder: None }
     }
 
     /// Attempts to acquire the lock for `task` (currently running at
@@ -114,17 +110,19 @@ impl PriorityInheritingLock {
         match self.holder {
             None => {
                 self.holder = Some(task);
-                self.original_priority = None;
                 Ok(())
             }
             Some(holder) => {
                 let holder_priority =
                     scheduler.priority_of(holder).ok_or(LockError::UnknownTask)?;
                 if task_priority > holder_priority {
-                    if self.original_priority.is_none() {
-                        self.original_priority = Some(holder_priority);
-                    }
-                    scheduler.set_priority(holder, task_priority).ok_or(LockError::UnknownTask)?;
+                    // Records only what is inherited. Nothing about the
+                    // holder's *own* priority is captured, so there is no
+                    // stored value for a later degrade to invalidate
+                    // (`STORY-P1-04-04`, closing `LE-22`).
+                    scheduler
+                        .inherit_priority(holder, task_priority)
+                        .ok_or(LockError::UnknownTask)?;
                     journal.append(Spoor::stamp(
                         Category::Lock,
                         Actor::Kernel,
@@ -152,24 +150,23 @@ impl PriorityInheritingLock {
     /// restored-to priority value — no spoor is stamped when there was
     /// nothing to restore (`STORY-P0-06-03`).
     ///
-    /// # Known defect: this restore does not compose with a WCET degrade
+    /// # How this composes with a WCET degrade (`STORY-P1-04-04`, `LE-22`)
     ///
-    /// `LE-22`. `original_priority` is a value captured at boost time, and the
-    /// restore below writes it back **unconditionally**. If
-    /// [`crate::wcet`] degraded the holder's priority while it held this lock,
-    /// that degrade is a decision made by a different subsystem about the same
-    /// quantity, and this line silently discards it — the task leaves `unlock`
-    /// at the priority it had *before* the overrun that degraded it.
+    /// It releases the *inheritance* and nothing else. The task falls back to
+    /// its own priority **as it stands now**, so a [`crate::wcet`] degrade
+    /// applied while this lock was held survives the release — the task leaves
+    /// `unlock` at its floor, not at the priority it had before the overrun.
     ///
-    /// The converse also holds: degrading a boosted holder discards a boost a
-    /// waiter is depending on for progress.
+    /// The converse also holds, and is the more important half: a degrade
+    /// applied to a boosted holder does not disturb the boost, so a waiter
+    /// blocked on this lock keeps the priority it needs until the holder
+    /// actually releases.
     ///
-    /// The registered fix shape is a **dynamic effective priority** —
-    /// `effective = max(base after any degrade, highest waiter priority)`,
-    /// evaluated on demand — rather than a stored value replayed later. The
-    /// bug is storing a decision that two subsystems can both change. Do not
-    /// "fix" this by making the restore conditional; that reintroduces the
-    /// same defect with a narrower trigger.
+    /// Neither subsystem writes the quantity the scheduler reads. It is
+    /// `max(base, inherited)`, derived on demand, which is why there is no
+    /// stored decision left for either to invalidate. **A conditional restore
+    /// would not have been a fix** — it stores the same decision and merely
+    /// narrows the window in which it is stale.
     pub fn unlock<const N: usize, const J: usize>(
         &mut self,
         scheduler: &mut Scheduler<N>,
@@ -178,15 +175,24 @@ impl PriorityInheritingLock {
     ) -> Result<(), LockError> {
         match self.holder {
             Some(holder) if holder == task => {
-                if let Some(original) = self.original_priority.take() {
-                    scheduler.set_priority(task, original).ok_or(LockError::UnknownTask)?;
+                let was_boosted =
+                    scheduler.inherited_priority_of(task).ok_or(LockError::UnknownTask)?.is_some();
+                let fell_back_to =
+                    scheduler.release_inheritance(task).ok_or(LockError::UnknownTask)?;
+                // Only a release that actually changed the effective priority
+                // is an audit event, matching this journal's "what changed"
+                // scope. The stamped `COST` is the priority the task really
+                // lands on — including a degrade applied while it held the
+                // lock, which the previous implementation would have
+                // overwritten and mis-reported.
+                if was_boosted {
                     journal.append(Spoor::stamp(
                         Category::Lock,
                         Actor::Kernel,
                         Action::Restore,
                         Outcome::Ok,
                         task.index() as u16,
-                        original.value() as u32,
+                        fell_back_to.value() as u32,
                     ));
                 }
                 self.holder = None;
@@ -436,5 +442,178 @@ mod tests {
             lock.try_lock(&mut sched, &mut journal, holder, priority(10)),
             Err(LockError::AlreadyLocked)
         );
+    }
+
+    // ---- `TEST-P1-04-04-A`: degrade and inheritance compose (`LE-22`) ----
+    //
+    // Every composition test below fails on the pre-`STORY-P1-04-04`
+    // implementation, which is the point. The old code captured the holder's
+    // pre-boost priority at boost time and replayed it on unlock, so a degrade
+    // applied in between was silently discarded — and the degrade, writing the
+    // same field, silently discarded the boost.
+
+    /// Drives `task` past its budget through the **real** enforcement path.
+    ///
+    /// `wcet::account_tick` is what the timer ISR calls and the only entry
+    /// point that both detects an overrun and applies the declared policy;
+    /// `record_tick` alone only detects. Testing the composition against
+    /// anything less than the real path would prove nothing about the system
+    /// that ships.
+    fn overrun<const N: usize, const J: usize>(
+        sched: &mut Scheduler<N>,
+        journal: &mut SpoorJournal<J>,
+        task: TaskId,
+    ) {
+        for _ in 0..3 {
+            crate::wcet::account_tick(sched, journal, Some(task));
+        }
+    }
+
+    /// The three-task scenario plus an overrun. `low` (5, degrade floor 2)
+    /// holds; `high` (25) contends; `medium` (15) is uninvolved and must never
+    /// outrank the boosted holder.
+    #[allow(clippy::type_complexity)]
+    fn contended_holder_that_overruns(
+    ) -> (Scheduler<4>, SpoorJournal<16>, PriorityInheritingLock, TaskId, TaskId) {
+        let mut sched: Scheduler<4> = Scheduler::new();
+        let mut journal: SpoorJournal<16> = SpoorJournal::new();
+        let low = sched
+            .create_task(
+                priority(5),
+                WcetBudgetTicks(2),
+                OverrunPolicy::Degrade(priority(2)),
+                dummy_entry,
+            )
+            .expect("slot available");
+        let high = sched
+            .create_task(priority(25), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .expect("slot available");
+        let medium = sched
+            .create_task(priority(15), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .expect("slot available");
+
+        let mut lock = PriorityInheritingLock::new();
+        lock.try_lock(&mut sched, &mut journal, low, priority(5)).expect("lock is free");
+        assert_eq!(
+            lock.try_lock(&mut sched, &mut journal, high, priority(25)),
+            Err(LockError::AlreadyLocked),
+            "high contends"
+        );
+        assert_eq!(sched.priority_of(low), Some(priority(25)), "boosted to the waiter");
+        (sched, journal, lock, low, medium)
+    }
+
+    // Clause 2. The assertion the old implementation fails: after a degrade
+    // taken while boosted, `unlock` must land the task on its *floor*, not on
+    // the priority it held before the overrun that degraded it.
+    #[test]
+    fn a_degrade_taken_while_boosted_survives_the_unlock() {
+        let (mut sched, mut journal, mut lock, low, _medium) = contended_holder_that_overruns();
+        // Three ticks against a budget of 2, through the real enforcement
+        // path -- `account_tick` is what the timer ISR calls, and it is the
+        // only caller that both detects and applies.
+        overrun(&mut sched, &mut journal, low);
+
+        // Clause 3: the boost is intact while `high` is still blocked.
+        assert_eq!(
+            sched.priority_of(low),
+            Some(priority(25)),
+            "the waiter still needs the holder to finish"
+        );
+        assert_eq!(sched.base_priority_of(low), Some(priority(2)), "but the degrade landed");
+
+        lock.unlock(&mut sched, &mut journal, low).expect("holder releases");
+
+        assert_eq!(
+            sched.priority_of(low),
+            Some(priority(2)),
+            "falls to the degraded floor, NOT to the pre-boost 5 — this is LE-22"
+        );
+        assert_eq!(sched.inherited_priority_of(low), Some(None), "nothing left inherited");
+    }
+
+    // Clause 3, as the property that matters rather than as values: an
+    // uninvolved medium task must not outrank the holder at any point between
+    // the boost and the release, including across the degrade.
+    #[test]
+    fn an_overrun_never_lets_an_uninvolved_task_outrank_the_boosted_holder() {
+        let (mut sched, mut journal, mut lock, low, medium) = contended_holder_that_overruns();
+        assert!(sched.priority_of(low) > sched.priority_of(medium), "before the overrun");
+        overrun(&mut sched, &mut journal, low);
+        assert!(
+            sched.priority_of(low) > sched.priority_of(medium),
+            "and after it — the degrade must not re-create the inversion the boost prevents"
+        );
+
+        // Only once the waiter is released does medium legitimately outrank it.
+        lock.unlock(&mut sched, &mut journal, low).expect("holder releases");
+        assert!(sched.priority_of(low) < sched.priority_of(medium));
+    }
+
+    // Clause 1: the two writers cannot reach each other's field, in both
+    // directions, with no lock or overrun machinery involved.
+    #[test]
+    fn the_two_priority_writers_are_independent() {
+        let mut sched: Scheduler<2> = Scheduler::new();
+        let task = sched
+            .create_task(priority(10), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .expect("slot available");
+
+        sched.inherit_priority(task, priority(20)).expect("task is live");
+        sched.set_base_priority(task, priority(3)).expect("task is live");
+        assert_eq!(sched.priority_of(task), Some(priority(20)), "degrade cannot cancel a boost");
+
+        assert_eq!(sched.release_inheritance(task), Some(priority(3)));
+        assert_eq!(
+            sched.priority_of(task),
+            Some(priority(3)),
+            "and releasing the boost cannot undo the degrade"
+        );
+    }
+
+    // Clause 4: inheritance raises and never lowers, structurally.
+    #[test]
+    fn inheritance_never_lowers_an_already_higher_inherited_priority() {
+        let mut sched: Scheduler<2> = Scheduler::new();
+        let task = sched
+            .create_task(priority(5), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .expect("slot available");
+
+        sched.inherit_priority(task, priority(25)).expect("task is live");
+        sched.inherit_priority(task, priority(12)).expect("task is live");
+        assert_eq!(
+            sched.priority_of(task),
+            Some(priority(25)),
+            "a second, lower waiter cannot pull the holder down"
+        );
+    }
+
+    // Clause 4: an inherited priority below the task's own is inert, so a
+    // boost can never demote anyone even if a caller asks for one.
+    #[test]
+    fn an_inherited_priority_below_the_base_changes_nothing() {
+        let mut sched: Scheduler<2> = Scheduler::new();
+        let task = sched
+            .create_task(priority(20), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .expect("slot available");
+        sched.inherit_priority(task, priority(4)).expect("task is live");
+        assert_eq!(sched.priority_of(task), Some(priority(20)));
+    }
+
+    // The audit trail has to report where the task actually landed. The old
+    // implementation stamped the value it replayed, which after a degrade was
+    // a priority the task never held.
+    #[test]
+    fn the_release_spoor_records_the_priority_the_task_actually_lands_on() {
+        let (mut sched, mut journal, mut lock, low, _medium) = contended_holder_that_overruns();
+        overrun(&mut sched, &mut journal, low);
+        lock.unlock(&mut sched, &mut journal, low).expect("holder releases");
+
+        let restore = journal
+            .iter()
+            .filter(|spoor| spoor.action() == Action::Restore)
+            .last()
+            .expect("a boosted holder releasing stamps a Restore");
+        assert_eq!(restore.cost(), 2, "the floor it landed on, not the 5 it left");
     }
 }

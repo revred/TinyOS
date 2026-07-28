@@ -319,7 +319,7 @@ mod tests {
 
         // After inheritance boosts the holder to the waiter's priority, it
         // does not.
-        sched.set_priority(low, priority(25)).unwrap();
+        sched.inherit_priority(low, priority(25)).unwrap();
         let after = (low, sched.live_priority_of(low).unwrap());
         assert_eq!(tick_outcome(Some(after), Some(candidate)), TickOutcome::Continue);
     }
@@ -331,7 +331,7 @@ mod tests {
     fn live_priority_of_reports_the_boosted_value_and_fails_closed_when_unknown() {
         let (mut sched, low, _high) = scheduler_with_two();
         assert_eq!(sched.live_priority_of(low), Some(priority(5)));
-        sched.set_priority(low, priority(25)).unwrap();
+        sched.inherit_priority(low, priority(25)).unwrap();
         assert_eq!(sched.live_priority_of(low), Some(priority(25)));
 
         let mut empty: Scheduler<1> = Scheduler::new();

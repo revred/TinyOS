@@ -174,7 +174,23 @@ pub type TaskEntry = extern "C" fn() -> !;
 /// system, not caller discipline, enforces that invariant.
 #[derive(Debug, Clone, Copy)]
 pub struct Tcb {
-    priority: Priority,
+    /// The task's **own** priority: what it was created with, and the only
+    /// field `crate::wcet`'s degrade lowers (`STORY-P1-04-02`).
+    ///
+    /// Split out from a single `priority` field by `STORY-P1-04-04`, closing
+    /// `LE-22`. Two subsystems used to write one field — the lock replayed a
+    /// captured value on unlock, the WCET path wrote a declared floor on
+    /// overrun — so whichever wrote last silently discarded the other's
+    /// decision. Neither writes the other's field now, and neither writes the
+    /// value anybody reads.
+    base_priority: Priority,
+    /// The highest priority currently *inherited* from a waiter blocked on a
+    /// lock this task holds (`STORY-P0-02-03`), or `None` when nothing is
+    /// inherited.
+    ///
+    /// Written only by [`Scheduler::inherit_priority`] and cleared only by
+    /// [`Scheduler::release_inheritance`], both of which `crate::lock` owns.
+    inherited_priority: Option<Priority>,
     wcet_budget: WcetBudgetTicks,
     /// What this task declared should happen to it if it exceeds
     /// `wcet_budget` — `STORY-P1-04-02`. Supplied at creation alongside the
@@ -203,9 +219,33 @@ pub struct Tcb {
 }
 
 impl Tcb {
-    /// The task's static scheduling priority.
+    /// The priority everything that *schedules* this task reads:
+    /// `max(base, inherited)`, evaluated on demand.
+    ///
+    /// **Derived, never stored** — `STORY-P1-04-04`'s whole point. A stored
+    /// effective priority is a decision two subsystems can invalidate, which
+    /// is the defect `LE-22` registered; a computed one cannot go stale
+    /// because there is nothing to go stale.
+    ///
+    /// `max` also makes "inheritance raises and never lowers" structural
+    /// rather than a guard at each call site that someone can forget.
     pub const fn priority(&self) -> Priority {
-        self.priority
+        match self.inherited_priority {
+            Some(inherited) if inherited.value() > self.base_priority.value() => inherited,
+            _ => self.base_priority,
+        }
+    }
+
+    /// The task's own priority, ignoring any inheritance — what `degrade`
+    /// lowers and what the task falls back to when its last waiter is
+    /// released.
+    pub const fn base_priority(&self) -> Priority {
+        self.base_priority
+    }
+
+    /// The highest priority currently inherited from a waiter, or `None`.
+    pub const fn inherited_priority(&self) -> Option<Priority> {
+        self.inherited_priority
     }
 
     /// The task's WCET budget, enforced by `crate::wcet::record_tick`.
@@ -317,7 +357,8 @@ impl<const N: usize> Scheduler<N> {
             }
         }
         let tcb = Tcb {
-            priority,
+            base_priority: priority,
+            inherited_priority: None,
             wcet_budget,
             overrun_policy,
             entry,
@@ -346,14 +387,64 @@ impl<const N: usize> Scheduler<N> {
         self.tasks.get_mut(task.0).map(|tcb| tcb.priority())
     }
 
-    /// Sets `task`'s current priority, used by [`crate::lock`]'s priority
-    /// inheritance to boost a lock holder to a waiter's priority, and to
-    /// restore it afterward. Returns `None` (no side effect) if `task`
-    /// doesn't identify a currently live task.
-    pub fn set_priority(&mut self, task: TaskId, priority: Priority) -> Option<()> {
+    /// Sets `task`'s **own** priority, leaving any inherited priority intact.
+    ///
+    /// The only writer is `crate::wcet::apply`'s degrade arm. It is named for
+    /// the field it writes rather than for the quantity anybody reads, because
+    /// `LE-22` was precisely a caller believing it had set the scheduling
+    /// priority when it had set one of two inputs to it.
+    ///
+    /// **This cannot cancel a boost**: a task degraded while a waiter is
+    /// blocked on a lock it holds keeps running at the waiter's priority until
+    /// it releases, and *then* falls to the degraded base. Returns `None` (no
+    /// side effect) if `task` doesn't identify a currently live task.
+    pub fn set_base_priority(&mut self, task: TaskId, priority: Priority) -> Option<()> {
         let tcb = self.tasks.get_mut(task.0)?;
-        tcb.priority = priority;
+        tcb.base_priority = priority;
         Some(())
+    }
+
+    /// Raises `task`'s inherited priority to `priority` if that is higher than
+    /// what it already inherits (`STORY-P0-02-03`).
+    ///
+    /// Idempotent and monotonic within one contention cycle: a second, lower
+    /// waiter cannot pull a holder down, and re-boosting to the same value
+    /// changes nothing. Returns `None` (no side effect) if `task` doesn't
+    /// identify a currently live task.
+    ///
+    /// **This cannot cancel a degrade**: it writes only `inherited_priority`,
+    /// so a task's own priority is exactly where `crate::wcet` left it.
+    pub fn inherit_priority(&mut self, task: TaskId, priority: Priority) -> Option<()> {
+        let tcb = self.tasks.get_mut(task.0)?;
+        let raise = match tcb.inherited_priority {
+            Some(current) => priority.value() > current.value(),
+            None => true,
+        };
+        if raise {
+            tcb.inherited_priority = Some(priority);
+        }
+        Some(())
+    }
+
+    /// Drops every priority `task` inherits, returning the effective priority
+    /// it falls back to — which is its **current** base, including any degrade
+    /// applied while it was boosted.
+    ///
+    /// Returns `None` (no side effect) if `task` doesn't identify a currently
+    /// live task.
+    ///
+    /// **Known limit (`LE-49`).** This clears the task's inheritance outright,
+    /// so a task holding two contended locks loses the second lock's boost when
+    /// it releases the first. Correcting that needs per-lock inheritance
+    /// records, which needs blocking waiters, which this kernel does not have —
+    /// `crate::lock::PriorityInheritingLock::try_lock` reports contention rather
+    /// than parking. It is a smaller hole than the one it replaces: the previous
+    /// code wrote back a stale *absolute* value in the same scenario, which
+    /// could raise a task above any priority it was entitled to.
+    pub fn release_inheritance(&mut self, task: TaskId) -> Option<Priority> {
+        let tcb = self.tasks.get_mut(task.0)?;
+        tcb.inherited_priority = None;
+        Some(tcb.base_priority)
     }
 
     /// `task`'s current `(ticks_consumed, wcet_budget)`, used by
@@ -418,6 +509,20 @@ impl<const N: usize> Scheduler<N> {
             .map(|(_, tcb)| tcb.priority())
     }
 
+    /// `task`'s own priority, ignoring inheritance, or `None` if `task`
+    /// doesn't identify a currently live task.
+    pub fn base_priority_of(&mut self, task: TaskId) -> Option<Priority> {
+        self.tasks.get_mut(task.0).map(|tcb| tcb.base_priority())
+    }
+
+    /// What `task` currently inherits from a waiter, or `None` if `task`
+    /// doesn't identify a currently live task. The inner `Option` is `None`
+    /// when the task inherits nothing — the distinction `crate::lock` needs to
+    /// tell "released a boost" from "there was no boost".
+    pub fn inherited_priority_of(&mut self, task: TaskId) -> Option<Option<Priority>> {
+        self.tasks.get_mut(task.0).map(|tcb| tcb.inherited_priority())
+    }
+
     /// The [`OverrunPolicy`] `task` declared at creation, or `None` if `task`
     /// doesn't identify a currently live task (`STORY-P1-04-02`).
     ///
@@ -463,7 +568,10 @@ impl<const N: usize> Scheduler<N> {
     pub fn highest_priority_ready(&self) -> Option<TaskId> {
         self.iter_tasks()
             .filter(|(_, tcb)| tcb.state == TaskState::Ready)
-            .max_by_key(|(_, tcb)| tcb.priority)
+            // `priority()`, not the base field: selection is exactly the place
+            // a boosted holder must outrank an uninvolved medium task, which
+            // is what priority inheritance exists to make true.
+            .max_by_key(|(_, tcb)| tcb.priority())
             .map(|(id, _)| id)
     }
 }
