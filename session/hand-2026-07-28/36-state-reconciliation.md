@@ -73,12 +73,54 @@ or a prose rule where a gate belongs) — and it is **the fifth instance this we
 `LE-43` named. Registering the machine rather than only fixing the instance is the whole lesson of
 that row.
 
+## Rule 8, corrected — the field-count guard could not have caught it
+
+**Added to this document after its first close**, from a grounding pass on [Handover 35](35-le-43-closed.md)
+by the session whose commit message the error originated in. Recorded here because 35 is another
+session's dated document and the corrections belong in a **binding** document anyway, not a narrative one.
+
+**Handover 35 §3 credits the wrong mechanism.** It says the duplicate `LE-43` was *"caught by session A's
+own rule-8 field check."* It was not, and it could not have been: **both duplicate rows were well-formed
+at eight fields.** A duplicate id is a different defect class from the consumed separator that produced
+`LE-36`. This session can corroborate the correction from its own side rather than accept it — its first
+inspection of the file printed `44: 8 fields id=LE-43` and `45: 8 fields id=LE-43`, and what actually
+returned the error was `check-assurance-spine` with `duplicate id LE-43` ([`assurance.rs:1153`](../../os/src/xtask/src/assurance.rs)).
+
+**What actually surfaced it** was re-inspecting `git` state the moment a concurrent commit appeared:
+noticing a new `HEAD`, diffing the working tree against it, printing both rows. **Handover 35's
+conclusion stands and its evidence did not** — the *"guard the write, not only the result"* lesson is
+right, but the anecdote credited a mechanism that cannot work and omitted the one that did. For a
+document titled *"verified rather than inherited"*, that was its one inherited claim. Credit the
+mechanism that worked, because the next session reaches for the one it is told about.
+
+**Two further corrections to Handover 35, both accepted, neither repaired there:**
+
+- Its `ADR`-file deletion rests on *"with both other sessions closed there is nobody left for it to
+  belong to."* **That session was still live**, and the protocol gives nobody a way to establish another
+  session's liveness. The deletion is harmless and correctly recorded, but *"zero bytes, never staged,
+  nothing recoverable to lose"* was **already sufficient warrant** — the liveness claim added exposure
+  without adding support. Same shape as the trap the document praises, on a much smaller object.
+- *"eight sections mirroring the Story's six criteria"* is loose: clauses 1–6 mirror the criteria, 7 and
+  8 do not mirror anything. Inside a verification table, where looseness costs most.
+
+**`LE-36` is under-specified on this evidence, and its row now says so.** It asks for *"a cheap
+field-count guard on the assurance TSVs"* — and a field-count guard is precisely what ran and passed.
+Field counting is **necessary and demonstrably not sufficient**; the guard must also check id uniqueness
+and contiguity, which `validate_loose_ends` already does. So the cheap correct answer is **a fast
+subcommand wrapping the existing validator**, not a new field counter. That is a strictly smaller job
+than the row previously described.
+
+`CONCURRENT_SESSIONS` rule 8 gains a subsection with all three: **validate with the check that would
+fail**, **guard the write and not only the result**, and **re-derive your state when a concurrent commit
+lands mid-turn.**
+
 ## What landed
 
 | Artifact | Change |
 | --- | --- |
 | `FEAT-P1-07` | `-01` row: *"criteria 2 and 4"* → **"criteria 3 and 4"**, matching the Story |
-| `loose-ends.tsv` | **`LE-44` raised** — the missing Feature-table/Story-header cross-check |
+| `loose-ends.tsv` | **`LE-44` raised** — the missing Feature-table/Story-header cross-check; **`LE-36`'s `owner_path` amended** — its field-count guard is under-specified |
+| `agent/CONCURRENT_SESSIONS.md` | Rule 8 gains §"The second incident, later the same day: the rule was half-right" |
 | `goals/index.html` | `44 rows, 30 open` in both places; `LE-44` paragraph added |
 | `session/hand-2026-07-28/index.html` | count line to `44 rows, 30 open`; entry 36 added |
 
@@ -94,10 +136,18 @@ three times: the `.org` guard padded past 128 bytes before its zero was trusted,
 self-tested on `v1.16b` and `fadd s0`, and now `Q3`'s positive control. **A rule with three
 independent derivations is far harder to argue away than one asserted once.**
 
-It is one paragraph. Two sessions have now recommended taking it and neither has, because it edits an
-**accepted ADR's body** rather than its status header, and `ADR 0004`'s treatment is the precedent for
-leaving a cited body alone absent a reason. **Left to the owner deliberately** — it is not a session's
-call, and it is recorded here so it is not lost by being mentioned only in passing.
+It is one paragraph. Two sessions recommended taking it and neither did, because it edits an **accepted
+ADR's body** rather than its status header, and `ADR 0004`'s treatment is the precedent for leaving a
+cited body alone absent a reason. This session declined it a second time on the same grounds — it is not
+a session's call.
+
+**Overtaken mid-turn, per rule 7.** At 12:40–12:41 a concurrent session was observed writing
+`docs/adr/0005-…md` (+34 lines, unstaged) and claiming slot **37**, `37-adr-0005-provenance.md`, which is
+that paragraph. **Neither file is staged in this commit** and neither was read or repaired here (rule 3).
+Stated as what was observed — two files written in the last minute — and **not** as a claim about that
+session's liveness or intent, which is the error [Handover 35](35-le-43-closed.md) made about the `ADR`
+file and §"Rule 8, corrected" above records. **A reader wanting the outcome should read Handover 37, not
+this paragraph.**
 
 ## Work order
 

@@ -65,6 +65,35 @@ used, which is better than this document previously asked for:
 - **Verify your own subset in a throwaway worktree over clean `HEAD`**, then wait for the row to
   complete.
 
+### The second incident, later the same day: the rule was half-right
+
+`LE-43` was written **twice**, by two sessions, into the same file. For a period `loose-ends.tsv` held
+two `LE-43` rows and `check-assurance-spine` was red with `duplicate id LE-43`. Three things this
+incident corrects, all of them cheap:
+
+**1. A field-count pass would not have caught it, and did not.** Both duplicate rows were well-formed
+at eight fields — a duplicate id is a different defect class from a consumed separator. The session
+that made the edit ran its field check, the check passed, and it was right to pass. What actually
+surfaced the break was **re-inspecting `git` state the moment a concurrent commit appeared**: noticing
+a new `HEAD`, diffing the working tree against it, and reading both rows. Credit the mechanism that
+worked, because the next session will reach for the one it is told about.
+
+So rule 8's "validate before your next tool call" needs its instrument named: **validate with the
+check that would fail** — for a spine TSV that is `check-assurance-spine` or an equivalent id-and-order
+pass, not a field count alone. `LE-36` asks for a field-count guard and is, on this evidence,
+**under-specified**: field counting is necessary and demonstrably not sufficient.
+
+**2. Guard the write, not only the result.** A second session read the broken row, built a repair, and
+gated the write on the file's line count — which **refused to fire**, because by then the other session
+had already withdrawn its row and the file had changed under it. That one `[ … ] || exit 1` is the only
+reason two sessions did not write the same file in the same second. Validating *after* writing catches
+a break; guarding *before* writing prevents one. Do both.
+
+**3. When a concurrent commit lands mid-turn, re-derive your state before continuing.** `git status`,
+`git log`, and the diff of anything you were about to touch. Nothing in a shared tree entitles you to a
+fact you established a tool call ago, and mtimes are enough to tell a live session from an abandoned
+one when you need to know.
+
 ## The rule for counts and totals
 
 The five spine-count re-syncs have one cause worth naming separately, because it recurs anywhere two sessions share a repository:
