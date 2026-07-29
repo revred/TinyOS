@@ -20,6 +20,32 @@ None of that was a mistake of reasoning. All of it was the absence of a protocol
 
 Stage the paths you actually changed. This one rule prevents the worst outcome above — committing another agent's unfinished work under your name — and it costs nothing when you are alone in the tree.
 
+### Staging narrowly is not enough for a *shared* file
+
+Later on 2026-07-28, a session staged `goals/assurance/loose-ends.tsv` **by path** — exactly what this
+rule asks for — and swept in another session's appended `LE-48` row, which landed in `8b8f703`, a commit
+about priority inheritance, under the wrong authorship. The other session's `goals/index.html` edit did
+not travel with it, so the register and the dashboard disagreed for as long as it took someone to notice.
+
+**Path-level staging is file-level staging.** `git add <path>` takes *every* change in that file,
+including the ones you did not make. For the handful of append-only shared registers — the assurance
+TSVs above all — narrow staging is therefore **not** the same as narrow *content*.
+
+When you must commit a shared register while another session has edits pending in it, stage the content
+rather than the path:
+
+```sh
+# verify YOUR row over clean HEAD first (see rule 8), then stage exactly HEAD + your row
+SHA=$(git hash-object -w --path=goals/assurance/loose-ends.tsv <verified-file>)
+git update-index --cacheinfo 100644,$SHA,goals/assurance/loose-ends.tsv
+git diff --cached --numstat -- goals/assurance/loose-ends.tsv   # MUST show only your lines
+```
+
+That last line is the check that makes this safe, and it is the one to actually run: **read
+`git diff --cached` before every commit, not after.** It is also how a directory-wide `git add -- session/…`
+was caught mid-turn on the same day, one tool call before it would have committed another session's
+handover.
+
 **2. Re-run the gates *after* staging, never only before.**
 
 `.githooks/pre-commit` now does this for you; install it with `git config core.hooksPath .githooks`. The gate you ran before `git add` describes a tree that no longer exists. This is exactly how the broken spine shipped.

@@ -10,7 +10,7 @@ The numbered Epics preserve the MVP delivery path. Destination-horizon Epics rec
 |---|---|---|---|---|
 | [`EPIC-P1`](EPIC-P1.md) — **decomposed** | Phase 1 — Determinism proof | G-RT-1, G-RT-3, G-PA-1; G-SEC-2, -8, -12 – -15 | Both MVP boards (Tier 0 until purchased — named debt) | `EPIC-P0` |
 | `EPIC-P1_5` | Phase 1.5 — Deploy tooling | G-RC-6, G-DX-3; G-SEC-1, -8, -10 | Both MVP boards | `EPIC-P0` |
-| `EPIC-P2` | Phase 2 — Shell & UX | G-RT-5, G-RT-6; G-SEC-5, -7 | Both MVP boards | `EPIC-P0` |
+| [`EPIC-P2`](EPIC-P2.md) — **Epic written, Features not yet decomposed** | Phase 2 — Shell & UX (DOS + POSIX + RT flavours) | G-RT-5, G-RT-6; G-SEC-5, -7 | Both MVP boards | `EPIC-P0` |
 | `EPIC-P3` | Phase 3 — Connectivity | G-HW-2, G-PA-4; G-SEC-5 – -9, -12 | Both MVP boards + peripheral hardware | `EPIC-P0`, `EPIC-P2` |
 | `EPIC-P4` | Phase 4 — Host bridge | G-RC-1, G-RC-2; G-SEC-6, -10 | x86_64 mini-PC | `EPIC-P0` |
 | `EPIC-P5` | Phase 5 — Agent Command Interface | G-AI-2 – G-AI-5, G-RC-2, G-RC-3; G-SEC-1 – -13 | Both MVP boards | `EPIC-P4` |
