@@ -1,8 +1,8 @@
 domain	metric	tier	arch	profile	cycle_source	runs	min_cycles	p50_cycles	min_ratio_ppm	p50_ratio_ppm	recorded_on
-REF	fixed_integer_loop	T0	x86_64	release	rdtsc	5	454	572	1000000	1000000	2026-07-28
-D07	pool_u64x64_alloc_free_round_trip	T0	x86_64	release	rdtsc	5	2	6	4901	3690	2026-07-28
-D07	pool_u64x4_alloc_denied_exhausted	T0	x86_64	release	rdtsc	5	22	26	53921	45454	2026-07-28
-D04	context_switch_yield_roundtrip_2switches	T0	x86_64	release	rdtsc	5	318	332	681372	612546	2026-07-28
-D05	dispatch_select_highest_priority_ready	T0	x86_64	release	rdtsc	5	104	112	197761	195348	2026-07-28
-D05	dispatch_run_once_cooperative_round	T0	x86_64	release	rdtsc	5	420	438	985714	982517	2026-07-28
-D02	fault_ud2_capture_terminate_kernel_context	T0	x86_64	release	rdtsc	5	988	1174	1962686	1977859	2026-07-28
+REF	fixed_integer_loop	T0	x86_64	release	rdtsc	3	442	490	1000000	1000000	2026-07-29
+D07	pool_u64x64_alloc_free_round_trip	T0	x86_64	release	rdtsc	3	123	123	278280	251020	2026-07-29
+D07	pool_u64x4_alloc_denied_exhausted_per_op_of_64	T0	x86_64	release	rdtsc	3	20	20	42986	40816	2026-07-29
+D04	context_switch_yield_roundtrip_2switches	T0	x86_64	release	rdtsc	3	221	245	500000	500000	2026-07-29
+D05	dispatch_select_highest_priority_ready	T0	x86_64	release	rdtsc	3	98	123	221719	251020	2026-07-29
+D05	dispatch_run_once_cooperative_round	T0	x86_64	release	rdtsc	3	319	343	721719	700000	2026-07-29
+D02	fault_ud2_capture_terminate_kernel_context	T0	x86_64	release	rdtsc	3	539	588	1222222	1197556	2026-07-29
