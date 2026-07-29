@@ -383,6 +383,35 @@ jobs:
             exit 1
           fi
 
+      # STORY-P1-04-05, closing LE-50: the composed scenario under real
+      # preemption. STORY-P1-04-04 proved at the host level that a WCET
+      # degrade and a priority-inheritance boost compose; this proves it by
+      # who the dispatcher actually selected. A medium task at priority 15 —
+      # Ready throughout, and demonstrably able to run afterwards — makes no
+      # progress at all across a window that contains the degrade of a holder
+      # boosted to 25, and the holder then lands on its declared floor of 2
+      # rather than the 5 it left. Under the pre-STORY-P1-04-04 kernel the
+      # degrade discarded the boost and medium would have started winning
+      # selections immediately, so the frozen counter is a claim the old
+      # kernel could not have satisfied.
+      #
+      # Run under serial capture, and the capture is retained on failure.
+      # LE-46 is the reason: the soak's own priority-inversion FAIL had no
+      # diagnostic for the one run that mattered, which left it impossible to
+      # adjudicate either way. A fixture armed to detect and not to explain is
+      # half an instrument.
+      - name: TEST-P1-04-05-A — a degrade taken while boosted keeps the boost, then lands on its floor
+        run: |
+          set +e
+          cargo run -p xtask -- qemu-x86_64 --fixture=degrade-inheritance --serial-capture=degrade-inheritance.log
+          code=$?
+          set -e
+          if [ "$code" -ne 0 ] || ! grep -q 'TINYOS-RESULT/1 fixture=degrade-inheritance ok=true' degrade-inheritance.log; then
+            echo "the composed degrade/inheritance fixture did not pass (exit $code):"
+            cat degrade-inheritance.log
+            exit 1
+          fi
+
       # STORY-P1-01-02's gate, re-based onto same-run ratios by
       # STORY-P1-01-04. Unlike the two steps above, this one *does* assert
       # about the numbers — but only the stable statistics (min, p50), only

@@ -95,6 +95,15 @@ fixture-wcet-degrade = []
 # its whole claim is that the system stops. Same precedent as
 # `fixture-broken-boot` and `fixture-idt-apic-unrouted`.
 fixture-wcet-trip = []
+# `STORY-P1-04-05`/`TEST-P1-04-05-A`, closing `LE-50`: the *composed*
+# scenario — a lock holder that overruns its budget while boosted by a blocked
+# waiter — run under genuine timer-driven preemption. `STORY-P1-04-04` proved
+# the composition at the host level; this proves it by who the dispatcher
+# actually selects. A second fixture rather than an extension of
+# `fixture-priority-inversion`, whose run is evidence a Verified Story rests
+# on. Used only by `xtask qemu-x86_64 --fixture=degrade-inheritance`, never
+# enabled in a real boot image.
+fixture-degrade-inheritance = []
 # The same measurement fixture with one measured phase deliberately made ~8x
 # slower, so `xtask check-timing-regression --inject-regression` can prove the
 # gate actually fails — `STORY-P1-01-02`'s "prove it can fail" criterion, and

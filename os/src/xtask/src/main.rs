@@ -369,6 +369,21 @@ const FIXTURES: &[Fixture] = &[
         owning_test: "TEST-P1-04-02-A",
         summary: "WCET overrun trips the system to its safe state",
     },
+    // `STORY-P1-04-05`, closing `LE-50`: the *composed* scenario. A lock
+    // holder overruns its budget while boosted by a blocked waiter, and the
+    // evidence is which task the dispatcher selected — a medium task that is
+    // `Ready` throughout makes no progress at all across a window containing
+    // the degrade. Deliberately not folded into `priority-inversion`, whose
+    // run is the evidence a Verified Story rests on.
+    Fixture {
+        name: "degrade-inheritance",
+        package: "kernel",
+        binary: "kernel",
+        feature: Some("fixture-degrade-inheritance"),
+        expects_failure: false,
+        owning_test: "TEST-P1-04-05-A",
+        summary: "A degrade taken while boosted keeps the boost, then lands on its floor",
+    },
 ];
 
 /// Resolves a `--fixture=` value, treating absence as the default boot.

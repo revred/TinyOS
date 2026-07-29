@@ -11,6 +11,8 @@
 
 #[cfg(feature = "fixture-context-switch")]
 mod context_switch_fixture;
+#[cfg(feature = "fixture-degrade-inheritance")]
+mod fixture_degrade_inheritance;
 #[cfg(feature = "fixture-double-fault")]
 mod fixture_double_fault;
 #[cfg(feature = "fixture-fault")]
@@ -67,7 +69,8 @@ use hal_x86_64::qemu_exit::{exit_qemu, QemuExitCode};
         feature = "fixture-priority-inversion",
         feature = "fixture-wcet-restart",
         feature = "fixture-wcet-degrade",
-        feature = "fixture-wcet-trip"
+        feature = "fixture-wcet-trip",
+        feature = "fixture-degrade-inheritance"
     ),
     allow(unused_imports)
 )]
@@ -98,7 +101,8 @@ use kernel::capacities::MAX_CPUS;
     feature = "fixture-priority-inversion",
     feature = "fixture-wcet-restart",
     feature = "fixture-wcet-degrade",
-    feature = "fixture-wcet-trip"
+    feature = "fixture-wcet-trip",
+    feature = "fixture-degrade-inheritance"
 )))]
 const BOOT_TIMER_INITIAL_COUNT: u32 = 1_000_000;
 
@@ -131,7 +135,8 @@ extern "C" fn kernel_main(
             feature = "fixture-priority-inversion",
             feature = "fixture-wcet-restart",
             feature = "fixture-wcet-degrade",
-            feature = "fixture-wcet-trip"
+            feature = "fixture-wcet-trip",
+            feature = "fixture-degrade-inheritance"
         ),
         allow(unused_variables)
     )]
@@ -232,6 +237,15 @@ extern "C" fn kernel_main(
         }
     }
 
+    #[cfg(feature = "fixture-degrade-inheritance")]
+    {
+        if fixture_degrade_inheritance::run() {
+            exit_qemu(QemuExitCode::Success)
+        } else {
+            exit_qemu(QemuExitCode::Failure)
+        }
+    }
+
     #[cfg(any(
         feature = "fixture-wcet-restart",
         feature = "fixture-wcet-degrade",
@@ -263,7 +277,8 @@ extern "C" fn kernel_main(
         feature = "fixture-priority-inversion",
         feature = "fixture-wcet-restart",
         feature = "fixture-wcet-degrade",
-        feature = "fixture-wcet-trip"
+        feature = "fixture-wcet-trip",
+        feature = "fixture-degrade-inheritance"
     )))]
     {
         // SAFETY: `start_info_paddr` is the physical address the PVH
