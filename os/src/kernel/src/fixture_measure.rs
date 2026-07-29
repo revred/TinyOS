@@ -205,10 +205,68 @@ fn phase_reference_loop<S: CycleSource>(
     last != 0
 }
 
+/// Operations timed inside **one** sample of the `D07` denial phase (`LE-24`).
+///
+/// # The defect this fixes
+///
+/// A denied `alloc` on a full `Pool<u64, 4>` costs about as much as a single
+/// [`Calibration`] read pair. [`Stopwatch::stop`] subtracts that pair's measured
+/// cost and **saturates at zero**, so an unbatched sample of an operation that
+/// cheap reports the residue of two numbers of the same magnitude —
+/// quantisation, not evidence.
+///
+/// That is not theoretical. On the Linux CI runner the metric's minimum reached
+/// **0** with `overhead_cycles=26` against a 26-cycle operation, and the
+/// baseline writer refused to write the file at all: *"zero ratio; nothing can
+/// be compared against it"*. **That refusal is what blocked `LE-23`.**
+///
+/// Timing 64 denials and dividing makes the region ~64× the calibration, so the
+/// subtraction becomes a correction rather than the whole answer and the result
+/// stops being a property of which host recorded it. This is `LE-24`'s own
+/// recorded remedy — *"a batched-iteration shape (time N operations and divide)
+/// would make it host-independent"* — applied verbatim. On this dev host it
+/// moves the metric from a p50 of 52 (mostly calibration residue) to **14**, the
+/// honest cost of a four-slot scan that finds nothing free.
+///
+/// # Why only this phase, when `LE-24` names two metrics
+///
+/// `pool_u64x64_alloc_free_round_trip` has the same disease — it medians to 0 on
+/// a Windows host, which is why `gate.rs` carries it in `UNGATED_AT_TIER0` — and
+/// it is deliberately **left alone here**.
+///
+/// Batching it does not merely correct it: on this host a batch of 64 reports
+/// **607 cycles per operation against 58 for a batch of 1**, ten times what
+/// linearity predicts. A superlinear cost with 64 iterations of a function that
+/// returns at the *first* free slot is not a calibration artifact and is not
+/// explained. Re-baselining a metric whose value moves 10× for a reason nobody
+/// can state would replace a number that is honestly quantisation-limited with
+/// one that merely looks plausible — which is strictly worse, because the second
+/// kind gets quoted.
+///
+/// So the ungated metric stays ungated, with its stated reason still true, and
+/// the unexplained factor of ten is written down for whoever picks `LE-24` up
+/// rather than absorbed into a baseline.
+///
+/// **The other five metrics are unbatched because they do not need it.** A
+/// context switch, a dispatch round and a fault capture are each hundreds of
+/// cycles, an order of magnitude above the calibration. Batching is a fix for a
+/// specific defect, not a house style.
+///
+/// **What batching costs, stated rather than hidden:** a batched sample's `max`
+/// is the mean of 64 operations, so a single-operation outlier is divided by 64
+/// before it is recorded. This metric's tail is therefore *less* sensitive than
+/// the other five's — an acceptable trade for a number that exists at all, and
+/// the reason its name says `per_op_of_64`. A reader must never have to guess
+/// which shape produced a figure.
+const D07_BATCH: usize = 64;
+
 /// D07 (`PERF-D07-G01`..`G07`): `Pool<u64, 64>` alloc/free round trip — the
 /// same operation shape `fixture_pool_bench` measures, here as the harness's
 /// canonical D07 metric so `xtask measure` reports one comparable number for
 /// it across runs.
+///
+/// **Unbatched, deliberately** — see [`D07_BATCH`] for why this phase is left
+/// exactly as it was while its neighbour was fixed.
 #[inline(never)]
 fn phase_pool_alloc_free<S: CycleSource>(
     source: &S,
@@ -242,6 +300,9 @@ fn phase_pool_alloc_free<S: CycleSource>(
 /// D07 (`PERF-D07-G20`): the denial path — an exhausted pool's `alloc` must be
 /// both fast *and* free of state change. Measured separately from the happy
 /// path because the guardrail's budget is separate (and tighter).
+///
+/// Batched [`D07_BATCH`] operations per sample; see that constant for why. This
+/// is the metric whose zero ratio blocked `LE-23`.
 #[inline(never)]
 fn phase_pool_denial<S: CycleSource>(
     source: &S,
@@ -256,14 +317,23 @@ fn phase_pool_denial<S: CycleSource>(
     }
     let mut ok = true;
     for index in 0..(WARMUP + SAMPLES) {
+        let mut denials = 0usize;
         let watch = Stopwatch::start(source);
-        let denied = pool.alloc(0xDEAD);
+        for _ in 0..D07_BATCH {
+            if pool.alloc(0xDEAD).is_err() {
+                denials += 1;
+            }
+        }
         let cycles = watch.stop(calibration);
-        if denied.is_ok() {
+        // Every one of the batch must have been refused. A batch in which the
+        // pool accepted anything is not a denial measurement at all — and
+        // because the pool is full and stays full, accepting even once would
+        // also mean the state-change check below is measuring a different pool.
+        if denials != D07_BATCH {
             ok = false;
         }
         if index >= WARMUP {
-            samples.record(cycles);
+            samples.record(cycles / D07_BATCH as u64);
         }
     }
     // Every slot must still hold its original value: a denial that changed
@@ -696,7 +766,13 @@ pub fn run() -> bool {
     let _ = writeln!(serial, "fixture-measure phase 2/7 done (D07 alloc/free)");
 
     ok &= phase_pool_denial(&source, &calibration, samples);
-    ok &= collect(&mut collected, 2, "D07", "pool_u64x4_alloc_denied_exhausted", samples);
+    ok &= collect(
+        &mut collected,
+        2,
+        "D07",
+        "pool_u64x4_alloc_denied_exhausted_per_op_of_64",
+        samples,
+    );
     let _ = writeln!(serial, "fixture-measure phase 3/7 done (D07 denial)");
 
     ok &= phase_context_switch(&source, &calibration, samples);
