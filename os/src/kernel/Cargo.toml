@@ -104,6 +104,20 @@ fixture-wcet-trip = []
 # on. Used only by `xtask qemu-x86_64 --fixture=degrade-inheritance`, never
 # enabled in a real boot image.
 fixture-degrade-inheritance = []
+# `STORY-P1-06-01`/`TEST-P1-06-01-A`: `G-PA-1`'s decision-to-actuation path.
+# One RT task arms an activation, computes a command and emits it through
+# `hal::actuation::OutputLine` (under Tier 0 a real ISA port write), with the
+# latency measured through `kernel::measure` and reported as a `TINYOS-MEAS/2`
+# envelope. Two fixtures, one source file, one constant apart — the declared
+# WCET budget — so the two arms cannot drift. Never enabled in a real boot
+# image.
+fixture-actuation = []
+# The same path with a decision that deliberately overruns its declared budget.
+# Its *correct* result is a QEMU isa-debug-exit **Failure** code: the system
+# enters its declared safe state and no command reaches the line. Same
+# precedent as `fixture-broken-boot`, `fixture-idt-apic-unrouted` and
+# `fixture-wcet-trip`.
+fixture-actuation-overrun = []
 # The same measurement fixture with one measured phase deliberately made ~8x
 # slower, so `xtask check-timing-regression --inject-regression` can prove the
 # gate actually fails — `STORY-P1-01-02`'s "prove it can fail" criterion, and

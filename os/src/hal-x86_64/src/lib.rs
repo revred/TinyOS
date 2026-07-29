@@ -34,12 +34,16 @@
 //! plain port I/O and `RDTSC` with no ELF-specific content, so it assembles
 //! under a COFF host assembler too — which matters because its PIT arithmetic
 //! carries host unit tests that must be runnable on a Windows dev machine, not
-//! only on the Linux CI runner.
+//! only on the Linux CI runner. `actuation` (`STORY-P1-06-01`'s
+//! [`hal::actuation::OutputLine`] backend — the Tier 0 actuator stand-in) is
+//! ungated for the same reason and on the same grounds: a bare `out`, no
+//! ELF-specific content, and kernel-side host tests that depend on the type.
 
 #![cfg_attr(not(test), no_std)]
 #![deny(missing_docs)]
 
 pub mod acpi;
+pub mod actuation;
 #[cfg(not(target_os = "windows"))]
 pub mod boot;
 pub mod extended_state;

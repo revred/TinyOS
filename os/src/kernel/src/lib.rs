@@ -10,6 +10,7 @@
 #![cfg_attr(not(test), no_std)]
 #![deny(missing_docs)]
 
+pub mod actuation;
 pub mod capacities;
 pub mod context;
 pub mod dispatch;

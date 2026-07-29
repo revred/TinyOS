@@ -66,6 +66,13 @@ pub enum Category {
     /// `Scheduling`: a fault is neither, and an auditor filtering for faults
     /// must never have to guess which other category one was folded into.
     Fault,
+    /// `kernel::actuation` — a command reaching (or being refused at) the
+    /// output boundary, and a missed actuation deadline (`STORY-P1-06-01`). A
+    /// new variant on the same grounds `Fault` took one: an actuation decision
+    /// is neither a scheduling decision nor a budget one, and the auditor who
+    /// most needs to filter for "did anything reach the actuator" is the one
+    /// who can least afford to guess which category it was folded into.
+    Actuation,
 }
 
 impl Category {
@@ -79,6 +86,7 @@ impl Category {
             Category::Memory => 5,
             Category::Boot => 6,
             Category::Fault => 7,
+            Category::Actuation => 8,
         }
     }
 
@@ -92,6 +100,7 @@ impl Category {
             5 => Ok(Category::Memory),
             6 => Ok(Category::Boot),
             7 => Ok(Category::Fault),
+            8 => Ok(Category::Actuation),
             _ => Err(SpoorError::UnknownCategory),
         }
     }
@@ -158,6 +167,22 @@ pub enum Action {
     /// A task that overran its WCET budget had its priority lowered to its
     /// declared floor under the `Degrade` policy (`kernel::wcet`).
     Degrade,
+    /// An actuation command was presented at the output boundary
+    /// (`kernel::actuation`). The [`Outcome`] carries what happened to it, and
+    /// the three cases are deliberately one verb rather than three:
+    /// [`Outcome::Ok`] — it reached the line; [`Outcome::Failed`] — refused,
+    /// the caller was not the declared actuation task; [`Outcome::Capped`] —
+    /// refused, the declared deadline had passed, which is a bound being
+    /// enforced rather than an error. `TARGET` is the *caller*, not the owner,
+    /// so a refused attempt names who attempted it.
+    Actuate,
+    /// A declared actuation deadline expired before the command was emitted
+    /// (`kernel::actuation`). Stamped by the monitor on the tick that crosses
+    /// the deadline, exactly once per activation — distinct from
+    /// [`Action::Actuate`] with [`Outcome::Capped`], which is the later refusal
+    /// of a specific command. One says the window closed; the other says
+    /// something tried to drive the line after it had.
+    Deadline,
 }
 
 impl Action {
@@ -174,6 +199,8 @@ impl Action {
             Action::Terminate => 8,
             Action::Restart => 9,
             Action::Degrade => 10,
+            Action::Actuate => 11,
+            Action::Deadline => 12,
         }
     }
 
@@ -190,6 +217,8 @@ impl Action {
             8 => Ok(Action::Terminate),
             9 => Ok(Action::Restart),
             10 => Ok(Action::Degrade),
+            11 => Ok(Action::Actuate),
+            12 => Ok(Action::Deadline),
             _ => Err(SpoorError::UnknownAction),
         }
     }
@@ -377,7 +406,7 @@ impl Spoor {
 mod tests {
     use super::*;
 
-    const ALL_CATEGORIES: [Category; 7] = [
+    const ALL_CATEGORIES: [Category; 9] = [
         Category::Scheduling,
         Category::Lock,
         Category::Wcet,
@@ -385,9 +414,11 @@ mod tests {
         Category::Exec,
         Category::Memory,
         Category::Boot,
+        Category::Fault,
+        Category::Actuation,
     ];
     const ALL_ACTORS: [Actor; 2] = [Actor::Kernel, Actor::Exec];
-    const ALL_ACTIONS: [Action; 7] = [
+    const ALL_ACTIONS: [Action; 13] = [
         Action::Create,
         Action::Boost,
         Action::Restore,
@@ -395,6 +426,12 @@ mod tests {
         Action::Select,
         Action::Overrun,
         Action::ResetBudget,
+        Action::Fault,
+        Action::Terminate,
+        Action::Restart,
+        Action::Degrade,
+        Action::Actuate,
+        Action::Deadline,
     ];
     const ALL_OUTCOMES: [Outcome; 8] = [
         Outcome::Ok,
@@ -457,9 +494,9 @@ mod tests {
     // (STORY-P0-06-01 acceptance criterion 2).
     #[test]
     fn decode_rejects_an_unknown_category_nibble() {
-        // Category 0..=7 are valid (7 = `Fault`, added by `STORY-P1-02-01`);
-        // 8 is not yet assigned.
-        let bits = 8u64 << CAT_SHIFT;
+        // Category 0..=8 are valid (7 = `Fault`, added by `STORY-P1-02-01`;
+        // 8 = `Actuation`, added by `STORY-P1-06-01`); 9 is not yet assigned.
+        let bits = 9u64 << CAT_SHIFT;
         assert_eq!(Spoor::decode(bits), Err(SpoorError::UnknownCategory));
     }
 
@@ -473,12 +510,14 @@ mod tests {
 
     #[test]
     fn decode_rejects_an_unknown_action_nibble() {
-        // Action 0..=10 are valid (7 = `Fault`, 8 = `Terminate`, added by
+        // Action 0..=12 are valid (7 = `Fault`, 8 = `Terminate`, added by
         // `STORY-P1-02-01`; 9 = `Restart`, 10 = `Degrade`, added by
-        // `STORY-P1-04-02`); 11 is not yet assigned. The nibble's remaining
-        // range is 11..=15, so the vocabulary has five verbs of headroom
-        // before the `ACT` field itself has to widen.
-        let bits = 11u64 << ACT_SHIFT;
+        // `STORY-P1-04-02`; 11 = `Actuate`, 12 = `Deadline`, added by
+        // `STORY-P1-06-01`); 13 is not yet assigned. The nibble's remaining
+        // range is 13..=15, so the vocabulary has three verbs of headroom
+        // before the `ACT` field itself has to widen — worth watching, since
+        // widening it is a wire-format change to every stored spoor.
+        let bits = 13u64 << ACT_SHIFT;
         assert_eq!(Spoor::decode(bits), Err(SpoorError::UnknownAction));
     }
 

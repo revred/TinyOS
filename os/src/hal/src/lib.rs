@@ -5,7 +5,10 @@
 //! device-tree backend (ARM64, `EPIC-P7`) both produce. `device`
 //! (`STORY-P0-04-03`) is its bus-enumeration companion: the shared
 //! discovered-device table a PCI configuration-space walk records into.
-//! HAL trait definitions beyond those land in later Phases.
+//! `time` (`STORY-P1-01-01`) is the measurement seam; `actuation`
+//! (`STORY-P1-06-01`) is the output boundary at the far end of `G-PA-1`'s
+//! decision-to-actuation path. HAL trait definitions beyond those land in
+//! later Phases.
 //!
 //! `#![no_std]` is suppressed under `cfg(test)` so `cargo test` links the
 //! host's `std` test harness, matching `kernel`'s `lib.rs` split — the
@@ -15,6 +18,7 @@
 #![cfg_attr(not(test), no_std)]
 #![deny(missing_docs)]
 
+pub mod actuation;
 pub mod device;
 pub mod time;
 pub mod topology;

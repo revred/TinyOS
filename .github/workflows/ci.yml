@@ -412,6 +412,62 @@ jobs:
             exit 1
           fi
 
+      # STORY-P1-06-01 — G-PA-1's flagship path, FEAT-P1-06's mechanism half.
+      # One RT task arms an activation, computes a command and drives a real
+      # output boundary (an ISA port write standing in for an actuator line),
+      # with the decision-to-actuation latency measured and reported as a
+      # TINYOS-MEAS/2 envelope. The same run then attacks the port with the
+      # background task's real TaskId, placed in Running so that the ONLY
+      # thing distinguishing it from the declared owner is its identity, and
+      # asserts the line is never written.
+      #
+      # These numbers close no guardrail. Under ADR 0005 a worst-case bound is
+      # quotable only from a platform holding a secure-world qualification
+      # record and zero platforms hold one, so PERF-D03-G04/PERF-D05-G04 stay
+      # open as stated debt against LE-09. This step gates the mechanism, not
+      # a threshold.
+      - name: TEST-P1-06-01-A — decision to actuation, measured, with no ambient path to the output
+        run: |
+          set +e
+          cargo run -p xtask -- qemu-x86_64 --fixture=actuation --serial-capture=actuation.log
+          code=$?
+          set -e
+          if [ "$code" -ne 0 ] || ! grep -q 'TINYOS-RESULT/1 fixture=actuation ok=true' actuation.log; then
+            echo "the actuation fixture did not pass (exit $code):"
+            cat actuation.log
+            exit 1
+          fi
+
+      # The positive control, and it is not optional: FEAT-P1-06's own exit
+      # criterion says "the proof must show the enforcement firing, not only
+      # clean runs" — written two days before ADR 0005 said the same thing
+      # about Q3 campaigns. A clean run does not stand in for a demonstrated
+      # trip.
+      #
+      # A deliberately-overrunning decision misses its declared deadline, has
+      # its late command REFUSED while it is still running, and is then
+      # removed by the WCET enforcement it declared. No command reaches the
+      # line. Exit 1 is the CORRECT outcome — the system enters its declared
+      # safe state — so this step inverts the code, and the RESULT line is
+      # what distinguishes a correct trip from a broken one, because the exit
+      # code cannot. Same treatment wcet-trip already gets.
+      - name: TEST-P1-06-01-A — a deliberate overrun trips the policy before any late command is emitted
+        run: |
+          set +e
+          cargo run -p xtask -- qemu-x86_64 --fixture=actuation-overrun --serial-capture=actuation-overrun.log
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ]; then
+            echo "actuation-overrun exited 0: the system did NOT enter its safe state"
+            cat actuation-overrun.log
+            exit 1
+          fi
+          if ! grep -q 'TINYOS-RESULT/1 fixture=actuation-overrun ok=true' actuation-overrun.log; then
+            echo "actuation-overrun exited non-zero but did not report a correct trip:"
+            cat actuation-overrun.log
+            exit 1
+          fi
+
       # STORY-P1-01-02's gate, re-based onto same-run ratios by
       # STORY-P1-01-04. Unlike the two steps above, this one *does* assert
       # about the numbers — but only the stable statistics (min, p50), only

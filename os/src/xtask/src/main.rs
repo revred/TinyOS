@@ -55,7 +55,7 @@ struct MeasurableTarget {
 /// `dispatch` and `dispatch-measure` are the two names for the same binary,
 /// one per subcommand. `list-fixtures` prints both sets for this reason.
 const MEASURABLE_FIXTURES: &[&str] =
-    &["measure", "measure-regression", "pool-bench", "dispatch", "pe-measure"];
+    &["measure", "measure-regression", "pool-bench", "dispatch", "pe-measure", "actuation"];
 
 /// Maps a `--fixture=` value to what must be built, or `None` if that
 /// fixture emits no measurement envelope.
@@ -84,6 +84,17 @@ fn measurable_fixture(name: &str) -> Option<MeasurableTarget> {
         "pe-measure" => {
             Some(MeasurableTarget { package: "exec", binary: "pe-measure-fixture", feature: None })
         }
+        // `STORY-P1-06-01`: the same binary `qemu-x86_64 --fixture=actuation`
+        // boots, named in both namespaces because it is both a behavioural
+        // fixture and a measured one. `actuation-overrun` is deliberately
+        // absent: a run that trips to its safe state emits no envelope at all,
+        // and offering it here would be offering a measurement that cannot
+        // exist.
+        "actuation" => Some(MeasurableTarget {
+            package: "kernel",
+            binary: "kernel",
+            feature: Some("fixture-actuation"),
+        }),
         _ => None,
     }
 }
@@ -383,6 +394,34 @@ const FIXTURES: &[Fixture] = &[
         expects_failure: false,
         owning_test: "TEST-P1-04-05-A",
         summary: "A degrade taken while boosted keeps the boost, then lands on its floor",
+    },
+    // `STORY-P1-06-01` — `G-PA-1`'s flagship path. One RT task arms an
+    // activation, computes a command and drives a real output boundary, with
+    // the decision-to-actuation latency measured. Also in the *measurable*
+    // namespace (`measure --fixture=actuation`), because it emits an envelope.
+    Fixture {
+        name: "actuation",
+        package: "kernel",
+        binary: "kernel",
+        feature: Some("fixture-actuation"),
+        expects_failure: false,
+        owning_test: "TEST-P1-06-01-A",
+        summary: "Decision to actuation, measured, with no ambient path to the output",
+    },
+    // `actuation-overrun`'s correct outcome is exit 1: the decision overruns
+    // its declared budget, the system enters its declared safe state, and no
+    // command reaches the line. Its CI step expects failure, as `broken-boot`,
+    // `idt-apic-unrouted` and `wcet-trip` already do — and its `TINYOS-RESULT/1`
+    // line is what distinguishes a correct trip from a broken one, since the
+    // exit code cannot.
+    Fixture {
+        name: "actuation-overrun",
+        package: "kernel",
+        binary: "kernel",
+        feature: Some("fixture-actuation-overrun"),
+        expects_failure: true,
+        owning_test: "TEST-P1-06-01-A",
+        summary: "A deliberate overrun trips the policy before any late command is emitted",
     },
 ];
 
@@ -1477,14 +1516,24 @@ mod tests {
     }
 
     #[test]
-    fn exactly_three_fixtures_document_failure_as_their_pass_condition() {
-        // `broken-boot`, `idt-apic-unrouted` and `wcet-trip`. Pinned so that
-        // adding a fourth is a deliberate act: these three are the ones whose
-        // CI steps invert the exit code, and two of them still have the
-        // exit-code hole `wcet-trip` closed.
+    fn exactly_four_fixtures_document_failure_as_their_pass_condition() {
+        // `broken-boot`, `idt-apic-unrouted`, `wcet-trip` and
+        // `actuation-overrun`. Pinned so that adding a fifth is a deliberate
+        // act: these are the ones whose CI steps invert the exit code, and an
+        // inverted step is the one place a fixture that never ran at all is
+        // indistinguishable from one that passed.
+        //
+        // `wcet-trip` closed that exit-code hole by asserting its own
+        // `TINYOS-RESULT/1` line as well as the exit code; `actuation-overrun`
+        // (`STORY-P1-06-01`) is held to the same standard by its own CI step,
+        // and its `run` emits a *failing* result line on every path that
+        // reaches the safe state for the wrong reason.
         let failing: Vec<&str> =
             FIXTURES.iter().filter(|f| f.expects_failure).map(|f| f.name).collect();
-        assert_eq!(failing, vec!["broken-boot", "idt-apic-unrouted", "wcet-trip"]);
+        assert_eq!(
+            failing,
+            vec!["broken-boot", "idt-apic-unrouted", "wcet-trip", "actuation-overrun"]
+        );
     }
 
     #[test]

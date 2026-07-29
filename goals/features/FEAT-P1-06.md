@@ -1,6 +1,6 @@
 # FEAT-P1-06 — Deterministic Actuation Proof (G-PA-1 Flagship Path)
 
-Status: **Specified — no Story started**
+Status: **In progress — 1 of 1 Story Verified at Tier 0 (mechanism half, 2026-07-29); the Feature is NOT complete** (assurance `baseline-debt`). Two of the three halves of the exit criteria below remain open and are gated by different things: the *under-hostile-load* half by `FEAT-P1-05`, which has no Story started, and the *bound* half by hardware plus a secure-world qualification record no platform holds (`ADR 0005`, `LE-09`). A Feature whose only Story is Verified is not thereby Complete, and saying so here is cheaper than discovering it at a release gate
 Epic: [`EPIC-P1`](../epics/EPIC-P1.md)
 Introduced in: [`session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md`](../../session/hand-2026-07-26/36-epic-p1-determinism-proof-decomposition.md)
 
@@ -24,7 +24,7 @@ This is the primitive the `G-PA-8` 5-axis CNC flagship milestone (a cross-`EPIC-
 
 | Story | Summary | Status |
 |---|---|---|
-| [`STORY-P1-06-01`](../stories/STORY-P1-06-01.md) | Bounded decision-to-actuation path: declared budget, enforced deadline, measured distribution, demonstrated overrun trip | Specified |
+| [`STORY-P1-06-01`](../stories/STORY-P1-06-01.md) | Bounded decision-to-actuation path: declared budget, enforced deadline, measured distribution, demonstrated overrun trip | **Verified** (Tier 0, mechanism half, 2026-07-29, `REPORT-2026-07-29-02`; assurance `baseline-debt`) |
 
 ## Containment contract
 

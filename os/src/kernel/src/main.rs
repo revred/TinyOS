@@ -9,6 +9,8 @@
 #![no_main]
 #![deny(missing_docs)]
 
+#[cfg(any(feature = "fixture-actuation", feature = "fixture-actuation-overrun"))]
+mod fixture_actuation;
 #[cfg(feature = "fixture-context-switch")]
 mod context_switch_fixture;
 #[cfg(feature = "fixture-degrade-inheritance")]
@@ -70,7 +72,9 @@ use hal_x86_64::qemu_exit::{exit_qemu, QemuExitCode};
         feature = "fixture-wcet-restart",
         feature = "fixture-wcet-degrade",
         feature = "fixture-wcet-trip",
-        feature = "fixture-degrade-inheritance"
+        feature = "fixture-degrade-inheritance",
+        feature = "fixture-actuation",
+        feature = "fixture-actuation-overrun"
     ),
     allow(unused_imports)
 )]
@@ -102,7 +106,9 @@ use kernel::capacities::MAX_CPUS;
     feature = "fixture-wcet-restart",
     feature = "fixture-wcet-degrade",
     feature = "fixture-wcet-trip",
-    feature = "fixture-degrade-inheritance"
+    feature = "fixture-degrade-inheritance",
+    feature = "fixture-actuation",
+    feature = "fixture-actuation-overrun"
 )))]
 const BOOT_TIMER_INITIAL_COUNT: u32 = 1_000_000;
 
@@ -136,7 +142,9 @@ extern "C" fn kernel_main(
             feature = "fixture-wcet-restart",
             feature = "fixture-wcet-degrade",
             feature = "fixture-wcet-trip",
-            feature = "fixture-degrade-inheritance"
+            feature = "fixture-degrade-inheritance",
+            feature = "fixture-actuation",
+            feature = "fixture-actuation-overrun"
         ),
         allow(unused_variables)
     )]
@@ -246,6 +254,22 @@ extern "C" fn kernel_main(
         }
     }
 
+    #[cfg(any(feature = "fixture-actuation", feature = "fixture-actuation-overrun"))]
+    {
+        // The `actuation-overrun` build never reaches this `if`: its whole
+        // claim is that the system stops before a late command can be emitted,
+        // so it exits from inside the tick hook with a failure code, which is
+        // that fixture's documented pass condition. Reaching here under that
+        // feature means the trip did *not* happen — and `run` says so on the
+        // serial line before returning, because the exit code alone cannot
+        // tell a correct trip from a broken one.
+        if fixture_actuation::run() {
+            exit_qemu(QemuExitCode::Success)
+        } else {
+            exit_qemu(QemuExitCode::Failure)
+        }
+    }
+
     #[cfg(any(
         feature = "fixture-wcet-restart",
         feature = "fixture-wcet-degrade",
@@ -278,7 +302,9 @@ extern "C" fn kernel_main(
         feature = "fixture-wcet-restart",
         feature = "fixture-wcet-degrade",
         feature = "fixture-wcet-trip",
-        feature = "fixture-degrade-inheritance"
+        feature = "fixture-degrade-inheritance",
+        feature = "fixture-actuation",
+        feature = "fixture-actuation-overrun"
     )))]
     {
         // SAFETY: `start_info_paddr` is the physical address the PVH
