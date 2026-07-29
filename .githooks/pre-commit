@@ -45,11 +45,29 @@
 # throwaway directory and the gates run there. **Two sessions can now commit
 # independently, and a failure here is always about your own change.**
 #
-# `CARGO_TARGET_DIR` points back at the real target directory so the dependency
-# build is reused — the whole pass is a few seconds warm, which is the difference
-# between a hook people keep and a hook people bypass. Cargo takes its own lock
-# on that directory, so two simultaneous commits serialise for the length of a
-# build rather than interfering.
+# `CARGO_TARGET_DIR` is a **dedicated** directory under the real `os/target/`, and
+# that detail is load-bearing rather than tidy-mindedness.
+#
+# The first version of this hook shared the real target directory to reuse the
+# dependency build. That poisons the cache in both directions, because
+# `xtask`'s `os_root()` resolves the repository from `env!("CARGO_MANIFEST_DIR")`
+# — a **compile-time** constant — so a cached `xtask` binary is bound to whichever
+# source location last built it:
+#
+#   * build here, then run in the real tree  -> the developer's own
+#     `check-assurance-spine` looks inside a temp directory that no longer exists;
+#   * build in the real tree, then run here  -> **the hook silently validates the
+#     WORKING TREE while reporting that it validated the index.** A gate that
+#     quietly stops doing its job looks exactly like a gate that always passes,
+#     which is the failure mode this hook exists to prevent.
+#
+# The second case is why a separate directory is not negotiable. The cost is one
+# extra dependency build the first time and a few seconds warm after that; a
+# `cargo clean -p xtask` is the repair if the shared-cache version ever ran.
+#
+# The real fix is for `os_root()` to resolve at runtime rather than compile time,
+# at which point one shared cache would be safe and fast. That is a code change
+# with a test in front of it, and it is recorded rather than done here.
 #
 # Submodules are deliberately not materialised (`MsDOS/`, `WindowsTerminal/`):
 # none of the three checks reads them, and both are references rather than build
@@ -73,7 +91,9 @@ trap 'rm -rf "$staged"' EXIT INT TERM
 # additions included, unstaged edits excluded, deletions honoured.
 git checkout-index -a --prefix="$staged/"
 
-CARGO_TARGET_DIR="$repo_root/os/target"
+# Dedicated, NOT the real target directory — see the note above on why sharing it
+# can make this hook silently check the wrong tree.
+CARGO_TARGET_DIR="$repo_root/os/target/precommit-index"
 export CARGO_TARGET_DIR
 
 cd "$staged/os"
