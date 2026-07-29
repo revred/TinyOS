@@ -1,0 +1,22 @@
+[package]
+name = "stage-e-console"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "08C Stage E / 13F Deliverable A, core: signed console manifest, deny-by-default AuthorityResolver, and the QEMU fixture harness driving `cargo run -p xtask -- qemu-x86_64` — headless-testable, no wry"
+
+[dependencies]
+tauri = { path = "../../crates/tauri", default-features = false, features = ["unstable", "tinyos"] }
+tauri-utils = { path = "../../crates/tauri-utils" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ed25519-dalek = "2"
+hex = "0.4"
+
+[dev-dependencies]
+tauri = { path = "../../crates/tauri", default-features = false, features = ["test", "unstable", "tinyos"] }
+stage-a = { path = "../stage-a" }
+
+[[bin]]
+name = "sign-manifest"
+path = "src/bin/sign_manifest.rs"

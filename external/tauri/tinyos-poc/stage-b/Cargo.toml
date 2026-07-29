@@ -1,0 +1,10 @@
+[package]
+name = "stage-b"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "08C Stage B: EPIC-H2 §2.2 boundary tests, prototyped early — default inversion and remote-context stripping. Written to graduate into H2-02's boundary-test set."
+
+[dependencies]
+tauri-utils = { path = "../../crates/tauri-utils", features = ["tinyos-acl"] }
+serde_json = "1"

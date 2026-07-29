@@ -1,0 +1,14 @@
+# Mirrors c:\Code\TinyOS\os\.cargo\config.toml (see its comment block): no MSVC install on this
+# machine; rust-lld links MSVC-target binaries with the Windows SDK/CRT import libs supplied from
+# the cargo-xwin splat cache.
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"
+
+[env]
+LIB = 'C:\Users\End User\AppData\Local\cargo-xwin\xwin\crt\lib\x86_64;C:\Users\End User\AppData\Local\cargo-xwin\xwin\sdk\lib\um\x86_64;C:\Users\End User\AppData\Local\cargo-xwin\xwin\sdk\lib\ucrt\x86_64'
+
+# Same build-tooling stub as tinyos-poc/: locate-Visual-Studio C shim replaced on a machine
+# that deliberately has no Visual Studio (rust-lld + cargo-xwin splat).
+[patch.crates-io]
+vswhom-sys = { path = "tinyos-poc/vendor/vswhom-sys" }
+

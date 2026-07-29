@@ -304,7 +304,7 @@ TinyOS borrows MS-DOS 4+'s ergonomics deliberately — not out of nostalgia, but
 /docs/                      Architecture decision records, protocol specs, hardware bring-up notes
 /goals/                      Verification & Validation model: Goals → Epics → Features → Stories → Tests → Reports
 /session/                   Dated handover snapshots
-/external/                  External trees under contract (ADR 0008) — reference submodules and the Tauri fork, never build inputs
+/external/                  External trees under contract (ADR 0008/0009) — reference submodules and the vendored Tauri fork, never build inputs
 /os/                        The OS project — everything below this line compiles
   /Cargo.toml                Workspace manifest
   /targets/                  Custom Rust target-spec JSON files for bare-metal builds (build data, not source)

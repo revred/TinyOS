@@ -1,0 +1,12 @@
+[package]
+name = "stage-d"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "08C Stage D: revocation on navigation — a slow handler and an open Channel, origin flipped to remote, cancel and close rather than drain (PD-13)"
+
+[dependencies]
+tauri = { path = "../../crates/tauri", default-features = false, features = ["test", "unstable", "tinyos"] }
+stage-a = { path = "../stage-a" }
+serde_json = "1"
+tokio = { version = "1", features = ["time"] }

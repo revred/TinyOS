@@ -24,8 +24,10 @@ what the report pattern does not. Branch `os.tauru.poc`, still unmerged and unpu
    header restates the prohibition.
 3. **The unknowns**: U4 and U6 **closed**; U5 and U7 **pinned** to named artifacts
    (`EPIC-H2` §2.7: `H2-02-T1..T5` green-on-host, `H2-02-R1..R4` red-until-OS, `H2-05-AC1`);
-   U2/U3 **pinned** to named ADR slots (**0009** review verdict, **0010** engine lane);
-   U1 **still owner-blocked** (`LE-54`). Commits `6ce8258` (TinyOS side) and the fork head.
+   U2/U3 **pinned** to named ADR slots (**0010** review verdict, **0011** engine lane —
+   renumbered by `15G` when ADR 0009 became the fork-vendoring decision);
+   U1 **still owner-blocked** (`LE-54`) at the time of writing — resolved hours later, see `15G`.
+   Commits `6ce8258` (TinyOS side) and the fork head.
 4. **`LE-55` filed**: 13F's live-verification plan is not executable — no shell crate, no
    UART RX path anywhere, no interactive fixture, and no `boot-banner` fixture exists (the
    console smokes with `measure`). Repair path stated in the row.
@@ -58,8 +60,8 @@ what the report pattern does not. Branch `os.tauru.poc`, still unmerged and unpu
 1. **Push `C:\Code\tinyos-tauri-fork` to a remote** (GitHub fork of `tauri-apps/tauri`,
    branch `tinyos-poc`) → one-line `.gitmodules` URL swap + `git submodule sync external/tauri`
    → closes `LE-54`, unblocks U1 (the PR is drafted; submission is minutes).
-2. **Choose a reviewer for `07A`** → the verdict lands as **ADR 0009** (U2), which feeds the
-   **ADR 0010** engine-lane pricing spike (U3). Nothing else waits on these.
+2. **Choose a reviewer for `07A`** → the verdict lands as **ADR 0010** (U2), which feeds the
+   **ADR 0011** engine-lane pricing spike (U3). Nothing else waits on these.
 3. **The branch question**: `os.tauru.poc` → `main`. This session added its commits on top of
    the PoC/restructure set; spine green throughout; the evidence 13F asked to have in hand
    for the merge decision now exists.

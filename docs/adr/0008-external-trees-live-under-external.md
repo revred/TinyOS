@@ -1,6 +1,8 @@
 # ADR 0008 — External Trees Live Under `external/`, Under a Stated Contract
 
-Status: **Accepted**
+Status: **Accepted — amended by [`ADR 0009`](0009-the-tauri-fork-is-vendored-in-tree.md)
+(2026-07-30): the fork tier is vendored in-tree as plain files rather than held as a
+submodule; the reference tier and the machine-enforced boundary are unchanged**
 Date: 2026-07-29
 Follows: [`ADR 0007`](0007-modifying-tauri-is-in-scope-at-the-seams.md), which decided the fork
 posture; this ADR decides where forks and references live and how the boundary is enforced

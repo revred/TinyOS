@@ -1,0 +1,4 @@
+{
+  "console": "console",
+  "verbs": ["launch_fixture", "send_line", "read_stream", "terminate"]
+}

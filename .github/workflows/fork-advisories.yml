@@ -6,10 +6,10 @@
 # to append to goals/assurance/loose-ends.tsv; nothing is written back by CI.
 #
 # The pins below are data this job owns. They MUST be advanced in the same
-# change that advances the external/tauri submodule to a rebased fork head —
+# change that refreshes the vendored external/tauri tree to a rebased fork —
 # a stale pin here silently re-opens the gap this job closes. Source of truth:
-# the fork's crates/*/Cargo.toml and Cargo.lock at the submodule commit
-# (baseline tag tauri-runtime-wry-v2.11.4; see external/README.md).
+# the in-tree external/tauri/crates/*/Cargo.toml and Cargo.lock
+# (baseline tag tauri-runtime-wry-v2.11.4; see external/README.md, ADR 0009).
 #
 # The query goes to OSV (api.osv.dev), which aggregates both databases ADR
 # 0007 names — RUSTSEC and GHSA — for the crates.io ecosystem, unauthenticated.

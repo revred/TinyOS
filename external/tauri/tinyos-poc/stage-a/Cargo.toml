@@ -1,0 +1,14 @@
+[package]
+name = "stage-a"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "08C Stage A: the tauri-runtime seam holds headless, with zero patches to tao/wry"
+
+[dependencies]
+tauri = { path = "../../crates/tauri", default-features = false, features = ["test", "unstable"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lib]
+path = "src/lib.rs"

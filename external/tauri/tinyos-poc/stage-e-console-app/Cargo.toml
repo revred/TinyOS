@@ -1,0 +1,18 @@
+[package]
+name = "stage-e-console-app"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "08C Stage E / 13F Deliverable A, shell: the windowed Tauri operator console — WebView2 window over the stage-e-console core, embedding the signed manifest"
+
+[dependencies]
+stage-e-console = { path = "../stage-e-console" }
+# No "common-controls-v6": that feature makes muda/tao import TaskDialogIndirect, which
+# only resolves under a comctl32 v6 activation-context manifest — and the rc shim
+# (rc_shim.rs) deliberately embeds no resources at all. The console draws no native
+# dialogs; nothing v6 offers is used.
+tauri = { path = "../../crates/tauri", default-features = false, features = ["wry", "unstable", "tinyos"] }
+serde_json = "1"
+
+[build-dependencies]
+tauri-build = { path = "../../crates/tauri-build", default-features = false }

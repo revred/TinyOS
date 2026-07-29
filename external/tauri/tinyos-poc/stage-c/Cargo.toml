@@ -1,0 +1,12 @@
+[package]
+name = "stage-c"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "08C Stage C: authority resolution externalised behind a resolver seam — upstream wrap (no regression) and a mock ACI answering deny-by-default from an external table"
+
+[dependencies]
+tauri = { path = "../../crates/tauri", default-features = false, features = ["test", "unstable"] }
+tauri-utils = { path = "../../crates/tauri-utils" }
+stage-a = { path = "../stage-a" }
+serde_json = "1"

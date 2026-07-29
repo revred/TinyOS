@@ -4,7 +4,3 @@
 [submodule "WindowsTerminal"]
 	path = external/WindowsTerminal
 	url = https://github.com/microsoft/terminal.git
-[submodule "external/tauri"]
-	path = external/tauri
-	url = C:/Code/tinyos-tauri-fork
-	branch = tinyos-poc

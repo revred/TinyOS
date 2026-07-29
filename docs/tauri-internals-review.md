@@ -16,7 +16,7 @@ Reviewed against `tauri-apps/tauri` `dev` at **`872428f`**, `tauri-runtime-wry` 
 `wry` **0.55** and `tao` **0.35**. Line references are to that commit. Tauri is dual Apache-2.0/MIT,
 compatible with TinyOS's MIT ([`ADR 0006`](adr/0006-mit-licence-confirmed-and-open-core-optionality-dropped.md)).
 
-**Now vendored as a submodule at `external/tauri`** (the PoC fork, pinned per
+**Now vendored in-tree at `external/tauri`** (the PoC fork, plain files per [`ADR 0009`](adr/0009-the-tauri-fork-is-vendored-in-tree.md), previously a submodule per
 [`ADR 0008`](adr/0008-external-trees-live-under-external.md)) — this review predates that and was
 written when it was not. `external/MsDOS` and `external/WindowsTerminal` are held on the "reference
 only, never built upon" terms [`EPIC-P2`](../goals/epics/EPIC-P2.md) §6.4 sets out. Tauri was a

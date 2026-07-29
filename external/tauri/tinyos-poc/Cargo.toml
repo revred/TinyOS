@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["stage-a", "stage-b", "stage-c", "stage-d", "stage-e-console", "stage-e-console-app"]
+
+# This workspace is the TinyOS PoC side of the fork repository. It path-depends on the vendored
+# crates in ../crates. Per README-TINYOS.md, nothing in the TinyOS os/ workspace may ever depend
+# on anything here or in ../crates by path — the dependency arrow points this way only.
+
+# Build-tooling stub, not part of the measured fork diff: the real vswhom-sys compiles a C shim
+# to locate Visual Studio, which this machine deliberately does not have (rust-lld + cargo-xwin
+# splat instead — see .cargo/config.toml). The stub answers "not found" without needing cl.exe.
+[patch.crates-io]
+vswhom-sys = { path = "vendor/vswhom-sys" }

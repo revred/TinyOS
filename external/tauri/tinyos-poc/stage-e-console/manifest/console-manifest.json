@@ -1,0 +1,12 @@
+{
+  "payload": {
+    "console": "console",
+    "verbs": [
+      "launch_fixture",
+      "send_line",
+      "read_stream",
+      "terminate"
+    ]
+  },
+  "signature_hex": "69a5dd32c7f54af1d50b2276962f164640a86ffa8fbfd2f78e9d38ef9107e4ec3226032496950bb9de169ee8c3c7f650ce59ecdc4846db47376eb4733fff8b09"
+}

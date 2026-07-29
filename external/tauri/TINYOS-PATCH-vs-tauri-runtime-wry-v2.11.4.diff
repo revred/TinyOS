@@ -1,0 +1,562 @@
+diff --git a/crates/tauri-utils/Cargo.toml b/crates/tauri-utils/Cargo.toml
+index 8d1680d..4aca4ef 100644
+--- a/crates/tauri-utils/Cargo.toml
++++ b/crates/tauri-utils/Cargo.toml
+@@ -67,6 +67,10 @@ tauri = { path = "../tauri" }
+ tempfile = "3.15.0"
+ 
+ [features]
++# TinyOS fork (ADR 0007 / EPIC-H2 §2.2): deny-by-default ACL posture. Inverts the
++# `Capability.local` default and strips `remote` execution contexts at resolution.
++# Off by default so upstream behaviour and tests are unchanged without it.
++tinyos-acl = []
+ build = [
+   "proc-macro2",
+   "quote",
+diff --git a/crates/tauri-utils/src/acl/capability.rs b/crates/tauri-utils/src/acl/capability.rs
+index 33a2c60..a83d1da 100644
+--- a/crates/tauri-utils/src/acl/capability.rs
++++ b/crates/tauri-utils/src/acl/capability.rs
+@@ -231,7 +231,10 @@ fn unique_permission(gen: &mut schemars::gen::SchemaGenerator) -> schemars::sche
+ }
+ 
+ fn default_capability_local() -> bool {
+-  true
++  // TinyOS fork (`tinyos-acl`, ADR 0007 / PD-03): authority is empty until granted, so an
++  // omitted `local` is deny — a ported manifest must not be trusted to have made the safe
++  // choice, because upstream's safe choice is the opposite one.
++  !cfg!(feature = "tinyos-acl")
+ }
+ 
+ /// Configuration for remote URLs that are associated with the capability.
+diff --git a/crates/tauri-utils/src/acl/resolved.rs b/crates/tauri-utils/src/acl/resolved.rs
+index 8aa4322..6b15896 100644
+--- a/crates/tauri-utils/src/acl/resolved.rs
++++ b/crates/tauri-utils/src/acl/resolved.rs
+@@ -218,6 +218,10 @@ fn resolve_command(
+   if capability.local {
+     contexts.push(ExecutionContext::Local);
+   }
++  // TinyOS fork (`tinyos-acl`): no `remote` execution context survives resolution — remote
++  // web content holds no application IPC authority (Security Charter; EPIC-H2 §2.2). A carried
++  // `remote` grant is stripped even though it looks intentional; that is the point.
++  #[cfg(not(feature = "tinyos-acl"))]
+   if let Some(remote) = &capability.remote {
+     contexts.extend(remote.urls.iter().map(|url| {
+       ExecutionContext::Remote {
+diff --git a/crates/tauri/Cargo.toml b/crates/tauri/Cargo.toml
+index 5c13753..4727423 100644
+--- a/crates/tauri/Cargo.toml
++++ b/crates/tauri/Cargo.toml
+@@ -185,7 +185,9 @@ quickcheck = "1.0.3"
+ quickcheck_macros = "1.0.0"
+ serde = { version = "1", features = ["derive"] }
+ serde_json = "1"
+-tauri = { path = ".", default-features = false, features = ["wry"] }
++# TinyOS PoC (dev-only): "wry" -> "test" so the unit suite builds and runs without the
++# platform webview stack (this machine deliberately has no MSVC/WebView2 toolchain).
++tauri = { path = ".", default-features = false, features = ["test"] }
+ tokio = { version = "1", features = ["full"] }
+ cargo_toml = "0.22"
+ http-range = "0.1.5"
+@@ -210,6 +212,9 @@ common-controls-v6 = [
+ tray-icon = ["dep:tray-icon"]
+ tracing = ["dep:tracing", "tauri-macros/tracing", "tauri-runtime-wry?/tracing"]
+ test = []
++# TinyOS fork posture (ADR 0007): deny-by-default ACL (tauri-utils/tinyos-acl) and the
++# PD-05 pre-parse IPC payload ceiling in the protocol layer.
++tinyos = ["tauri-utils/tinyos-acl"]
+ compression = ["tauri-macros/compression", "tauri-utils/compression"]
+ wry = ["webview2-com", "webkit2gtk", "tauri-runtime-wry"]
+ # TODO: Remove in v3 - wry does not have this feature anymore
+diff --git a/crates/tauri/src/app.rs b/crates/tauri/src/app.rs
+index d4b7d13..f504cff 100644
+--- a/crates/tauri/src/app.rs
++++ b/crates/tauri/src/app.rs
+@@ -2654,8 +2654,8 @@ fn on_event_loop_event<R: Runtime>(
+ mod tests {
+   #[test]
+   fn is_send_sync() {
+-    crate::test_utils::assert_send::<super::AppHandle>();
+-    crate::test_utils::assert_sync::<super::AppHandle>();
++    crate::test_utils::assert_send::<super::AppHandle<crate::test::MockRuntime>>();
++    crate::test_utils::assert_sync::<super::AppHandle<crate::test::MockRuntime>>();
+ 
+     #[cfg(feature = "wry")]
+     {
+diff --git a/crates/tauri/src/error.rs b/crates/tauri/src/error.rs
+index 405a9b4..e576622 100644
+--- a/crates/tauri/src/error.rs
++++ b/crates/tauri/src/error.rs
+@@ -34,6 +34,11 @@ pub enum Error {
+   /// Runtime error.
+   #[error("runtime error: {0}")]
+   Runtime(#[from] tauri_runtime::Error),
++  /// TinyOS fork (PD-13): the channel's originating webview navigated away from the local
++  /// application; the channel is closed, not drained.
++  #[cfg(feature = "tinyos")]
++  #[error("channel revoked: the webview's origin left the local application")]
++  ChannelRevoked,
+   /// Window label must be unique.
+   #[error("a window with label `{0}` already exists")]
+   WindowLabelAlreadyExists(String),
+diff --git a/crates/tauri/src/ipc/authority.rs b/crates/tauri/src/ipc/authority.rs
+index 8bb81e3..d536fe0 100644
+--- a/crates/tauri/src/ipc/authority.rs
++++ b/crates/tauri/src/ipc/authority.rs
+@@ -32,6 +32,7 @@ pub struct RuntimeAuthority {
+   allowed_commands: BTreeMap<String, Vec<ResolvedCommand>>,
+   denied_commands: BTreeMap<String, Vec<ResolvedCommand>>,
+   pub(crate) scope_manager: ScopeManager,
++  resolver: Option<Box<dyn AuthorityResolver>>,
+ }
+ 
+ /// The origin trying to access the IPC.
+@@ -100,6 +101,25 @@ macro_rules! runtime_authority {
+   };
+ }
+ 
++/// An external authority resolver: the single seam through which every IPC allow/deny
++/// verdict flows (TinyOS fork, ADR 0007 constraint 6 — attempted upstream first).
++///
++/// Installing one (see [`RuntimeAuthority::set_resolver`]) replaces the built-in
++/// capability-table lookup wholesale, and declares authority *fully governed*: commands the
++/// resolver does not allow are denied, including app commands an app without an ACL manifest
++/// would otherwise accept from a local origin.
++pub trait AuthorityResolver: Send + Sync + 'static {
++  /// Resolve whether `command`, invoked from `webview` in `window` with `origin`, is allowed.
++  /// `None` denies. Identity arguments are runtime-derived labels, never caller-supplied.
++  fn resolve_access(
++    &self,
++    command: &str,
++    window: &str,
++    webview: &str,
++    origin: &Origin,
++  ) -> Option<Vec<ResolvedCommand>>;
++}
++
+ impl RuntimeAuthority {
+   /// Contruct a new [`RuntimeAuthority`] from the ACL
+   ///
+@@ -126,11 +146,18 @@ impl RuntimeAuthority {
+         command_cache,
+         global_scope_cache: StateManager::new(),
+       },
++      resolver: None,
+     }
+   }
+ 
+   pub(crate) fn has_app_manifest(&self) -> bool {
+-    self.has_app_acl
++    // An installed resolver is a complete authority policy: enforce for every command.
++    self.resolver.is_some() || self.has_app_acl
++  }
++
++  /// Install an external [`AuthorityResolver`]. Every subsequent verdict defers to it.
++  pub fn set_resolver<R: AuthorityResolver>(&mut self, resolver: R) {
++    self.resolver = Some(Box::new(resolver));
+   }
+ 
+   #[doc(hidden)]
+@@ -443,6 +470,9 @@ impl RuntimeAuthority {
+     webview: &str,
+     origin: &Origin,
+   ) -> Option<Vec<ResolvedCommand>> {
++    if let Some(resolver) = &self.resolver {
++      return resolver.resolve_access(command, window, webview, origin);
++    }
+     if self
+       .denied_commands
+       .get(command)
+diff --git a/crates/tauri/src/ipc/channel.rs b/crates/tauri/src/ipc/channel.rs
+index 0b3eb67..e5ca61d 100644
+--- a/crates/tauri/src/ipc/channel.rs
++++ b/crates/tauri/src/ipc/channel.rs
+@@ -25,6 +25,9 @@ use super::{
+   Request, Response,
+ };
+ 
++#[cfg(feature = "tinyos")]
++use crate::sealed::ManagerBase;
++
+ pub const IPC_PAYLOAD_PREFIX: &str = "__CHANNEL__:";
+ // TODO: Change this to `channel` in v3
+ pub const CHANNEL_PLUGIN_NAME: &str = "__TAURI_CHANNEL__";
+@@ -139,9 +142,17 @@ impl JavaScriptChannelId {
+     let counter_clone = counter.clone();
+     let webview_clone = webview.clone();
+ 
++    // TinyOS fork (PD-13): the channel is authorised under the origin it was opened from.
++    #[cfg(feature = "tinyos")]
++    let channel_epoch = webview.manager().origin_epoch(webview.label());
++
+     Channel::new_with_id(
+       callback_id,
+       Box::new(move |body| {
++        #[cfg(feature = "tinyos")]
++        if webview.manager().origin_epoch(webview.label()) != channel_epoch {
++          return Err(crate::Error::ChannelRevoked);
++        }
+         let current_index = counter.fetch_add(1, Ordering::Relaxed);
+ 
+         if let Some(interceptor) = &webview.manager.channel_interceptor {
+diff --git a/crates/tauri/src/ipc/mod.rs b/crates/tauri/src/ipc/mod.rs
+index aff4d48..129ab0d 100644
+--- a/crates/tauri/src/ipc/mod.rs
++++ b/crates/tauri/src/ipc/mod.rs
+@@ -32,7 +32,8 @@ pub(crate) mod format_callback;
+ pub(crate) mod protocol;
+ 
+ pub use authority::{
+-  CommandScope, GlobalScope, Origin, RuntimeAuthority, ScopeObject, ScopeObjectMatch, ScopeValue,
++  AuthorityResolver, CommandScope, GlobalScope, Origin, RuntimeAuthority, ScopeObject,
++  ScopeObjectMatch, ScopeValue,
+ };
+ #[cfg(feature = "dynamic-acl")]
+ pub use capability_builder::{CapabilityBuilder, RuntimeCapability};
+diff --git a/crates/tauri/src/ipc/protocol.rs b/crates/tauri/src/ipc/protocol.rs
+index 455b1d0..be5f6d8 100644
+--- a/crates/tauri/src/ipc/protocol.rs
++++ b/crates/tauri/src/ipc/protocol.rs
+@@ -433,6 +433,13 @@ fn handle_ipc_message<R: Runtime>(request: Request<String>, manager: &AppManager
+   }
+ }
+ 
++/// TinyOS fork (PD-05): the invoke payload ceiling, enforced on raw bytes before the
++/// isolation decrypt and before any `serde` parse — a bounded channel after an unbounded
++/// parse has bounded nothing. The TinyOS-side manifest may lower this; it may never be
++/// raised past what the transport can account for.
++#[cfg(feature = "tinyos")]
++pub(crate) const MAX_INVOKE_PAYLOAD_BYTES: usize = 1024 * 1024;
++
+ fn parse_invoke_request<R: Runtime>(
+   #[allow(unused_variables)] manager: &AppManager<R>,
+   request: http::Request<Vec<u8>>,
+@@ -440,6 +447,14 @@ fn parse_invoke_request<R: Runtime>(
+   #[allow(unused_mut)]
+   let (parts, mut body) = request.into_parts();
+ 
++  #[cfg(feature = "tinyos")]
++  if body.len() > MAX_INVOKE_PAYLOAD_BYTES {
++    return Err(format!(
++      "invoke payload of {} bytes exceeds the {MAX_INVOKE_PAYLOAD_BYTES}-byte ceiling; refused before parse",
++      body.len()
++    ));
++  }
++
+   // skip leading `/`
+   let cmd = percent_encoding::percent_decode(&parts.uri.path().as_bytes()[1..])
+     .decode_utf8_lossy()
+@@ -555,15 +570,67 @@ mod tests {
+   use std::str::FromStr;
+ 
+   use super::*;
+-  use crate::{ipc::InvokeBody, manager::AppManager, plugin::PluginStore, StateManager, Wry};
++  use crate::{ipc::InvokeBody, manager::AppManager, plugin::PluginStore, test::MockRuntime, StateManager};
+   use http::header::*;
+   use serde_json::json;
+   use tauri_macros::generate_context;
+ 
++  /// TinyOS PD-05: the ceiling must refuse the payload BEFORE any deserialisation — a
++  /// bounded channel after an unbounded parse has bounded nothing (review §7.1). The body is
++  /// deliberately not valid JSON: an implementation that parsed first would fail with a serde
++  /// error, not the ceiling error asserted here.
++  #[cfg(feature = "tinyos")]
++  #[test]
++  fn oversized_payload_is_refused_before_parse() {
++    let manager = test_manager();
++    let make_request = |len: usize| {
++      let mut request = Request::builder().uri("ipc://localhost/big");
++      request.headers_mut().unwrap().insert(
++        HeaderName::from_str(TAURI_INVOKE_KEY_HEADER_NAME).unwrap(),
++        HeaderValue::from_str("key").unwrap(),
++      );
++      request.headers_mut().unwrap().insert(
++        CONTENT_TYPE,
++        HeaderValue::from_str(mime::APPLICATION_JSON.as_ref()).unwrap(),
++      );
++      request.body(vec![b'x'; len]).unwrap()
++    };
++
++    let err = super::parse_invoke_request(&manager, make_request(MAX_INVOKE_PAYLOAD_BYTES + 1))
++      .expect_err("an oversized payload must be refused");
++    assert!(
++      err.contains("payload") && err.contains("exceeds"),
++      "the refusal must be the ceiling, not a parse error: {err}"
++    );
++  }
++
++  fn test_manager() -> AppManager<MockRuntime> {
++    let context = generate_context!("test/fixture/src-tauri/tauri.conf.json", crate, test = true);
++    AppManager::with_handlers(
++      context,
++      PluginStore::default(),
++      Box::new(|_| false),
++      None,
++      #[cfg(any(target_os = "macos", target_os = "ios"))]
++      None,
++      Default::default(),
++      StateManager::new(),
++      Default::default(),
++      #[cfg(all(desktop, feature = "tray-icon"))]
++      Default::default(),
++      Default::default(),
++      Default::default(),
++      Default::default(),
++      "".into(),
++      None,
++      crate::generate_invoke_key().unwrap(),
++    )
++  }
++
+   #[test]
+   fn parse_invoke_request() {
+     let context = generate_context!("test/fixture/src-tauri/tauri.conf.json", crate, test = true);
+-    let manager: AppManager<Wry> = AppManager::with_handlers(
++    let manager: AppManager<MockRuntime> = AppManager::with_handlers(
+       context,
+       PluginStore::default(),
+       Box::new(|_| false),
+@@ -681,7 +748,7 @@ mod tests {
+       "contentType":  mime::APPLICATION_JSON.to_string(),
+     });
+ 
+-    let manager: AppManager<Wry> = AppManager::with_handlers(
++    let manager: AppManager<MockRuntime> = AppManager::with_handlers(
+       context,
+       PluginStore::default(),
+       Box::new(|_| false),
+diff --git a/crates/tauri/src/lib.rs b/crates/tauri/src/lib.rs
+index 261f7e8..7d5a838 100644
+--- a/crates/tauri/src/lib.rs
++++ b/crates/tauri/src/lib.rs
+@@ -17,6 +17,7 @@
+ //! - **unstable**: Enables unstable features. Be careful, it might introduce breaking changes in future minor releases.
+ //! - **tracing**: Enables [`tracing`](https://docs.rs/tracing/latest/tracing) for window startup, plugins, `Window::eval`, events, IPC, updater and custom protocol request handlers.
+ //! - **test**: Enables the [`mod@test`] module exposing unit test helpers.
++//! - **tinyos**: TinyOS fork posture (ADR 0007): deny-by-default ACL and the PD-05 pre-parse invoke payload ceiling.
+ //! - **objc-exception**: This feature flag is no-op since 2.3.0.
+ //! - **linux-libxdo**: Enables linking to libxdo which enables Cut, Copy, Paste and SelectAll menu items to work on Linux.
+ //! - **isolation**: Enables the isolation pattern. Enabled by default if the `app > security > pattern > use` config option is set to `isolation` on the `tauri.conf.json` file.
+@@ -522,6 +523,17 @@ impl<R: Runtime> Context<R> {
+ // TODO: expand these docs
+ /// Manages a running application.
+ pub trait Manager<R: Runtime>: sealed::ManagerBase<R> {
++  /// Installs an external [`crate::ipc::AuthorityResolver`]; every subsequent IPC allow/deny
++  /// verdict defers to it, and authority becomes fully governed (TinyOS fork, ADR 0007).
++  fn set_authority_resolver<Resolver: crate::ipc::AuthorityResolver>(&self, resolver: Resolver) {
++    self
++      .manager()
++      .runtime_authority
++      .lock()
++      .unwrap()
++      .set_resolver(resolver);
++  }
++
+   /// The application handle associated with this manager.
+   fn app_handle(&self) -> &AppHandle<R> {
+     self.managed_app_handle()
+diff --git a/crates/tauri/src/manager/mod.rs b/crates/tauri/src/manager/mod.rs
+index 8215cf1..97e5013 100644
+--- a/crates/tauri/src/manager/mod.rs
++++ b/crates/tauri/src/manager/mod.rs
+@@ -219,6 +219,12 @@ pub struct AppManager<R: Runtime> {
+   /// Sets to true in [`AppHandle::request_restart`] and [`AppHandle::restart`]
+   /// and we will call `restart` on the next `RuntimeRunEvent::Exit` event
+   pub(crate) restart_on_exit: AtomicBool,
++
++  /// TinyOS fork (PD-13): per-webview origin generation. Advanced when a webview's origin
++  /// leaves the local application, revoking every in-flight invoke and open channel that was
++  /// authorised under the previous origin — a token per invoke, not a dispatch restructure.
++  #[cfg(feature = "tinyos")]
++  pub(crate) origin_epochs: Mutex<HashMap<String, u64>>,
+ }
+ 
+ impl<R: Runtime> fmt::Debug for AppManager<R> {
+@@ -242,6 +248,26 @@ impl<R: Runtime> fmt::Debug for AppManager<R> {
+   }
+ }
+ 
++impl<R: Runtime> AppManager<R> {
++  /// The current origin generation for `label` (TinyOS fork, PD-13).
++  #[cfg(feature = "tinyos")]
++  pub(crate) fn origin_epoch(&self, label: &str) -> u64 {
++    *self.origin_epochs.lock().unwrap().get(label).unwrap_or(&0)
++  }
++
++  /// Advance `label`'s origin generation: everything authorised under the previous origin is
++  /// now revoked (TinyOS fork, PD-13).
++  #[cfg(feature = "tinyos")]
++  pub(crate) fn advance_origin_epoch(&self, label: &str) {
++    *self
++      .origin_epochs
++      .lock()
++      .unwrap()
++      .entry(label.to_string())
++      .or_insert(0) += 1;
++  }
++}
++
+ pub(crate) enum EmitPayload<'a, S: Serialize> {
+   Serialize(&'a S),
+   Str(String),
+@@ -324,6 +350,8 @@ impl<R: Runtime> AppManager<R> {
+       plugin_global_api_scripts: Arc::new(context.plugin_global_api_scripts),
+       resources_table: Arc::default(),
+       invoke_key,
++      #[cfg(feature = "tinyos")]
++      origin_epochs: Default::default(),
+       channel_interceptor,
+       restart_on_exit: AtomicBool::new(false),
+     }
+@@ -741,7 +769,7 @@ mod test {
+     webview::WebviewBuilder,
+     window::WindowBuilder,
+     App, Emitter, Listener, Manager, StateManager, Webview, WebviewWindow, WebviewWindowBuilder,
+-    Window, Wry,
++    Window,
+   };
+ 
+   use super::AppManager;
+@@ -759,7 +787,7 @@ mod test {
+   #[test]
+   fn check_get_url() {
+     let context = generate_context!("test/fixture/src-tauri/tauri.conf.json", crate, test = true);
+-    let manager: AppManager<Wry> = AppManager::with_handlers(
++    let manager: AppManager<MockRuntime> = AppManager::with_handlers(
+       context,
+       PluginStore::default(),
+       Box::new(|_| false),
+diff --git a/crates/tauri/src/manager/webview.rs b/crates/tauri/src/manager/webview.rs
+index 8c99afb..d798eb7 100644
+--- a/crates/tauri/src/manager/webview.rs
++++ b/crates/tauri/src/manager/webview.rs
+@@ -594,6 +594,12 @@ impl<R: Runtime> WebviewManager<R> {
+       }
+       let webview = app_manager.webview.webviews_lock().get(&label).cloned();
+       if let Some(w) = webview {
++        // TinyOS fork (PD-13): runtime-initiated navigation to a non-local origin revokes
++        // everything authorised under the previous origin, same as core-initiated.
++        #[cfg(feature = "tinyos")]
++        if !w.is_local_url(url) {
++          app_manager.advance_origin_epoch(&label);
++        }
+         app_manager
+           .plugins
+           .lock()
+diff --git a/crates/tauri/src/test/mock_runtime.rs b/crates/tauri/src/test/mock_runtime.rs
+index f51c488..c872892 100644
+--- a/crates/tauri/src/test/mock_runtime.rs
++++ b/crates/tauri/src/test/mock_runtime.rs
+@@ -1342,7 +1342,7 @@ impl<T: UserEvent> Runtime<T> for MockRuntime {
+             if let Some(label) = label {
+               let (tx, rx) = channel();
+               callback(RunEvent::WindowEvent {
+-                label,
++                label: label.clone(),
+                 event: WindowEvent::CloseRequested { signal_tx: tx },
+               });
+ 
+@@ -1350,6 +1350,13 @@ impl<T: UserEvent> Runtime<T> for MockRuntime {
+               if !should_prevent {
+                 self.context.windows.borrow_mut().remove(&id);
+ 
++                // Real runtimes emit Destroyed after removal; the app layer relies on it
++                // to release its own bookkeeping for the label (`on_window_close`).
++                callback(RunEvent::WindowEvent {
++                  label,
++                  event: WindowEvent::Destroyed,
++                });
++
+                 let is_empty = self.context.windows.borrow().is_empty();
+                 if is_empty {
+                   let (tx, rx) = channel();
+@@ -1366,8 +1373,13 @@ impl<T: UserEvent> Runtime<T> for MockRuntime {
+             }
+           }
+           Message::DestroyWindow(id) => {
+-            let removed = self.context.windows.borrow_mut().remove(&id).is_some();
+-            if removed {
++            let removed = self.context.windows.borrow_mut().remove(&id);
++            if let Some(window) = removed {
++              callback(RunEvent::WindowEvent {
++                label: window.label.clone(),
++                event: WindowEvent::Destroyed,
++              });
++
+               let is_empty = self.context.windows.borrow().is_empty();
+               if is_empty {
+                 let (tx, rx) = channel();
+diff --git a/crates/tauri/src/webview/mod.rs b/crates/tauri/src/webview/mod.rs
+index b89d3c9..280caa4 100644
+--- a/crates/tauri/src/webview/mod.rs
++++ b/crates/tauri/src/webview/mod.rs
+@@ -1687,6 +1687,12 @@ tauri::Builder::default()
+ 
+   /// Navigates the webview to the defined url.
+   pub fn navigate(&self, url: Url) -> crate::Result<()> {
++    // TinyOS fork (PD-13): leaving the local application revokes everything authorised
++    // under it — in-flight invoke results and open channels die with the origin.
++    #[cfg(feature = "tinyos")]
++    if !self.is_local_url(&url) {
++      self.manager().advance_origin_epoch(self.label());
++    }
+     self.webview.dispatcher.navigate(url).map_err(Into::into)
+   }
+ 
+@@ -1695,7 +1701,7 @@ tauri::Builder::default()
+     self.webview.dispatcher.reload().map_err(Into::into)
+   }
+ 
+-  fn is_local_url(&self, current_url: &Url) -> bool {
++  pub(crate) fn is_local_url(&self, current_url: &Url) -> bool {
+     let uses_https = current_url.scheme() == "https";
+ 
+     // if from `tauri://` custom protocol
+@@ -1761,10 +1767,21 @@ tauri::Builder::default()
+       return;
+     }
+ 
++    // TinyOS fork (PD-13): the token per invoke. The origin generation is captured when the
++    // invoke is authorised; if the webview's origin has left the local application by the time
++    // the result tries to cross back, the result is cancelled, not delivered.
++    #[cfg(feature = "tinyos")]
++    let invoke_epoch = manager.origin_epoch(self.label());
++
+     let resolver = InvokeResolver::new(
+       self.clone(),
+       Arc::new(Mutex::new(Some(Box::new(
+         move |webview: Webview<R>, cmd, response, callback, error| {
++          #[cfg(feature = "tinyos")]
++          if webview.manager().origin_epoch(webview.label()) != invoke_epoch {
++            log::warn!("invoke `{cmd}` result cancelled: origin revoked mid-flight (PD-13)");
++            return;
++          }
+           responder(webview, cmd, response, callback, error);
+         },
+       )))),
+@@ -2370,8 +2387,8 @@ mod tests {
+ 
+   #[test]
+   fn webview_is_send_sync() {
+-    crate::test_utils::assert_send::<super::Webview>();
+-    crate::test_utils::assert_sync::<super::Webview>();
++    crate::test_utils::assert_send::<super::Webview<crate::test::MockRuntime>>();
++    crate::test_utils::assert_sync::<super::Webview<crate::test::MockRuntime>>();
+   }
+ 
+   #[test]
+diff --git a/crates/tauri/src/window/mod.rs b/crates/tauri/src/window/mod.rs
+index 0aa26a1..79ac754 100644
+--- a/crates/tauri/src/window/mod.rs
++++ b/crates/tauri/src/window/mod.rs
+@@ -2476,7 +2476,7 @@ impl From<WindowEffectsConfig> for EffectsBuilder {
+ mod tests {
+   #[test]
+   fn window_is_send_sync() {
+-    crate::test_utils::assert_send::<super::Window>();
+-    crate::test_utils::assert_sync::<super::Window>();
++    crate::test_utils::assert_send::<super::Window<crate::test::MockRuntime>>();
++    crate::test_utils::assert_sync::<super::Window<crate::test::MockRuntime>>();
+   }
+ }
