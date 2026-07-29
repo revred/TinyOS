@@ -250,9 +250,8 @@ pub fn grant<
     // `i < pages` is representable, which is why those loops may keep using
     // plain arithmetic. This is stated rather than assumed, because an
     // unstated invariant is what `LE-40` was.
-    let last_offset = ((pages - 1) as u64)
-        .checked_mul(PAGE_SIZE)
-        .ok_or(SharedMemoryError::RangeOverflow)?;
+    let last_offset =
+        ((pages - 1) as u64).checked_mul(PAGE_SIZE).ok_or(SharedMemoryError::RangeOverflow)?;
     owner_virt.checked_add(last_offset).ok_or(SharedMemoryError::RangeOverflow)?;
     sharee_virt.checked_add(last_offset).ok_or(SharedMemoryError::RangeOverflow)?;
 

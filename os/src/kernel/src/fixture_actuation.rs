@@ -655,7 +655,8 @@ fn enter_safe_state(task: TaskId, attributed: u32) -> ! {
     //
     // SAFETY: interrupt context on a single CPU with the run over.
     let canaries_intact = unsafe {
-        (0..TASKS).all(|slot| (&raw const TASK_STACKS[slot]).cast::<u64>().read_unaligned() == CANARY)
+        (0..TASKS)
+            .all(|slot| (&raw const TASK_STACKS[slot]).cast::<u64>().read_unaligned() == CANARY)
     };
     check(
         &mut serial,
@@ -1028,7 +1029,12 @@ pub fn run() -> bool {
             CURRENT_TASK = Some(next.index());
             let ran = dispatch::run_once(scheduler, &raw mut DISPATCHER_CTX, &raw mut TASK_CTX);
             CURRENT_TASK = None;
-            check(&mut serial, &mut ok, "the dispatcher ran the task it selected", ran == Some(next));
+            check(
+                &mut serial,
+                &mut ok,
+                "the dispatcher ran the task it selected",
+                ran == Some(next),
+            );
             ran
         };
         if ran.is_none() {
@@ -1107,7 +1113,8 @@ pub fn run() -> bool {
     //
     // SAFETY: interrupts masked, every switch has returned.
     let canaries_intact = unsafe {
-        (0..TASKS).all(|slot| (&raw const TASK_STACKS[slot]).cast::<u64>().read_unaligned() == CANARY)
+        (0..TASKS)
+            .all(|slot| (&raw const TASK_STACKS[slot]).cast::<u64>().read_unaligned() == CANARY)
     };
     check(
         &mut serial,
@@ -1165,12 +1172,7 @@ pub fn run() -> bool {
          identity does not reach the actuator",
         writes_after == writes_before,
     );
-    check(
-        &mut serial,
-        &mut ok,
-        "clause 2: every refusal was counted",
-        refused == expected,
-    );
+    check(&mut serial, &mut ok, "clause 2: every refusal was counted", refused == expected);
 
     // The envelope. Two metrics, in the order they were measured — each
     // summarized by its own phase, over its own population.

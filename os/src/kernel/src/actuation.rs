@@ -264,7 +264,12 @@ impl<L: OutputLine> ActuationPort<L> {
     ) -> Result<(), ActuationError> {
         // Authority first, and nothing about the window read before it.
         if caller != self.owner || scheduler.state_of(caller) != Some(TaskState::Running) {
-            return Err(self.refuse(journal, caller, Outcome::Failed, ActuationError::NotAuthorized));
+            return Err(self.refuse(
+                journal,
+                caller,
+                Outcome::Failed,
+                ActuationError::NotAuthorized,
+            ));
         }
         match self.status() {
             DeadlineStatus::Idle => {
@@ -445,8 +450,7 @@ mod tests {
         sched.set_state(owner, TaskState::Running).expect("the task is live");
         let intruder = task(&mut sched, 5, 1_000);
         sched.set_state(intruder, TaskState::Running).expect("the task is live");
-        let mut port =
-            ActuationPort::declare(RecordingLine::default(), owner, DeadlineTicks(1));
+        let mut port = ActuationPort::declare(RecordingLine::default(), owner, DeadlineTicks(1));
 
         // Never armed.
         assert_eq!(
@@ -669,10 +673,8 @@ mod tests {
         }
         let _ = port.emit(&sched, &mut journal, owner, 0x55);
 
-        let spoors: Vec<Spoor> = journal
-            .iter()
-            .filter(|spoor| spoor.category() == Category::Actuation)
-            .collect();
+        let spoors: Vec<Spoor> =
+            journal.iter().filter(|spoor| spoor.category() == Category::Actuation).collect();
         assert_eq!(spoors.len(), 4, "emit, unauthorized refusal, deadline miss, late refusal");
 
         assert_eq!(spoors[0].who(), Actor::Kernel);
@@ -707,9 +709,11 @@ mod tests {
         sched.set_state(owner, TaskState::Running).expect("the task is live");
         sched.set_state(intruder, TaskState::Running).expect("the task is live");
 
-        for error in
-            [ActuationError::NotAuthorized, ActuationError::NotArmed, ActuationError::DeadlineMissed]
-        {
+        for error in [
+            ActuationError::NotAuthorized,
+            ActuationError::NotArmed,
+            ActuationError::DeadlineMissed,
+        ] {
             // Named exhaustively rather than with a wildcard: this is one of
             // the places a fourth arm must be handled.
             match error {

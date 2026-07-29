@@ -9,10 +9,10 @@
 #![no_main]
 #![deny(missing_docs)]
 
-#[cfg(any(feature = "fixture-actuation", feature = "fixture-actuation-overrun"))]
-mod fixture_actuation;
 #[cfg(feature = "fixture-context-switch")]
 mod context_switch_fixture;
+#[cfg(any(feature = "fixture-actuation", feature = "fixture-actuation-overrun"))]
+mod fixture_actuation;
 #[cfg(feature = "fixture-degrade-inheritance")]
 mod fixture_degrade_inheritance;
 #[cfg(feature = "fixture-double-fault")]
