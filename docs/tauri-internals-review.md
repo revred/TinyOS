@@ -316,6 +316,14 @@ Advisories reference releases; a dev-commit baseline never maps onto them. `8724
 referent for this document's line numbers only. Wherever the vendored tree lands, state the
 workspace-exclusion rule from §7.2 explicitly alongside it.
 
+### 7.5 Executed
+
+The PoC [`08C`](../session/hand-2026-07-29/08C-tauri-poc-execution-cover-note.md) ordered ran
+on 2026-07-29: this review was reproduced at the release tag (every claim survives; §7.2's
+size figures measure slightly smaller there, as the Provenance section predicts), and §7.1's
+patch/seam classification held under test —
+[`REPORT-2026-07-29-03`](../goals/reports/REPORT-2026-07-29-03.md).
+
 ## 8. What this changes, and what it does not
 
 **Changes:** `whole-system-context.md`'s Tauri paragraph is now backed by mechanism. Three claims in

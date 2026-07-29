@@ -50,6 +50,13 @@ ADR set, where decisions with alternatives are recorded.
 6. **Upstream-first for mechanical seams.** The `RuntimeAuthority` resolver trait (review §7.3) is
    attempted as an upstream contribution before being carried as a patch.
 
+## Status of the evidence
+
+Executed and upheld by the fork PoC on 2026-07-29:
+[`REPORT-2026-07-29-03`](../../goals/reports/REPORT-2026-07-29-03.md) — stages 0–D all pass,
+no kill criterion tripped, cumulative patch +224/−19 lines against the release-tag baseline
+(constraint 2 at ~25% consumed), constraint 6's upstream PR drafted in the fork repository.
+
 ## Consequences
 
 - Review §7 cites this ADR rather than being the decision's only record, and its "reference
