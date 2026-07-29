@@ -119,6 +119,46 @@ in `hal-x86_64`, (2) an interactive echo-class fixture exists in the `qemu-x86_6
 (3) the Stage E console types the DOS form and the POSIX form at it and records both. The
 console half is already built and waiting.
 
+## Axis 4 — performance of the experience: tested, not asserted
+
+**Owner directive (2026-07-30): 4.0 is a milestone, not the destination — and UX performance,
+speed and rendering quality are all tested.** Recorded in `EPIC-P2` §2. Behavioural parity
+without performance parity is not parity: DOS 4.0's whole interactive virtue was that the
+prompt *never lagged*. This axis gives every experience property a named test id now, so
+"untested" is a red row rather than an omission. The register follows the `H2-02` pattern
+(`EPIC-H2` §2.7): ids are stable, rows graduate into `goals/assurance/story-contracts.tsv`
+when `EPIC-P2` decomposes, and budgets whose numbers are not yet in the decided record say so
+rather than inventing one.
+
+**Command speed** is already covered by the performance catalogue and needs no new ids:
+every verb execution lands under **`PERF-D23`** (Shell config and audit query — all 25
+guardrails: median/p99/p99.9/WCET latency, jitter, cycles, footprint, throughput floor,
+isolation under competing load, denial cost, 72-hour soak, and the two same-hardware
+comparison guardrails G24/G25), and the 15 file-backed verbs additionally under
+**`PERF-D14`** (Storage and file access). The `perf` column in the TSV binds each row.
+
+**Window and rendering behaviour** has no catalogue domain — these ids close that gap:
+
+| id | Measures | Metric | Budget source | Today |
+|---|---|---|---|---|
+| `TG-P01` | Keypress → glyph (local echo through the focused tab) | end-to-end latency, median/p99/max, under idle and under competing load | `EPIC-P2` §6.6 (below RT floor, preemptible); number set at decomposition | RED — no shell, no tab host |
+| `TG-P02` | Command submit → first output byte | latency, median/p99 | `PERF-D23-G01/G02` apply directly | RED |
+| `TG-P03` | Writer-never-blocks under full-rate output flood | producer stall time = 0 while renderer saturated; serial capture byte-complete | §6.6 drop-frames-not-block; the `window:buffer-renderer-seam` row's adopted shape | RED |
+| `TG-P04` | Frame pacing under load | frame time p99, dropped-frame count **reported not silent**, zero deadline misses system-wide during flood | §6.6 ("a dropped frame is reported as dropped"; "no tab may cause a deadline miss") | RED |
+| `TG-P05` | Scrollback append at capacity | cost per line, full vs empty buffer, ratio ≈ 1 (O(1) recycle) | `window:scrollback` row's adopted circular-buffer shape | RED |
+| `TG-P06` | Resize reflow | time per 10k-line buffer; preemptible (an RT task's deadlines unaffected mid-reflow) | §6.6 bounded-work obligation | RED |
+| `TG-P07` | VT/ANSI parse throughput + hostile-input ceiling | bytes/s sustained; worst-case cost of adversarial sequences bounded and ≈ benign cost | §6.5 rule 3 (untrusted text rendered inert — the cost of inertness is itself bounded) | RED |
+| `TG-P08` | Rendering quality: correctness | golden-frame comparison per verb output (DIR table, TREE graphics, MORE prompt), in glyph mode **and** ASCII degrade mode; glyph+word+colour triple present in every status | §6.5 rules 1–2 (never colour alone; ASCII is canonical) | RED |
+| `TG-P09` | Tab switch | latency to first correct frame of the target tab, median/p99 | §6 interaction model; number at decomposition | RED |
+| `TG-P10` | Trusted region under render load | reserved region pixels unchanged by any tab content during flood/adversarial rendering; secure-attention key latency unaffected | §6.3 (the trusted path holds *under load*, not just at rest) | RED |
+
+Every row is red by construction — the shell (`LE-48`), the tab host and the serial RX path
+(`LE-55`) do not exist yet. That is the point of naming them now: when `EPIC-P2` decomposes,
+the Features inherit test ids instead of adjectives, and "fast, smooth, correct" becomes ten
+measurements. The Stage E console is the interim harness for the earliest of them (`TG-P02`,
+`TG-P03` can be prototyped host-side against QEMU serial the way the `H2-02` probes were
+prototyped on `MockRuntime`).
+
 ## Maintaining this register
 
 One row per behaviour; every row carries evidence; `status` is `spec-level` or

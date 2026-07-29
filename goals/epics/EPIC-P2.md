@@ -39,6 +39,18 @@ That is **`LE-48`**, and it is a decision this Epic must not take unilaterally. 
 
 **Ergonomic parity only. Never binary compatibility.** MS-DOS 4 was 16-bit real-mode and segmented; TinyOS is **64-bit-only by charter**. No DOS `.COM` or `.EXE` will ever execute here. `SeedMVP.md` records the `MsDOS/` submodule as *"a historical command-behavior reference only, not built upon"*, and `README.md` says *"the soul of MS-DOS"*. **No Report, Story or marketing sentence from this Epic may imply a compatibility claim**, and that prohibition is an exit criterion because it is the kind of claim that drifts by accident.
 
+**4.0 is a milestone, never the destination** (owner directive, 2026-07-30). The source-verified
+4.0 baseline in [`goals/context/terminal-gap.tsv`](../context/terminal-gap.tsv) fixes what the
+reference *actually did* — and several deliberate divergences already exceed it (`MOVE`,
+`DIR /S`-class recursion, meaningful exit codes where 4.0 dropped its own). The destination is
+the *ergonomics operators deserve*: the 4.0 behaviours where they were right, the post-4.0 and
+POSIX behaviours where 4.0 was thin, and modern terminal expectations (scrollback, reflow, full
+VT) 4.0 never had. And the experience is **tested, not asserted**: command speed under
+`PERF-D23`/`PERF-D14`, and the window/rendering behaviours under the named `TG-P*` budgets in
+[`docs/terminal-gap-analysis.md`](../../docs/terminal-gap-analysis.md) §Axis 4 — UX latency,
+frame pacing, and rendering quality each get a red test id now, a green run when the shell and
+tab host exist.
+
 ## 3. The security doctrine — features never arrive ahead of it
 
 The mandate is *features with a strong security doctrine in place*, not features followed by hardening. Each rule below is stated so it can become a boundary test rather than a paragraph.
