@@ -1,0 +1,62 @@
+# ADR 0007 constraint 5, mechanised (13F mandate U6). The external/tauri fork
+# carries pinned versions of upstream crates; an advisory published against a
+# pin is the "advisory rot" this job exists to surface. Its design copies the
+# LE-23 baseline recorder's ethos: CI *detects and refuses*, a human *decides
+# and commits* — a hit fails this workflow and prints the exact loose-end row
+# to append to goals/assurance/loose-ends.tsv; nothing is written back by CI.
+#
+# The pins below are data this job owns. They MUST be advanced in the same
+# change that advances the external/tauri submodule to a rebased fork head —
+# a stale pin here silently re-opens the gap this job closes. Source of truth:
+# the fork's crates/*/Cargo.toml and Cargo.lock at the submodule commit
+# (baseline tag tauri-runtime-wry-v2.11.4; see external/README.md).
+#
+# The query goes to OSV (api.osv.dev), which aggregates both databases ADR
+# 0007 names — RUSTSEC and GHSA — for the crates.io ecosystem, unauthenticated.
+# The schedule matters more than the push trigger: rot happens precisely when
+# the repository is idle.
+
+name: fork-advisories
+
+on:
+  schedule:
+    - cron: "17 6 * * 1" # weekly, Monday 06:17 UTC
+  push:
+    branches: [main]
+    paths:
+      - .gitmodules
+      - .github/workflows/fork-advisories.yml
+  workflow_dispatch:
+
+jobs:
+  advisory-rot:
+    name: RUSTSEC/GHSA (via OSV) vs the external/tauri fork pins
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query OSV for each pinned crate version
+        run: |
+          set -euo pipefail
+          fail=0
+          while read -r crate version; do
+            response=$(curl -sf -X POST https://api.osv.dev/v1/query \
+              -H 'Content-Type: application/json' \
+              -d "{\"package\":{\"name\":\"$crate\",\"ecosystem\":\"crates.io\"},\"version\":\"$version\"}")
+            ids=$(echo "$response" | jq -r '[.vulns[]?.id] | join(", ")')
+            if [ -n "$ids" ]; then
+              fail=1
+              echo "::error::$crate $version is affected by: $ids"
+              echo "Append to goals/assurance/loose-ends.tsv (next LE id, one row, tab-separated):"
+              echo "  summary: external/tauri pins $crate $version, affected by $ids; the fork must rebase past the patched version (ADR 0007 constraint 5) or record why not"
+              echo "  origin: fork-advisories CI job"
+            else
+              echo "$crate $version: clean"
+            fi
+          done <<'PINS'
+          tauri 2.11.4
+          tauri-utils 2.9.3
+          tauri-runtime 2.11.3
+          tauri-runtime-wry 2.11.4
+          wry 0.55.0
+          tao 0.35.0
+          PINS
+          exit $fail

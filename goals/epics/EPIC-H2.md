@@ -100,6 +100,45 @@ executable memory. Every lane except .NET AOT brings one or both. **This is an `
 code-admission decision, not a runtime configuration choice**, and it is the gate that actually
 governs whether Node and Bun are ever admitted.
 
+### 2.7 The `H2-02`/`H2-05` named-test register (added 2026-07-29, 13F mandate U5/U7)
+
+The PoC (`REPORT-2026-07-29-03`, Stage E in `REPORT-2026-07-29-04`) proved what a host can
+prove and no more. This register turns both halves into **test ids**, so "unproven" is a
+named red row rather than vague debt. The ids are stable now; the rows graduate verbatim
+into `goals/assurance/story-contracts.tsv` when this Epic decomposes. (They cannot live in
+`goals/security/containment-tests.tsv`: that catalogue's id grammar is the closed canonical
+set `BND-01..BND-20`, machine-enforced — a deliberate property, not an oversight. The 13F
+mandate's suggestion of `H2-02` rows there is corrected here.)
+
+**Green on host today** — the Stage B probes, graduating into `H2-02`'s boundary-test set:
+
+| id | Asserts | Today's evidence |
+|---|---|---|
+| `H2-02-T1` | `PD-03`: a capability that *omits* `local` resolves to no local authority (§2.2's default inversion) | fork `stage-b::b1_local_defaults_to_deny` |
+| `H2-02-T2` | The inversion is of the default, not a ban: an explicit `local: true` grant is honoured | fork `stage-b::b2_explicit_local_grant_is_honoured` |
+| `H2-02-T3` | A **carried** `remote` grant is stripped by the manifest intersection (the hostile input, 08C trap 4) | fork `stage-b::b3_carried_remote_grant_is_stripped` |
+| `H2-02-T4` | A remote-only capability resolves to nothing at all | fork `stage-b::b4_remote_only_capability_resolves_to_nothing` |
+| `H2-02-T5` | `PD-05`: the pre-parse size ceiling refuses oversized payloads on raw bytes, before any deserialisation (§2.5) | the knob-on `+1` test in the fork's `tauri` suite (58th) |
+
+**Red until the OS exists** — `PD-01`/`PD-07`/`PD-08`/`PD-12` cannot be host-proven
+(REPORT-2026-07-29-03 non-claims). Each is a named row that stays red by design:
+
+| id | Asserts | Blocked on |
+|---|---|---|
+| `H2-02-R1` | `PD-01`: a command handler holds only granted authority — handler compromise cannot reach ungranted memory, devices or files (§2.1: the framework ACL is metadata, never the boundary) | real domains under the runtime profile (`U5`) |
+| `H2-02-R2` | `PD-07`: every command's cost is bounded and accounted against its caller | OS accounting |
+| `H2-02-R3` | `PD-08`/`PD-09`: renderer and IPC work is charged to the requesting domain, and backpressure fails closed | OS charging |
+| `H2-02-R4` | `PD-12`: no runtime-profile work runs at or above the real-time floor, under load, measured | OS scheduling + `EPIC-H3` |
+
+**`H2-05-AC1` (U7 — the invoke-key criterion, pinned so it cannot be forgotten or done
+early):** the `__TAURI_INVOKE_KEY__` bearer secret (§2.3) is removed **only** in the same
+change that makes the IPC transport carry kernel-derived caller identity, and its removal
+test asserts both directions: the key is gone, *and* a forged/absent identity is refused by
+the kernel-side check rather than by possession of a secret. Removing the key before that
+transport exists deletes a mitigation without supplying a boundary
+(REPORT-2026-07-29-03 finding 3); adding the transport without removing the key leaves a
+caller-supplied credential load-bearing. Acceptance is the pair, atomically.
+
 ## 3. Proposed Features — for whenever this Epic is decomposed
 
 **Not created as documents.** Recorded so decomposition starts from the review rather than from
