@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # LE-23's baseline recorder only. Every other job here runs on push and
+  # pull_request as before; the recorder is gated on this event, so a manual
+  # run records a baseline and does nothing else.
+  workflow_dispatch:
 
 defaults:
   run:
@@ -493,3 +497,59 @@ jobs:
       # build, exactly as a functional test failure does (README Phase 1).
       - name: TEST-P1-01-04-A — timing-regression gate (same-run ratios vs committed baselines)
         run: cargo run -p xtask -- check-timing-regression --runs=3
+  # LE-23 -- the baseline recorder, and it is deliberately manual.
+  #
+  # `goals/performance/baselines/tier0-x86_64.tsv` was recorded on a Windows dev
+  # host, and two CI runs (30294647525, 30294872213) confirmed it reads
+  # systematically high on this runner: D04, D05/dispatch_run_once and D02 all
+  # came in 23-53% BELOW baseline in both runs, consistently signed, with two of
+  # them reporting improved-is-the-baseline-stale -- the gate correctly
+  # reporting a baseline recorded on the wrong host. A same-run ratio cancels
+  # out how *fast* a runner is; it cannot cancel out a different machine's
+  # relative costs, and that is precisely what LE-23 is.
+  #
+  # `workflow_dispatch` rather than `push`, and that is the whole design.
+  # Re-recording on every push would mean the gate always compares against the
+  # run that just happened, which is not a gate at all -- it is a very
+  # expensive way of asserting that a number equals itself. Recording is an act
+  # somebody decides to take, and the artifact it produces is reviewed and
+  # committed by hand rather than written back into the repository by CI.
+  #
+  # LE-28 is the local counterpart of the same rule: do NOT run
+  # `--update-baseline` on a dev host. That is what produced the offset this
+  # job exists to remove.
+  record-timing-baseline:
+    name: LE-23 -- record the Tier 0 baseline on this runner (manual)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned toolchain
+        run: |
+          rustup toolchain install --profile minimal --component rust-src "$(grep -oP 'channel\s*=\s*"\K[^"]+' rust-toolchain.toml)"
+
+      - name: Install QEMU
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-x86
+
+      # The same `--runs=3` median the gate itself compares against, in the same
+      # release profile -- LE-13: a dev-profile number is not a noisier version
+      # of the same thing, it is a different binary. The date is passed
+      # explicitly because the recorded date is committed data, not a wall clock
+      # the tool reads for itself.
+      - name: Record the baseline
+        run: |
+          cargo run -p xtask -- check-timing-regression --runs=3 \
+            --update-baseline --date="$(date -u +%Y-%m-%d)"
+
+      # Printed as well as uploaded, so the numbers are readable in the log
+      # without downloading anything -- the first thing a reviewer wants is the
+      # reference metric's own cycle count, which says how fast this runner was.
+      - name: Show what was recorded
+        run: cat ../goals/performance/baselines/tier0-x86_64.tsv
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tier0-x86_64-baseline
+          path: goals/performance/baselines/tier0-x86_64.tsv
+          if-no-files-found: error
