@@ -27,7 +27,7 @@ Horizon IDs are not inserted into the numbered critical path and do not imply se
 | Epic | Destination | Goals to verify | Proving applications | Depends on |
 |---|---|---|---|---|
 | `EPIC-H1` | Application ABI, graphics, audio, input and game proving path | G-APP-1, G-APP-5, G-APP-11 | Dangerous Dave, DOOM, Quake II, Quake III | `EPIC-P0`, `EPIC-P2`, `EPIC-P3`, `EPIC-P5` |
-| `EPIC-H2` | Wails, Tauri, .NET AOT, Node and research Bun runtime profiles | G-APP-2, G-APP-3, G-APP-4 | Wails, Tauri, .NET 10+, Node, Bun | `EPIC-H1`, `EPIC-P5` |
+| [`EPIC-H2`](EPIC-H2.md) — **specified, not decomposed** | Wails, Tauri, .NET AOT, Node and research Bun runtime profiles | G-APP-2, G-APP-3, G-APP-4 | Wails, Tauri, .NET 10+, Node, Bun | `EPIC-H1`, `EPIC-P5`; **the Tauri/Wails lanes also need `EPIC-H3`** for a rendering engine |
 | `EPIC-H3` | Chrome-class browser and TinySpot remote UX | G-APP-6, G-APP-9 | Chromium/Chrome-class browser, TinySpot | `EPIC-H1`, `EPIC-H2`, `EPIC-P3`, `EPIC-P4` |
 | `EPIC-H4` | TLE and WST compatibility/coexistence | G-APP-7, G-APP-8 | TinyOS Linux Environment, Windows TinyOS Tools | `EPIC-P4`, `EPIC-P5`, `EPIC-H1` |
 | `EPIC-H5` | Browser-hosted TinyOS laboratory | G-APP-10 | WebAssembly semantic build and browser emulator | `EPIC-P0`, `EPIC-P2` |
