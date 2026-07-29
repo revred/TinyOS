@@ -14,7 +14,7 @@
 //! (no policy engine needed here — grant ownership is enforced by
 //! `TaskId` identity directly, since there is exactly one owner per grant).
 
-use hal_x86_64::paging::PAGE_SIZE;
+use hal_x86_64::paging::{MappedPage, PAGE_SIZE};
 use kernel::sched::TaskId;
 
 use crate::address_space::{AddressSpace, AddressSpaceError, KERNEL_RESERVED_REGION_END};
@@ -55,6 +55,13 @@ pub enum SharedMemoryError {
     /// registry's current record, so it is rejected rather than tearing
     /// down an unrelated later grant that happens to reuse the address.
     StaleGrant,
+    /// `owner_virt`/`sharee_virt` plus `pages` describes a range whose page
+    /// addresses do not all fit in a 64-bit address space (`STORY-P0-07-03`).
+    ///
+    /// Both bases and the count are caller-chosen, so this is a *request*
+    /// defect rather than a kernel-state defect: it is rejected before any
+    /// page is inspected or mapped.
+    RangeOverflow,
 }
 
 impl From<AddressSpaceError> for SharedMemoryError {
@@ -76,6 +83,14 @@ impl From<AddressSpaceError> for SharedMemoryError {
 /// grant that happens to reuse the same `sharee_virt` after this one is
 /// revoked, so a stale token can never be mistaken for — and used to tear
 /// down — an unrelated later grant.
+///
+/// **Range invariant.** [`grant`] is this type's only constructor and it
+/// rejects any request whose page addresses do not all fit in a 64-bit
+/// address space ([`SharedMemoryError::RangeOverflow`]). So a `SharedGrant`
+/// that exists describes a representable range, and [`revoke`] may walk it
+/// with plain arithmetic rather than re-deriving a guarantee that was already
+/// established at issue time — a check that cannot fail is dead code, and
+/// dead code on a kernel path reads like a real guard (`STORY-P0-07-03`).
 pub struct SharedGrant {
     owner: TaskId,
     sharee_virt: u64,
@@ -192,6 +207,13 @@ pub struct GrantRequest {
 /// region. `registry` records the successful grant so [`revoke`] can later
 /// confirm a token against it; a full `registry` also rolls the mapping
 /// back and fails closed with [`SharedMemoryError::RegistryExhausted`].
+///
+/// **This function does not panic** (`STORY-P0-07-03`, closing `LE-40`). It
+/// is a kernel path, and `agent/CODING_STANDARDS.md` puts fail-safe above
+/// keep-trying: every reachable defect — including a caller-chosen range that
+/// does not fit in the address space, [`SharedMemoryError::RangeOverflow`] —
+/// returns an error with nothing mapped. A test gates the absence of explicit
+/// panic constructs on this module's non-test path.
 pub fn grant<
     const OWNER_FRAMES: usize,
     const SHAREE_FRAMES: usize,
@@ -213,17 +235,29 @@ pub fn grant<
     if sharee_virt < KERNEL_RESERVED_REGION_END {
         return Err(SharedMemoryError::KernelRegionCollision);
     }
+    // Every page address the three loops below will compute, checked before
+    // any of them computes one. `owner_virt`, `sharee_virt` and `pages` are
+    // all caller-chosen and the loops index off them with plain `+`/`*`;
+    // before `STORY-P0-07-03` they did so unchecked, so a page-aligned
+    // `sharee_virt` near the top of the address space panicked on the second
+    // page in a debug build, and in a release build wrapped silently to a low
+    // address that the kernel-region check immediately above had already
+    // passed. `pages >= 1` holds here, so `pages - 1` cannot underflow, and
+    // the last page's offset is the largest either loop will ever add.
+    //
+    // ESTABLISHED HERE, RELIED ON BELOW: after this point every
+    // `owner_virt + i * PAGE_SIZE` and `sharee_virt + i * PAGE_SIZE` for
+    // `i < pages` is representable, which is why those loops may keep using
+    // plain arithmetic. This is stated rather than assumed, because an
+    // unstated invariant is what `LE-40` was.
+    let last_offset = ((pages - 1) as u64)
+        .checked_mul(PAGE_SIZE)
+        .ok_or(SharedMemoryError::RangeOverflow)?;
+    owner_virt.checked_add(last_offset).ok_or(SharedMemoryError::RangeOverflow)?;
+    sharee_virt.checked_add(last_offset).ok_or(SharedMemoryError::RangeOverflow)?;
 
     for i in 0..pages {
-        let owner_page = owner_space
-            .translate(owner_virt + i as u64 * PAGE_SIZE)
-            .ok_or(SharedMemoryError::RegionNotOwned)?;
-        if sharee_permissions.write && !owner_page.writable {
-            return Err(SharedMemoryError::PermissionsExceedOwner);
-        }
-        if sharee_permissions.execute && !owner_page.executable {
-            return Err(SharedMemoryError::PermissionsExceedOwner);
-        }
+        grantable_owner_page(owner_space, owner_virt + i as u64 * PAGE_SIZE, sharee_permissions)?;
     }
     for i in 0..pages {
         if sharee_space.translate(sharee_virt + i as u64 * PAGE_SIZE).is_some() {
@@ -234,33 +268,40 @@ pub fn grant<
     let mut mapped = 0usize;
     for i in 0..pages {
         let offset = i as u64 * PAGE_SIZE;
-        // Already validated present above; re-reading here (rather than
-        // collecting into a fixed-size buffer up front) avoids needing a
-        // `pages`-sized scratch array for an arbitrary caller-chosen count.
+        // Re-read rather than collected into a fixed-size buffer up front,
+        // which would need a `pages`-sized scratch array for an arbitrary
+        // caller-chosen count.
         //
-        // THE INVARIANT THIS RESTS ON, stated because it was unstated (`LE-40`):
-        // the re-read returns what the validation loop saw because `owner_space`
-        // is held here as a SHARED borrow (`&AddressSpace<'_, OWNER_FRAMES>`),
-        // so no `&mut` can alias it, and this kernel is single-core with no
-        // page-table mutation from an interrupt path. There is therefore no
-        // window between check and use — this is not a TOCTOU, and it was once
-        // reported as one.
+        // WHY THE RE-READ AGREES WITH THE LOOP ABOVE, stated because it was
+        // once unstated (`LE-40`): `owner_space` is held here as a SHARED
+        // borrow (`&AddressSpace<'_, OWNER_FRAMES>`), so no `&mut` can alias
+        // it, and this kernel is single-core with no page-table mutation from
+        // an interrupt path. There is no window between check and use — this
+        // is not a TOCTOU, and it was once reported as one.
         //
-        // TWO THINGS WOULD INVALIDATE IT, SILENTLY:
-        //   1. SMP. Another core mutating the owner's tables makes the `expect`
-        //      below reachable, and it panics rather than failing closed.
+        // TWO THINGS WOULD INVALIDATE THAT, SILENTLY:
+        //   1. SMP. Another core mutating the owner's tables.
         //   2. Page-table structure shared between the two spaces covering
         //      `owner_virt` — `attach_shared_pd` makes that possible in
         //      principle. No reachable case has been constructed, and Rust's
         //      borrow rules already prevent the obvious one.
         //
-        // The `expect` is the only one on a non-test path in this file, and it
-        // sits in a function that already returns `Result<_, SharedMemoryError>`
-        // — so failing closed costs one line. That change is `LE-40`'s open
-        // half and must land BEFORE any SMP work, not after it.
-        let owner_page = owner_space
-            .translate(owner_virt + offset)
-            .expect("validated present in the loop above");
+        // So the re-read is checked, not asserted (`STORY-P0-07-03`). It runs
+        // the SAME grantability verdict as the loop above — presence AND
+        // authority — because under either condition the permission half is
+        // as stale as the presence half, and the old code panicked on the
+        // first while mapping the page regardless of the second. A rejected
+        // re-read rolls this call's mapping back and fails closed, exactly as
+        // frame exhaustion does two lines below. `LE-40` required this to
+        // land BEFORE any SMP work; it has.
+        let owner_page =
+            match grantable_owner_page(owner_space, owner_virt + offset, sharee_permissions) {
+                Ok(page) => page,
+                Err(err) => {
+                    unmap_prefix(sharee_space, sharee_virt, mapped);
+                    return Err(err);
+                }
+            };
         if let Err(err) =
             sharee_space.map_page(sharee_virt + offset, owner_page.phys, sharee_permissions)
         {
@@ -271,13 +312,52 @@ pub fn grant<
     }
 
     let generation = registry.next_generation;
+    // The last arithmetic on this path. Generations are never reused — that
+    // is the whole basis of `StaleGrant` — so the counter must not wrap
+    // (a wrapped generation makes a stale token match a later grant) and must
+    // not saturate (every subsequent grant would share one generation, with
+    // the same effect). Refusing the grant is the only disposition that keeps
+    // the token's meaning intact, so an exhausted counter is a full registry.
+    let Some(next_generation) = generation.checked_add(1) else {
+        unmap_prefix(sharee_space, sharee_virt, mapped);
+        return Err(SharedMemoryError::RegistryExhausted);
+    };
     if let Err(err) = registry.insert(GrantRecord { sharee_virt, generation }) {
         unmap_prefix(sharee_space, sharee_virt, mapped);
         return Err(err);
     }
-    registry.next_generation += 1;
+    registry.next_generation = next_generation;
 
     Ok(SharedGrant { owner, sharee_virt, pages, generation })
+}
+
+/// Reads `virt`'s mapping in `owner_space` and decides whether it may back a
+/// grant carrying `sharee_permissions` — the **single** definition of "this
+/// page is grantable", called by both of [`grant`]'s owner-facing loops.
+///
+/// One function rather than two because the two loops previously disagreed
+/// about what they were checking: the first asked both questions, and the
+/// second re-read the translation, `.expect`ed its presence and re-checked
+/// its permissions **not at all** (`LE-40`). Presence and authority are one
+/// verdict about one page, so they are read together or not at all.
+///
+/// Fails closed with [`SharedMemoryError::RegionNotOwned`] if `virt` is not
+/// mapped in `owner_space`, or [`SharedMemoryError::PermissionsExceedOwner`]
+/// if the owner's own page does not already carry the write/execute
+/// authority the sharee is asking for — a grant can never escalate.
+fn grantable_owner_page<const OWNER_FRAMES: usize>(
+    owner_space: &AddressSpace<'_, OWNER_FRAMES>,
+    virt: u64,
+    sharee_permissions: Permissions,
+) -> Result<MappedPage, SharedMemoryError> {
+    let owner_page = owner_space.translate(virt).ok_or(SharedMemoryError::RegionNotOwned)?;
+    if sharee_permissions.write && !owner_page.writable {
+        return Err(SharedMemoryError::PermissionsExceedOwner);
+    }
+    if sharee_permissions.execute && !owner_page.executable {
+        return Err(SharedMemoryError::PermissionsExceedOwner);
+    }
+    Ok(owner_page)
 }
 
 /// Unmaps the first `count` pages of a grant-in-progress starting at
@@ -912,5 +992,298 @@ mod tests {
 
         assert_eq!(revoke(owner, &second_grant, &mut sharee_space, &mut registry), Ok(()));
         assert_eq!(sharee_space.translate(SHAREE_VIRT), None);
+    }
+
+    // ---------------------------------------------------------------------
+    // STORY-P0-07-03 (`LE-40`) — `grant` fails closed on every path it takes.
+    // ---------------------------------------------------------------------
+
+    /// An owner space with a two-page RW region at `IMAGE_BASE` — the
+    /// smallest region that makes `grant`'s *per-page* loops take more than
+    /// one iteration, which is where every arithmetic defect below lives.
+    fn owner_space_with_two_rw_pages<'a>(
+        bytes: &'a AlignedPages,
+        staging: &'a mut AlignedPages,
+        pml4: &'a mut PageTable,
+        frame_pool: &'a mut Pool<PageTable, 8>,
+    ) -> AddressSpace<'a, 8> {
+        let sections = [SectionDescriptor {
+            virtual_address: 0,
+            virtual_size: 2 * PAGE_SIZE as u32,
+            file_offset: 0,
+            file_size: 2 * PAGE_SIZE as u32,
+            permissions: RW,
+        }];
+        AddressSpace::create(pml4, frame_pool, &sections, IMAGE_BASE, &bytes.0, &mut staging.0)
+            .unwrap()
+    }
+
+    /// The highest page-aligned address in a 64-bit address space. Above
+    /// `KERNEL_RESERVED_REGION_END` and `PAGE_SIZE`-aligned, so `grant`'s
+    /// kernel-collision and alignment checks both pass it — it is a
+    /// *well-formed* request by every check that existed before this Story.
+    const TOP_PAGE: u64 = 0xFFFF_FFFF_FFFF_F000;
+
+    // TEST-P0-07-03-A §3: the reachable one. Two legitimately-mapped owner
+    // pages and a sharee range that runs off the top of the address space.
+    // Before this Story the sharee-range loop computed `TOP_PAGE + PAGE_SIZE`
+    // with a plain `+` and panicked in a debug build; in a release build it
+    // wrapped silently to 0 — inside the kernel-reserved region whose check
+    // the function had already finished running.
+    #[test]
+    fn a_grant_whose_sharee_range_overflows_the_address_space_is_rejected() {
+        let (owner, _sharee) = two_tasks();
+        let bytes = AlignedPages([0; 8192]);
+        let mut owner_staging = AlignedPages([0; 8192]);
+        let mut owner_pml4 = PageTable::new();
+        let mut owner_frames: Pool<PageTable, 8> = Pool::new();
+        let owner_space = owner_space_with_two_rw_pages(
+            &bytes,
+            &mut owner_staging,
+            &mut owner_pml4,
+            &mut owner_frames,
+        );
+
+        let sharee_bytes = AlignedPages([0; 8192]);
+        let mut sharee_staging = AlignedPages([0; 8192]);
+        let mut sharee_pml4 = PageTable::new();
+        let mut sharee_frames: Pool<PageTable, 8> = Pool::new();
+        let mut sharee_space =
+            empty_space(&sharee_bytes, &mut sharee_staging, &mut sharee_pml4, &mut sharee_frames);
+
+        let mut registry: GrantRegistry<4> = GrantRegistry::new();
+        let result = grant(
+            owner,
+            &owner_space,
+            &mut sharee_space,
+            GrantRequest {
+                owner_virt: IMAGE_BASE,
+                sharee_virt: TOP_PAGE,
+                pages: 2,
+                sharee_permissions: RO,
+            },
+            &mut registry,
+        );
+
+        assert_eq!(result.err(), Some(SharedMemoryError::RangeOverflow));
+        assert_eq!(sharee_space.translate(TOP_PAGE), None, "a rejected grant maps nothing");
+        assert_eq!(sharee_space.translate(0), None, "and must not have wrapped to address 0");
+    }
+
+    // TEST-P0-07-03-A §3: the same defect on the owner side. Rejected as an
+    // unrepresentable *range* rather than as an unmapped page, because the
+    // check runs before either loop — the range is malformed regardless of
+    // what happens to be mapped.
+    #[test]
+    fn a_grant_whose_owner_range_overflows_the_address_space_is_rejected() {
+        let (owner, _sharee) = two_tasks();
+        let bytes = AlignedPages([0; 8192]);
+        let mut owner_staging = AlignedPages([0; 8192]);
+        let mut owner_pml4 = PageTable::new();
+        let mut owner_frames: Pool<PageTable, 8> = Pool::new();
+        let owner_space = owner_space_with_two_rw_pages(
+            &bytes,
+            &mut owner_staging,
+            &mut owner_pml4,
+            &mut owner_frames,
+        );
+
+        let sharee_bytes = AlignedPages([0; 8192]);
+        let mut sharee_staging = AlignedPages([0; 8192]);
+        let mut sharee_pml4 = PageTable::new();
+        let mut sharee_frames: Pool<PageTable, 8> = Pool::new();
+        let mut sharee_space =
+            empty_space(&sharee_bytes, &mut sharee_staging, &mut sharee_pml4, &mut sharee_frames);
+
+        let mut registry: GrantRegistry<4> = GrantRegistry::new();
+        let result = grant(
+            owner,
+            &owner_space,
+            &mut sharee_space,
+            GrantRequest {
+                owner_virt: TOP_PAGE,
+                sharee_virt: SHAREE_VIRT,
+                pages: 2,
+                sharee_permissions: RO,
+            },
+            &mut registry,
+        );
+
+        assert_eq!(result.err(), Some(SharedMemoryError::RangeOverflow));
+        assert_eq!(sharee_space.translate(SHAREE_VIRT), None, "a rejected grant maps nothing");
+    }
+
+    // TEST-P0-07-03-A §3: `pages` is caller-chosen too, and it is multiplied
+    // by `PAGE_SIZE`. Before this Story a nonsense count was rejected only
+    // incidentally — by the first unmapped page it happened to reach — which
+    // is not the same as rejecting it for being nonsense.
+    #[test]
+    fn a_grant_whose_page_count_overflows_the_address_space_is_rejected() {
+        let (owner, _sharee) = two_tasks();
+        let bytes = AlignedPages([0; 8192]);
+        let mut owner_staging = AlignedPages([0; 8192]);
+        let mut owner_pml4 = PageTable::new();
+        let mut owner_frames: Pool<PageTable, 8> = Pool::new();
+        let owner_space = owner_space_with_two_rw_pages(
+            &bytes,
+            &mut owner_staging,
+            &mut owner_pml4,
+            &mut owner_frames,
+        );
+
+        let sharee_bytes = AlignedPages([0; 8192]);
+        let mut sharee_staging = AlignedPages([0; 8192]);
+        let mut sharee_pml4 = PageTable::new();
+        let mut sharee_frames: Pool<PageTable, 8> = Pool::new();
+        let mut sharee_space =
+            empty_space(&sharee_bytes, &mut sharee_staging, &mut sharee_pml4, &mut sharee_frames);
+
+        let mut registry: GrantRegistry<4> = GrantRegistry::new();
+        let result = grant(
+            owner,
+            &owner_space,
+            &mut sharee_space,
+            GrantRequest {
+                owner_virt: IMAGE_BASE,
+                sharee_virt: SHAREE_VIRT,
+                pages: usize::MAX,
+                sharee_permissions: RO,
+            },
+            &mut registry,
+        );
+
+        assert_eq!(result.err(), Some(SharedMemoryError::RangeOverflow));
+        assert_eq!(sharee_space.translate(SHAREE_VIRT), None, "a rejected grant maps nothing");
+    }
+
+    // TEST-P0-07-03-A §3: the last arithmetic on the path. An exhausted
+    // generation counter must refuse the grant rather than wrap (a wrapped
+    // generation makes a stale token match a later grant, defeating
+    // `StaleGrant`) or panic on the `+= 1`.
+    #[test]
+    fn a_grant_that_would_exhaust_the_generation_counter_is_rejected() {
+        let (owner, _sharee) = two_tasks();
+        let bytes = AlignedPages([0; 8192]);
+        let mut owner_staging = AlignedPages([0; 8192]);
+        let mut owner_pml4 = PageTable::new();
+        let mut owner_frames: Pool<PageTable, 8> = Pool::new();
+        let owner_space = owner_space_with_one_rw_page(
+            &bytes,
+            &mut owner_staging,
+            &mut owner_pml4,
+            &mut owner_frames,
+        );
+
+        let sharee_bytes = AlignedPages([0; 8192]);
+        let mut sharee_staging = AlignedPages([0; 8192]);
+        let mut sharee_pml4 = PageTable::new();
+        let mut sharee_frames: Pool<PageTable, 8> = Pool::new();
+        let mut sharee_space =
+            empty_space(&sharee_bytes, &mut sharee_staging, &mut sharee_pml4, &mut sharee_frames);
+
+        let mut registry: GrantRegistry<4> = GrantRegistry::new();
+        registry.next_generation = u64::MAX;
+
+        let result = grant(
+            owner,
+            &owner_space,
+            &mut sharee_space,
+            GrantRequest {
+                owner_virt: IMAGE_BASE,
+                sharee_virt: SHAREE_VIRT,
+                pages: 1,
+                sharee_permissions: RO,
+            },
+            &mut registry,
+        );
+
+        assert_eq!(result.err(), Some(SharedMemoryError::RegistryExhausted));
+        assert_eq!(sharee_space.translate(SHAREE_VIRT), None, "a rejected grant maps nothing");
+    }
+
+    // TEST-P0-07-03-A §1/§2: the single grantability decision, exercised
+    // directly. `grant`'s mapping loop can only reject what this function
+    // rejects, and before this Story the mapping loop's own re-read was an
+    // `.expect` that checked presence by panicking and permissions not at all.
+    #[test]
+    fn the_grantability_check_rejects_an_unmapped_owner_page() {
+        let bytes = AlignedPages([0; 8192]);
+        let mut staging = AlignedPages([0; 8192]);
+        let mut pml4 = PageTable::new();
+        let mut frames: Pool<PageTable, 8> = Pool::new();
+        let space = owner_space_with_one_rw_page(&bytes, &mut staging, &mut pml4, &mut frames);
+
+        assert_eq!(
+            grantable_owner_page(&space, IMAGE_BASE + 0x10_0000, RO).err(),
+            Some(SharedMemoryError::RegionNotOwned),
+            "an unmapped page must be an error, not a panic"
+        );
+    }
+
+    #[test]
+    fn the_grantability_check_rejects_authority_the_owner_does_not_have() {
+        let bytes = AlignedPages([0; 8192]);
+        let mut staging = AlignedPages([0; 8192]);
+        let mut pml4 = PageTable::new();
+        let mut frames: Pool<PageTable, 8> = Pool::new();
+        // The region is RW: writable, and (W^X) not executable.
+        let space = owner_space_with_one_rw_page(&bytes, &mut staging, &mut pml4, &mut frames);
+
+        assert_eq!(
+            grantable_owner_page(&space, IMAGE_BASE, RX).err(),
+            Some(SharedMemoryError::PermissionsExceedOwner),
+            "execute must not be grantable out of a non-executable page"
+        );
+    }
+
+    #[test]
+    fn the_grantability_check_accepts_a_request_within_the_owners_authority() {
+        let bytes = AlignedPages([0; 8192]);
+        let mut staging = AlignedPages([0; 8192]);
+        let mut pml4 = PageTable::new();
+        let mut frames: Pool<PageTable, 8> = Pool::new();
+        let space = owner_space_with_one_rw_page(&bytes, &mut staging, &mut pml4, &mut frames);
+
+        let page = grantable_owner_page(&space, IMAGE_BASE, RO).expect("RO is within RW");
+        assert_eq!(page.phys, space.translate(IMAGE_BASE).unwrap().phys);
+        assert_eq!(
+            grantable_owner_page(&space, IMAGE_BASE, RW).map(|p| p.phys),
+            Ok(page.phys),
+            "RW is exactly the owner's own authority and must be grantable"
+        );
+    }
+
+    // TEST-P0-07-03-A §5: the gate. A prose rule with a machine behind it,
+    // in the spirit of `LE-33`/`LE-35`/`LE-36`/`LE-44`. This scans the half
+    // of this file above `#[cfg(test)]`, with comment lines stripped so the
+    // module's own prose about panics does not trip its own gate.
+    //
+    // It does NOT claim the absence of implicit panics (indexing, unchecked
+    // arithmetic) — `TEST-P0-07-03-A` §5 says so, and `LE-52` carries the
+    // generalisation of this gate beyond one module.
+    #[test]
+    fn this_modules_non_test_source_contains_no_panic_constructs() {
+        const SOURCE: &str = include_str!("shared_memory.rs");
+        const MARKER: &str = "#[cfg(test)]";
+        const BANNED: [&str; 6] =
+            [".unwrap()", ".expect(", "panic!", "unreachable!", "todo!", "unimplemented!"];
+
+        let non_test = SOURCE.split(MARKER).next().expect("split always yields one part");
+        assert!(non_test.len() < SOURCE.len(), "the marker must actually be present");
+
+        for (number, line) in non_test.lines().enumerate() {
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
+            for banned in BANNED {
+                assert!(
+                    !line.contains(banned),
+                    "`{banned}` on this module's non-test path, line {}: `grant` is a kernel \
+                     path and `agent/CODING_STANDARDS.md` puts fail-safe above keep-trying \
+                     (LE-40)",
+                    number + 1
+                );
+            }
+        }
     }
 }

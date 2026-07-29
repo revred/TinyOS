@@ -1,6 +1,6 @@
 # FEAT-P0-07 — Local Inter-Process Communication (Shared Memory & Message Channels)
 
-Status: **Verified — 2/2 Stories Verified**
+Status: **Verified — 3/3 Stories Verified**
 Epic: [`EPIC-P0`](../epics/EPIC-P0.md)
 Introduced in: (this Feature — 2026-07-26, per a new strategic objective naming "In-Process Communication, sharing memory between processes, socket communication, TCP/IP stack" as a priority)
 
@@ -32,6 +32,7 @@ A TCP/IP stack is a real, separate, larger piece of infrastructure: a NIC class 
 |---|---|---|
 | [`STORY-P0-07-01`](../stories/STORY-P0-07-01.md) | Bounded, capability-scoped message channel between two tasks | Verified |
 | [`STORY-P0-07-02`](../stories/STORY-P0-07-02.md) | Shared-memory region handle exchange between two tasks | Verified |
+| [`STORY-P0-07-03`](../stories/STORY-P0-07-03.md) | `grant` fails closed instead of panicking (`LE-40`) | Verified |
 
 Both implemented in [`session/hand-2026-07-26/26-feat-p0-07-local-ipc.md`](../../session/hand-2026-07-26/26-feat-p0-07-local-ipc.md) — `STORY-P0-07-01`: new `kernel::ipc::Channel<CAP, MSG_LEN>`, a directional, fixed-capacity, no-heap message pipe with a standalone `ChannelPolicy` capability stand-in (`REPORT-2026-07-26-21`). `STORY-P0-07-02`: new `exec::shared_memory::grant`/`revoke`, built on two new `exec::address_space::AddressSpace` primitives (`map_page`/`unmap_page`) and a new `hal_x86_64::paging::unmap_4k` (`REPORT-2026-07-26-22`).
 
@@ -42,6 +43,12 @@ Canonical row: [`assurance/feature-contracts.tsv`](../assurance/feature-contract
 That row also selects this Feature’s [`PD-*`](../security/protection-domain-contracts.tsv) and [`RCG-*`](../security/code-admission-gates.tsv) Security Charter obligations. Every Test repeats the exact selections and CI rejects drift.
 
 Ordinary IPC transfers bounded data, not authority. A capability may cross a channel only when the schema explicitly accepts a delegable, rights-reduced, generation-safe grant and records the delegation. Cross-process pointers are never interfaces; shared pages name participants, permissions, extent, lifetime, generation, and teardown. Required evidence includes forged endpoints, handle smuggling, directional misuse, transactional rollback, revocation on death, stale-token denial, bounded backpressure, and all-class-pair containment.
+
+`STORY-P0-07-03` (2026-07-29) hardens `-02` rather than extending it: `exec::shared_memory::grant` no
+longer panics on any path. It closed `LE-40` and, in auditing the same defect class across the whole
+function, found and fixed a **reachable** one the row had not described — unchecked address
+arithmetic on caller-chosen values, which panicked in a debug build and wrapped silently past the
+kernel-region check in a release build (`REPORT-2026-07-29-01`).
 
 ## Exit criteria
 

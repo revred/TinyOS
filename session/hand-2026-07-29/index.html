@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TinyOS Handovers — 29 July 2026</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #5a5a5a;
+    --border: #d8d8d8;
+    --code-bg: #f2f2f2;
+    --accent: #0b5fff;
+    --tag-bg: #eef2ff;
+    --card-bg: #fafafa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --fg: #e8e8e8;
+      --muted: #a0a0a0;
+      --border: #333740;
+      --code-bg: #1e2126;
+      --accent: #6fa8ff;
+      --tag-bg: #1c2333;
+      --card-bg: #191c21;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.6;
+  }
+  h1 { font-size: 1.7rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.25rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+  .status {
+    display: inline-block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--tag-bg);
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    margin-bottom: 1.5rem;
+  }
+  code {
+    background: var(--code-bg);
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.92rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.6rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th { color: var(--muted); font-weight: 600; }
+  ul, ol { padding-left: 1.3rem; }
+  li { margin-bottom: 0.4rem; }
+  a { color: var(--accent); }
+  .muted { color: var(--muted); }
+  .entries { list-style: none; padding-left: 0; }
+  .entry {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 0.9rem;
+  }
+  .entry .num {
+    display: inline-block;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin-right: 0.4rem;
+  }
+  .entry a { font-weight: 600; font-size: 1.02rem; text-decoration: none; }
+  .entry a:hover { text-decoration: underline; }
+  .entry p { margin: 0.4rem 0 0; color: var(--muted); font-size: 0.92rem; }
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+
+<h1>TinyOS — Handovers for 29 July 2026</h1>
+<p class="muted">This page indexes every handover produced on this date, in order. Per the <a href="../README.md">session naming convention</a>, all handovers from a single calendar date live in this one folder. Previous session: <a href="../hand-2026-07-28/index.html">28 July 2026</a> (closed through <a href="../hand-2026-07-28/45A-the-composed-scenario-under-preemption.md">Handover 45A</a> — <code>STORY-P1-04-05</code>, uncommitted when this folder opened and committed at <code>e980b9a</code> while it was being written).</p>
+<span class="status">LE-40 closed &middot; exec::shared_memory::grant no longer panics on any path &middot; a reachable overflow the row had not described, found by auditing the defect class &middot; LE-52 registered &middot; host tests 613 &rarr; 621</span>
+
+<h2>Read this first</h2>
+<ol class="entries">
+  <li class="entry">
+    <span class="num">01</span><a href="01-story-p0-07-03-grant-fails-closed.md"><code>grant</code> fails closed, and the reachable panic <code>LE-40</code> had not described</a>
+    <p>The only handover in this folder so far, and the start-here document for the next session. <strong><code>LE-40</code> is closed by <code>STORY-P0-07-03</code></strong>, the top unblocked row of <a href="../hand-2026-07-28/43A-degrade-and-inheritance-compose.md">43A</a> §7 as carried forward by <a href="../hand-2026-07-28/45A-the-composed-scenario-under-preemption.md">45A</a> §8. Its §7 is the one to read before touching <code>git</code>.</p>
+  </li>
+</ol>
+
+<h2>Handovers, in order</h2>
+<ol class="entries">
+  <li class="entry">
+    <span class="num">01</span><a href="01-story-p0-07-03-grant-fails-closed.md"><code>STORY-P0-07-03</code> Verified &mdash; <code>grant</code> fails closed instead of panicking</a>
+    <p><code>LE-40</code>'s remedy line reserved a Story for "replacing the <code>.expect</code> with a fail-closed path&hellip; before any SMP work". <strong>Auditing the whole function for that defect class found a worse instance than the row named</strong>: <code>grant</code> computed every page address with unchecked <code>+</code>/<code>*</code> on <em>caller-chosen</em> values, so a page-aligned <code>sharee_virt</code> of <code>0xFFFF_FFFF_FFFF_F000</code> &mdash; which passes both the alignment and the kernel-region checks &mdash; overflowed on the second page. Unlike the <code>.expect</code>, <strong>that is reachable today</strong>, and the release build is worse than the debug build: with <code>overflow-checks</code> defaulted off the address <em>wraps silently to <code>0x0</code></em> and is never re-checked against <code>KERNEL_RESERVED_REGION_END</code>, because the function is already past that check. Both profiles set <code>panic = "abort"</code>, so the debug disposition is a whole-system abort on a transactional path. A second finding the row also did not name: the mapping loop's re-read <code>.expect</code>ed <strong>presence</strong> and re-checked <strong>permissions not at all</strong> &mdash; so under the same conditions it would have panicked on a vanished page and <em>mapped a narrowed one anyway</em>. The privilege-escalating half was the unguarded one. Presence and authority are now one verdict from one function that both loops call; the range is checked once up front (<code>SharedMemoryError::RangeOverflow</code>); the generation counter refuses to wrap or saturate (it is the whole basis of <code>StaleGrant</code>); and a test gates this module's non-test source against explicit panic constructs, <strong>failing on the pre-fix source and naming the line</strong>. Host tests <strong>613 &rarr; 621</strong>. <code>LE-52</code> registered for the generalisation &mdash; with the warning that the <em>implicit</em> half is where this session's reachable defect actually was. <strong>Left uncommitted but ready to stage as one unit</strong>; §7 records the two commits that landed mid-session and why neither collided with this work.</p>
+  </li>
+</ol>
+
+<h2>Where to look</h2>
+<table>
+<tbody>
+<tr><td>Start here (next session)</td><td><a href="01-story-p0-07-03-grant-fails-closed.md">Handover 01</a> §9. Stage and push this session first &mdash; it is <strong>one clean unit of seven paths with no other session's content in any of them</strong>, and <code>main</code> is 17 commits ahead of <code>origin</code>, unpushed for eleven sessions. Then <strong>W3 / <code>LE-23</code></strong> (re-record the timing baseline from a CI run &mdash; the data already exists), with <code>LE-46</code> equally unblocked</td></tr>
+<tr><td>What <code>LE-40</code> actually was</td><td><a href="01-story-p0-07-03-grant-fails-closed.md">Handover 01</a> §2&ndash;§3, and <a href="../../goals/reports/REPORT-2026-07-29-01.md">REPORT-2026-07-29-01</a>. Not the TOCTOU it was first reported as &mdash; that analysis was re-checked and holds &mdash; but two real defects next to it, one of them reachable</td></tr>
+<tr><td>Concurrency state</td><td><a href="01-story-p0-07-03-grant-fails-closed.md">Handover 01</a> §7. <strong>Two commits landed mid-session</strong> &mdash; <code>dd73d05</code> (<code>EPIC-P2</code>) and <code>e980b9a</code> (<code>45A</code>'s Story) &mdash; and <strong>neither swept this session's rows</strong>: the other sessions content-staged correctly, so the protocol worked in the direction it was written for. The tree cleared underneath this work, which is why the reason not to commit expired mid-session</td></tr>
+<tr><td>Previous date's index</td><td><code>session/hand-2026-07-28/index.html</code></td></tr>
+</tbody>
+</table>
+
+<footer>
+  TinyOS session index · <a href="../README.md">session/README.md</a> for the naming convention · <a href="../../README.md">repository root README</a>
+</footer>
+
+</body>
+</html>

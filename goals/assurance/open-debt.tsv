@@ -10,6 +10,7 @@ STORY-P0-05-03	D14	stand-in-only	Storage and file access is a stand-in: no stora
 STORY-P0-05-04	D25	design	Combined system and footprint is a whole-system composition domain with no composed system behind it	2026-07-28
 STORY-P0-07-01	D12	specified	Local IPC message channel is specified, not built as a measurable subsystem; the Story proves a functional message path, and the 25 guardrails ask about a channel that does not exist	2026-07-28
 STORY-P0-07-02	D13	specified	Shared-memory grant is specified, not built as a measurable subsystem; grant and revoke are functional mechanisms with no measured grant path behind them	2026-07-28
+STORY-P0-07-03	D13	specified	Unchanged from STORY-P0-07-02: the shared-memory grant subsystem is still specified rather than measurable. This Story removes panics from the grant path and measures nothing, so it neither closes nor worsens D13 debt	2026-07-29
 STORY-P0-08-01	D25	design	Combined system and footprint is a whole-system composition domain with no composed system behind it	2026-07-28
 STORY-P1-01-04	D02	unbuilt	Interrupt entry and exit is unbuilt as a measured path; the ratio gate measures dispatch and pool composition, never interrupt entry	2026-07-28
 STORY-P1-02-01	D02	unbuilt	Interrupt entry and exit is unbuilt as a measured path; the fault handlers exist but LE-17 closed on a fault-latency fixture, not on an entry/exit measurement	2026-07-28
