@@ -190,7 +190,7 @@ The requirement:
 
 ### 6.4 Prior art: Windows Terminal, as a reference and as a counter-example
 
-[`WindowsTerminal/`](../../WindowsTerminal) is a submodule on exactly the terms `MsDOS/` is held: **a
+[`WindowsTerminal/`](../../external/WindowsTerminal) is a submodule on exactly the terms `MsDOS/` is held: **a
 reference for behaviour and structure, never code TinyOS builds on.** It is MIT-licensed, as is `MsDOS/`
 and as is TinyOS per [`ADR 0006`](../../docs/adr/0006-mit-licence-confirmed-and-open-core-optionality-dropped.md),
 so the reference carries no licensing obligation. It is also C++, and

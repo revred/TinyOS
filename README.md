@@ -292,7 +292,7 @@ TinyOS borrows MS-DOS 4+'s ergonomics deliberately — not out of nostalgia, but
 - A blue-screen full-view task manager (`TASKMGR.SYS`-style) for real-time task/thread status, deadlines, and bus traffic — evoking the DOS 4 `MEM`/`DOSSHELL` aesthetic.
 - Configuration via plain, human-readable text (`TINYOS.CFG`, `AUTOEXEC.TCB`) — inspectable, diffable, versionable, no hidden registry.
 - No modality trap: the shell never blocks the kernel, and the kernel never depends on the shell being alive.
-- **DOS and POSIX/Linux command compatibility, side by side.** `TINYCMD` accepts both `DIR`/`COPY`/`DEL`-style DOS syntax and `ls`/`cp`/`rm`-style POSIX syntax against one canonical command core, so operators from either world are at home immediately. See [`docs/cli-compatibility-mvp.md`](docs/cli-compatibility-mvp.md) for the MVP verb set and architecture. (The [`MsDOS`](MsDOS) submodule — Microsoft's officially released MS-DOS source — is kept as a reference for historical command behavior, not as code TinyOS builds on.)
+- **DOS and POSIX/Linux command compatibility, side by side.** `TINYCMD` accepts both `DIR`/`COPY`/`DEL`-style DOS syntax and `ls`/`cp`/`rm`-style POSIX syntax against one canonical command core, so operators from either world are at home immediately. See [`docs/cli-compatibility-mvp.md`](docs/cli-compatibility-mvp.md) for the MVP verb set and architecture. (The [`MsDOS`](external/MsDOS) submodule — Microsoft's officially released MS-DOS source — is kept as a reference for historical command behavior, not as code TinyOS builds on.)
 
 ---
 
@@ -304,6 +304,7 @@ TinyOS borrows MS-DOS 4+'s ergonomics deliberately — not out of nostalgia, but
 /docs/                      Architecture decision records, protocol specs, hardware bring-up notes
 /goals/                      Verification & Validation model: Goals → Epics → Features → Stories → Tests → Reports
 /session/                   Dated handover snapshots
+/external/                  External trees under contract (ADR 0008) — reference submodules and the Tauri fork, never build inputs
 /os/                        The OS project — everything below this line compiles
   /Cargo.toml                Workspace manifest
   /targets/                  Custom Rust target-spec JSON files for bare-metal builds (build data, not source)

@@ -6,7 +6,7 @@ Status: **draft / companion to Roadmap Phase 2 (Shell & UX)**
 
 TinyOS's shell, `TINYCMD`, needs to feel native to two very different populations of muscle memory: operators who think in `DIR`/`COPY`/`DEL` and DOS-style `/switches`, and operators who think in `ls`/`cp`/`rm` and POSIX-style `-flags`, pipes, and redirection. Rather than implementing each command twice, `TINYCMD` is built as **one canonical command core with two syntax front-ends** that both compile down to the same verbs — consistent with Design Pillar 2 (UX/UI strictly separated from control): whichever syntax an operator types, the same ACI-gated backend executes it, with the same audit trail.
 
-Reference note: the [`MsDOS`](../MsDOS) submodule (Microsoft's officially released MS-DOS source, `v4.0/src/CMD`) was reviewed for *which* commands existed and their general behavior, not for implementation — TinyOS's shell is an original, from-scratch Rust implementation per [`CODING_STANDARDS.md`](../agent/CODING_STANDARDS.md#language-policy), not a port.
+Reference note: the [`MsDOS`](../external/MsDOS) submodule (Microsoft's officially released MS-DOS source, `v4.0/src/CMD`) was reviewed for *which* commands existed and their general behavior, not for implementation — TinyOS's shell is an original, from-scratch Rust implementation per [`CODING_STANDARDS.md`](../agent/CODING_STANDARDS.md#language-policy), not a port.
 
 ## Architecture
 

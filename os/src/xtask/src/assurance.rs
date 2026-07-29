@@ -133,6 +133,11 @@ pub struct AssuranceSummary {
     /// Number of Feature Stories-table rows cross-checked against the
     /// referenced Story's own `Status:` header (`LE-44`).
     pub feature_story_row_count: usize,
+    /// Number of `Cargo.toml` manifests under `os/` proven not to reach
+    /// outside `os/` by `path =` dependency or workspace membership
+    /// (`ADR 0008`). The gate that keeps `external/` reference trees from
+    /// silently becoming build inputs.
+    pub external_manifest_count: usize,
     /// Number of dashboard Story status badges cross-checked against
     /// `list-status` (`LE-30`).
     ///
@@ -255,6 +260,9 @@ fn walk_spine(
 ) -> Result<(AssuranceSummary, dashboard::DashboardFacts), String> {
     crate::performance_catalogue::check_catalogue(repo_root)
         .map_err(|error| format!("performance catalogue: {error}"))?;
+
+    let external_isolation = crate::external_isolation::check_external_isolation(repo_root)
+        .map_err(|error| format!("external isolation: {error}"))?;
 
     let charter_path = repo_root.join("SECURITY_CHARTER.md");
     let charter_contents = fs::read_to_string(&charter_path)
@@ -470,6 +478,7 @@ fn walk_spine(
             bound_claim_count,
             feature_story_row_count,
             dashboard_badge_count: dashboard_summary.badges_checked,
+            external_manifest_count: external_isolation.manifest_count,
             feature_count: feature_contracts.features.len(),
             story_count: contracts.stories.len(),
             containment_class_count: containment_classes.len(),

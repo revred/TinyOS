@@ -20,7 +20,7 @@ The repository root separates **project documentation and governance** (which a 
 /docs/                     Architecture specs (HBP, WCI, deploy protocol, driver model, inference, workloads, this document)
 /goals/                    Verification & Validation model: Goals → Epics → Features → Stories → Tests → Reports
 /session/                  Dated handover snapshots (session/hand-YYYY-MM-DD/index.html)
-/MsDOS/                    Git submodule — Microsoft's released MS-DOS source, reference-only
+/external/                 External trees under contract (ADR 0008): MsDOS/ and WindowsTerminal/ reference-only, tauri/ fork-under-discipline — submodules, never build inputs
 /README.md
 /SeedMVP.md
 /os/                       The OS project — everything below this line compiles

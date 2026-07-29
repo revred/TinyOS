@@ -11,6 +11,7 @@
 mod assurance;
 mod bound_provenance;
 mod dashboard;
+mod external_isolation;
 mod gate;
 mod governance;
 mod performance_catalogue;
@@ -670,7 +671,7 @@ fn main() -> ExitCode {
             match result {
                 Ok(summary) => {
                     println!(
-                        "assurance-spine-check: {} Features, {} Stories, {} Tests, {} Reports, {} containment classes, {} boundary tests, {} security controls, {} Protection Domain contracts, {} code-admission gates, {} class communication pairs, {} application/platform targets, {} landing zones, {} selected Story/performance contracts, {} selected application/performance contracts, {} loose ends ({} open), {} status headers, {} release gates with evidence, {} open-debt selections, {} platforms ({} qualified), {} bound claims checked, {} Feature/Story status rows agree, {} dashboard badges agree",
+                        "assurance-spine-check: {} Features, {} Stories, {} Tests, {} Reports, {} containment classes, {} boundary tests, {} security controls, {} Protection Domain contracts, {} code-admission gates, {} class communication pairs, {} application/platform targets, {} landing zones, {} selected Story/performance contracts, {} selected application/performance contracts, {} loose ends ({} open), {} status headers, {} release gates with evidence, {} open-debt selections, {} platforms ({} qualified), {} bound claims checked, {} Feature/Story status rows agree, {} dashboard badges agree, {} manifests isolated from external/",
                         summary.feature_count,
                         summary.story_count,
                         summary.test_count,
@@ -694,7 +695,8 @@ fn main() -> ExitCode {
                         summary.qualified_platform_count,
                         summary.bound_claim_count,
                         summary.feature_story_row_count,
-                        summary.dashboard_badge_count
+                        summary.dashboard_badge_count,
+                        summary.external_manifest_count
                     );
                     ExitCode::SUCCESS
                 }

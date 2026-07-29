@@ -69,9 +69,9 @@
 # at which point one shared cache would be safe and fast. That is a code change
 # with a test in front of it, and it is recorded rather than done here.
 #
-# Submodules are deliberately not materialised (`MsDOS/`, `WindowsTerminal/`):
-# none of the three checks reads them, and both are references rather than build
-# inputs.
+# Submodules are deliberately not materialised (everything under `external/`,
+# per ADR 0008): none of the three checks reads them, and nothing there is a
+# build input — `check-external-isolation` inside the spine check enforces that.
 #
 # What this does NOT change: the working tree can still be broken while the index
 # is clean, so `check-assurance-spine` is still worth running by hand before you

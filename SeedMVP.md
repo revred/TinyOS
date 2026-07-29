@@ -626,7 +626,7 @@ Every document in the repository, one line each, for quick navigation from this 
 - [`docs/cli-compatibility-mvp.md`](docs/cli-compatibility-mvp.md) — TINYCMD DOS + POSIX command MVP spec.
 - [`docs/universal-driver-model.md`](docs/universal-driver-model.md) — driver isolation, DCI, class drivers, unified hardware manifest, the Apple Silicon scope caveat.
 - [`docs/mvp-delivery-strategy.md`](docs/mvp-delivery-strategy.md) — the concrete Cargo workspace crate map, custom target specs, `xtask` build/deploy tooling, and the phased walking-skeleton delivery strategy from an empty repository to the CNC flagship milestone.
-- [`MsDOS/`](MsDOS) (submodule) — Microsoft's officially released MS-DOS source, kept as a historical command-behavior reference only, not built upon.
+- [`MsDOS/`](external/MsDOS) (submodule) — Microsoft's officially released MS-DOS source, kept as a historical command-behavior reference only, not built upon.
 
 ---
 
