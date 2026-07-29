@@ -23,16 +23,65 @@
 #
 # If a check fails, fix the tree. Do not reach for --no-verify: the one time
 # this repository shipped past this gate, it shipped a broken spine.
+#
+# ---------------------------------------------------------------------------
+# It validates the INDEX, not the working tree (2026-07-29).
+# ---------------------------------------------------------------------------
+#
+# Until this change the checks ran against the working tree, so the hook
+# validated *everyone's* uncommitted work: a second session with a half-finished
+# Story made your unrelated commit fail, for a reason you could not diagnose
+# from your own changes and were forbidden by rule 5 from repairing.
+#
+# That was not theoretical. On 2026-07-28 and -29 it cost two sessions a commit
+# each. Both had produced complete, green, tested work; both correctly refused to
+# sweep the other's edits; both left it stranded in the tree for a later session
+# to recover and review. One of them had to reconstruct three shared files in a
+# throwaway worktree to land at all, and a third session hit the same wall four
+# separate times in one afternoon.
+#
+# The index is what `git commit` is about to write, and it is what CI will see.
+# So that is what gets checked: the staged content is materialised into a
+# throwaway directory and the gates run there. **Two sessions can now commit
+# independently, and a failure here is always about your own change.**
+#
+# `CARGO_TARGET_DIR` points back at the real target directory so the dependency
+# build is reused — the whole pass is a few seconds warm, which is the difference
+# between a hook people keep and a hook people bypass. Cargo takes its own lock
+# on that directory, so two simultaneous commits serialise for the length of a
+# build rather than interfering.
+#
+# Submodules are deliberately not materialised (`MsDOS/`, `WindowsTerminal/`):
+# none of the three checks reads them, and both are references rather than build
+# inputs.
+#
+# What this does NOT change: the working tree can still be broken while the index
+# is clean, so `check-assurance-spine` is still worth running by hand before you
+# stage. This hook now answers a narrower and more useful question — *is what I
+# am committing valid?* — rather than *is this machine's whole tree valid?*
 
 set -e
 
 repo_root=$(git rev-parse --show-toplevel)
-cd "$repo_root/os"
 
-echo "pre-commit: checking the assurance spine, the performance catalogue and crate sizes..."
+staged=$(mktemp -d 2>/dev/null || mktemp -d -t tinyos-precommit)
+# Clean up on success, failure or interrupt: a failed gate must not leave a copy
+# of the tree behind on someone's disk.
+trap 'rm -rf "$staged"' EXIT INT TERM
+
+# `-a` writes every file in the index, which is exactly the staged content —
+# additions included, unstaged edits excluded, deletions honoured.
+git checkout-index -a --prefix="$staged/"
+
+CARGO_TARGET_DIR="$repo_root/os/target"
+export CARGO_TARGET_DIR
+
+cd "$staged/os"
+
+echo "pre-commit: checking the staged tree — assurance spine, performance catalogue, crate sizes..."
 
 cargo run -q -p xtask -- check-assurance-spine
 cargo run -q -p xtask -- check-performance-catalogue
 cargo run -q -p xtask -- check-crate-sizes
 
-echo "pre-commit: ok"
+echo "pre-commit: ok (validated the index, not the working tree)"
