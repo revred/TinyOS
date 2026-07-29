@@ -472,6 +472,17 @@ jobs:
             exit 1
           fi
 
+      # TEST-P2-07-01-A: the owner's MS-DOS parity harness — a .TCB batch runs
+      # through TINYCMD's DOS front-end against the labelled RAM volume on the
+      # real target, and the serial transcript must byte-match the committed
+      # golden (two signals: in-guest assertions gate isa-debug-exit, the
+      # transcript gates here; either alone is not a pass). The plain fixture
+      # boot below keeps the fixture-coverage test honest about what CI runs.
+      - name: TEST-P2-07-01-A — the parity .TCB boots and its in-guest assertions hold
+        run: cargo run -p xtask -- qemu-x86_64 --fixture=shell-batch
+      - name: TEST-P2-07-01-A — TINYCMD transcript parity vs the committed golden
+        run: cargo run -p xtask -- check-shell-parity
+
       # STORY-P1-01-02's gate, re-based onto same-run ratios by
       # STORY-P1-01-04. Unlike the two steps above, this one *does* assert
       # about the numbers — but only the stable statistics (min, p50), only

@@ -24,3 +24,9 @@ STORY-P9-03-01	D25	design	Combined system and footprint is a whole-system compos
 STORY-P9-04-01	D25	design	Combined system and footprint is a whole-system composition domain with no composed system behind it	2026-07-28
 STORY-P9-05-01	D25	design	Combined system and footprint is a whole-system composition domain with no composed system behind it	2026-07-28
 STORY-P9-07-01	D25	design	Combined system and footprint is a whole-system composition domain with no composed system behind it	2026-07-28
+STORY-P2-01-01	D23	design	Shell config and audit query has no measurable shell subsystem behind it yet; this Story creates the subsystem and the guardrail numbers follow once the fixture is measured	2026-07-30
+STORY-P2-02-01	D14	stand-in-only	Storage and file access is backed by the RAM stand-in this Story builds; block-device storage is Phase 3 and no storage guardrail number is claimable from a RAM volume	2026-07-30
+STORY-P2-02-01	D23	design	Same design-readiness debt as STORY-P2-01-01 for the shell-facing half of the volume verbs	2026-07-30
+STORY-P2-04-01	D23	design	The DOS front-end executes through the same unmeasured shell subsystem; parser throughput is TG-P07's future measurement	2026-07-30
+STORY-P2-07-01	D14	stand-in-only	The parity fixture exercises file verbs against the RAM stand-in only	2026-07-30
+STORY-P2-07-01	D23	design	The batch fixture is the natural first D23 measurement host but no number is claimed until the measurement harness covers it	2026-07-30

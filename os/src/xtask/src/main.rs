@@ -16,6 +16,7 @@ mod gate;
 mod governance;
 mod performance_catalogue;
 mod probe_pe;
+mod shell_parity;
 mod spine_files;
 mod timing;
 mod txe;
@@ -28,6 +29,7 @@ use std::process::{Command, ExitCode};
 /// under test failed" from "the harness couldn't even run the test" — the
 /// distinction `STORY-P0-01-03`'s acceptance criteria require.
 #[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XtaskExit {
     KernelBootSucceeded = 0,
     KernelBootFailed = 1,
@@ -424,6 +426,15 @@ const FIXTURES: &[Fixture] = &[
         owning_test: "TEST-P1-06-01-A",
         summary: "A deliberate overrun trips the policy before any late command is emitted",
     },
+    Fixture {
+        name: "shell-batch",
+        package: "shell",
+        binary: "shell-batch-fixture",
+        feature: None,
+        expects_failure: false,
+        owning_test: "TEST-P2-07-01-A",
+        summary: "TINYCMD runs the parity .TCB against the labelled RAM volume over serial",
+    },
 ];
 
 /// Resolves a `--fixture=` value, treating absence as the default boot.
@@ -454,6 +465,10 @@ const SUBCOMMANDS: &[Subcommand] = &[
     Subcommand {
         name: "check-assurance-spine",
         summary: "Validate contracts, loose ends and the Story/Feature join",
+    },
+    Subcommand {
+        name: "check-shell-parity",
+        summary: "Boot the shell-batch fixture and byte-compare its transcript to the golden",
     },
     Subcommand {
         name: "emit-dashboard",
@@ -577,6 +592,48 @@ fn main() -> ExitCode {
                 Err(message) => {
                     eprintln!("xtask: {message}");
                     ExitCode::from(XtaskExit::HarnessError as u8)
+                }
+            }
+        }
+        // `TEST-P2-07-01-A`: two independent signals, exactly `timing.rs`'s
+        // discipline — the fixture's own isa-debug-exit verdict (its in-guest
+        // assertions) AND the byte-compared transcript must both hold. A
+        // matching transcript with a failing exit, or vice versa, is a harness
+        // error, never a pass.
+        "check-shell-parity" => {
+            let result = os_root().and_then(|root| {
+                let capture = env::temp_dir().join("shell-parity-capture.txt");
+                let verdict = qemu_x86_64(
+                    "shell",
+                    "shell-batch-fixture",
+                    None,
+                    Some(&capture),
+                    Profile::Dev,
+                )?;
+                if verdict != XtaskExit::KernelBootSucceeded {
+                    return Err(format!(
+                        "shell-batch fixture reported in-guest assertion failure (exit {})",
+                        verdict as u8
+                    ));
+                }
+                let actual = std::fs::read_to_string(&capture)
+                    .map_err(|e| format!("cannot read serial capture: {e}"))?;
+                let golden_path =
+                    root.join("src").join("shell").join("golden").join("parity-smoke.golden.txt");
+                let golden = std::fs::read_to_string(&golden_path)
+                    .map_err(|e| format!("cannot read golden transcript: {e}"))?;
+                shell_parity::compare_transcript(&actual, &golden)
+            });
+            match result {
+                Ok(lines) => {
+                    println!(
+                        "shell-parity: transcript matches golden ({lines} lines) and the fixture's in-guest assertions passed"
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(message) => {
+                    eprintln!("xtask: shell parity failed: {message}");
+                    ExitCode::FAILURE
                 }
             }
         }

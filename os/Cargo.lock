@@ -49,5 +49,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "shell"
+version = "0.1.0"
+dependencies = [
+ "hal-x86_64",
+]
+
+[[package]]
 name = "xtask"
 version = "0.1.0"

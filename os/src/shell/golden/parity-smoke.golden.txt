@@ -1,0 +1,61 @@
+
+TinyOS Version 0.2.0 (Tier 0, x86_64)
+
+
+ Volume in drive A is TINYOS
+ Volume Serial Number is 1234-ABCD
+ECHO is off
+Hello from TINYCMD
+FLAVOR=DOS
+PATH=\;
+A:\DOCS
+        1 File(s) copied
+ A       [origin=seeded trust=operator] NOTES.TXT
+ A       [origin=seeded trust=operator] KEEP.TXT
+
+ Volume in drive A is TINYOS
+ Volume Serial Number is 1234-ABCD
+
+ Directory of A:\
+
+DOCS          <DIR>          07-30-26  12:00p
+README.TXT            99 07-30-26  12:00p
+LIST.TXT              25 07-30-26  12:00p
+       2 File(s)      10752 bytes free
+TinyOS carries the soul of MS-DOS
+into a real-time, labelled world.
+TinyOS is tested, not asserted.
+---------- README.TXT: 2
+---------- README.TXT
+[1]TinyOS carries the soul of MS-DOS
+delta
+charlie
+bravo
+alpha
+Directory PATH listing for Volume TINYOS
+Volume Serial Number is 1234-ABCD
+A:\
+\---DOCS
+|   KEEP.TXT
+  Address     Name          Size       Type
+  -------     ----          ----       ----
+  000000      VOLUME         12288     Static Pool
+
+     12288 bytes total memory
+     10752 bytes available
+  TASK          PRI  STATE
+  RT-CTRL         0  ready
+  SPOOR           3  waiting
+  IDLE            9  ready
+Access denied: verb ClearScreen is not granted to session PARITY [audited]
+
+ Volume in drive A is TINYOS
+ Volume Serial Number is 1234-ABCD
+
+ Directory of A:\
+
+README.TXT            99 07-30-26  12:00p
+LIST.TXT              25 07-30-26  12:00p
+       2 File(s)      11264 bytes free
+Bad command or file name
+DOS batch complete
