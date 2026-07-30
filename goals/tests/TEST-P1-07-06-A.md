@@ -27,7 +27,7 @@ It also carries the measurement change the coarse-counter problem forces, which 
 ### 1. The envelope parses with **no change to the parser**
 
 **Given** `fixture_measure` running on the board,
-**then** it emits a `TINYOS-MEAS/1` envelope that the existing `xtask` parser reads with **zero modifications**.
+**then** it emits a `TINYOS-MEAS/2` envelope that the existing `xtask` parser reads with **zero modifications**.
 
 **And that clause is the point of the whole Feature's arch-neutrality claim.** `STORY-P1-01-03` demonstrated the seam on the host with an AArch64 `CycleSource` and no consumer change; this is the first time it meets a real target. If the parser must change, that is a finding worth more than a clean run — it means the seam was x86-shaped all along, and it is recorded as such rather than quietly patched.
 

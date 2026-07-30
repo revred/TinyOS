@@ -102,10 +102,13 @@ The committed second board is the **Jetson Orin Nano Super** (`jetson-orin-nano-
 in the platform register — the current-generation successor to the original Jetson Nano;
 same unified-memory architecture, which is what matters here). The pipeline below is how
 any device resource reaches an application; the GPU is the worked example. States:
-architecture **designed** (`docs/universal-driver-model.md`,
-`docs/inference-architecture.md`); implementation **future** (Phase 6 for inference);
-the governing gate pattern (ACI, one gate for every caller) is **live** today in
-host-side form — it is the same pattern the V1 console's signed manifest enforces.
+architecture **future** — `docs/universal-driver-model.md` and
+`docs/inference-architecture.md` are **draft specs with open questions recorded in
+their own closing sections**; no DCI/UDI runtime, GPU driver or UMM exists, and no
+committed ADR has promoted either draft. The governing gate pattern (ACI, one gate for
+every caller) is **live** today in host-side form — it is the same pattern the V1
+console's signed manifest enforces — and it is the only part of this stack an
+application can touch right now.
 
 ### 2.1 The layer stack (bottom-up)
 
@@ -227,7 +230,7 @@ of z-order), so the unattended run holds no always-on-top, steals no focus, and 
 fully occluded (`51e635c`). Rendering and verification are deliberately separable
 concerns.
 
-### 3.3 The destination (**designed shape, honestly costed**): the same UI over a TinyOS renderer
+### 3.3 The destination (**future** — shape identified by ADR 0007's review, blocked on `EPIC-H2`'s application ABI, display/input services and a renderer): the same UI over a TinyOS renderer
 
 Tauri's runtime seam makes the port well-shaped: `tauri-runtime` is a trait set
 (`Runtime`, `WebviewDispatch`, `WindowDispatch`…) with `wry`/`tao` as the sole current
@@ -260,5 +263,6 @@ RT deadline late.
 | Tauri runtime seam and its true cost | `docs/tauri-internals-review.md`, `ADR 0007/0008/0009` |
 
 **Non-claims, restated once:** nothing in this paper is `PD-*`/`TG-P*`/timing evidence;
-no number here is a bound; the Jetson and Pi 5 sections describe committed designs and
-registered-but-unqualified platforms, not shipped capability.
+no number here is a bound; the Pi 5 section describes committed, partially host-tested
+design on a registered-but-unqualified platform; the Jetson/GPU section describes
+**draft specs with open questions**, not committed designs and not shipped capability.
