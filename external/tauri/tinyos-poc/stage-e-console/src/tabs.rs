@@ -111,6 +111,8 @@ pub enum TabError {
     NoSuchTab,
     /// The verb needs a DOS session but the tab is not one (or vice versa).
     WrongKind,
+    /// The named enumerated slot already hosts a tab.
+    SlotTaken,
 }
 
 impl std::fmt::Display for TabError {
@@ -119,6 +121,7 @@ impl std::fmt::Display for TabError {
             TabError::CapacityExhausted => "tab capacity exhausted: all slots are in use",
             TabError::NoSuchTab => "no tab carries this label",
             TabError::WrongKind => "the verb does not match this tab's session kind",
+            TabError::SlotTaken => "the named tab slot is already in use",
         };
         f.write_str(text)
     }
@@ -170,6 +173,12 @@ impl Tab {
     /// The tab's label.
     pub fn label(&self) -> &'static str {
         self.label
+    }
+
+    /// The session's audited denial count (0 for the parity tab, which owns no
+    /// interactive world). Feeds the host-painted V1 system line.
+    pub fn denials(&self) -> u32 {
+        self.dos.as_ref().map(|d| d.world.denials).unwrap_or(0)
     }
 }
 
@@ -234,14 +243,30 @@ impl TabRegistry {
         Self::default()
     }
 
-    /// Open a tab of `kind`. The new tab takes the next enumerated label, owns a fresh
-    /// session (DOS tabs), and receives focus. Refuses beyond [`MAX_TABS`].
+    /// Open a tab of `kind` in the lowest free enumerated slot. The new tab owns a
+    /// fresh session (DOS tabs) and receives focus. Refuses beyond [`MAX_TABS`].
     pub fn open(&mut self, kind: TabKind) -> Result<TabInfo, TabError> {
-        let index = self.tabs.len();
-        if index >= MAX_TABS {
+        let slot = (1..=MAX_TABS)
+            .find(|s| self.get(TAB_LABELS[s - 1]).is_none())
+            .ok_or(TabError::CapacityExhausted)?;
+        self.open_at(kind, slot)
+    }
+
+    /// Open a tab of `kind` in the named 1-based enumerated slot, so the chrome's
+    /// displayed tx-name and the host identity are one name (V1 Part B: never a
+    /// second id). A slot beyond the enumeration is a capacity refusal; a taken slot
+    /// is [`TabError::SlotTaken`]; slot 0 names no tab.
+    pub fn open_at(&mut self, kind: TabKind, slot: usize) -> Result<TabInfo, TabError> {
+        if slot == 0 {
+            return Err(TabError::NoSuchTab);
+        }
+        if slot > MAX_TABS {
             return Err(TabError::CapacityExhausted);
         }
-        let (label, session) = (TAB_LABELS[index], SESSION_IDS[index]);
+        let (label, session) = (TAB_LABELS[slot - 1], SESSION_IDS[slot - 1]);
+        if self.get(label).is_some() {
+            return Err(TabError::SlotTaken);
+        }
         let dos = match kind {
             TabKind::Dos => {
                 Some(DosSession { world: seeded_world(session), transcript: String::new() })
@@ -249,8 +274,8 @@ impl TabRegistry {
             TabKind::Parity => None,
         };
         self.tabs.push(Tab { label, session, kind, dos });
-        self.focused = Some(index);
-        Ok(self.tabs[index].info())
+        self.focused = Some(self.tabs.len() - 1);
+        Ok(self.tabs[self.tabs.len() - 1].info())
     }
 
     /// Give `label` the focus.
@@ -347,6 +372,28 @@ mod tests {
         assert_eq!((c.label.as_str(), c.kind), ("tab-3", TabKind::Parity));
         assert_eq!(reg.focused().unwrap().label(), "tab-3");
         assert_eq!(reg.infos().len(), 3);
+    }
+
+    /// T8 (V1.1, Part B "no second id") — the chrome may open a tab at a named
+    /// enumerated slot so the display tx-name and the host identity are one name:
+    /// `open_at(kind, 4)` yields `tab-4`/`TAB-4` even when slots 2 and 3 are unused
+    /// (display-model tabs hold those tx names with no host session). A taken slot
+    /// is a typed refusal; plain `open` still takes the lowest free slot.
+    #[test]
+    fn t8_open_at_names_the_enumerated_slot() {
+        let mut reg = TabRegistry::new();
+        let a = reg.open(TabKind::Dos).unwrap();
+        assert_eq!(a.label.as_str(), "tab-1");
+        let b = reg.open_at(TabKind::Dos, 4).unwrap();
+        assert_eq!((b.label.as_str(), b.session.as_str()), ("tab-4", "TAB-4"));
+        assert_eq!(reg.focused().unwrap().label(), "tab-4");
+        assert_eq!(reg.open_at(TabKind::Dos, 4), Err(TabError::SlotTaken));
+        assert_eq!(reg.open_at(TabKind::Dos, 0), Err(TabError::NoSuchTab));
+        assert_eq!(reg.open_at(TabKind::Dos, 7), Err(TabError::CapacityExhausted));
+        // The next free slot for a plain open is 2 — holes are filled, never skipped.
+        let c = reg.open(TabKind::Dos).unwrap();
+        assert_eq!(c.label.as_str(), "tab-2");
+        assert!(reg.run_line("tab-4", "DIR").is_ok());
     }
 
     /// T2 — the per-tab session boundary (§6.1 at host level): `SET` in tab 1 is

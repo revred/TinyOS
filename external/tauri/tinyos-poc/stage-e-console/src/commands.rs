@@ -74,11 +74,12 @@ impl ConsoleState {
         &self.denials
     }
 
-    /// Compose the reserved-region line: focused-tab identity and flavour from the
-    /// registry, the parity verdict, and the denial count. Painted only by the Rust
-    /// side; no tab content string feeds it.
+    /// Compose the V1 system line (work/UX-V1 V1-STRATEGY Part D): focused tx-name and
+    /// flavour, tab count, parity verdict, and the focused session's audited denial
+    /// count. Painted only by the Rust side; no tab content string feeds it. The tx
+    /// display name derives from the enumerated label (`tab-N` → `txNN`) — the runtime
+    /// label stays the identity, the tx name is its Part B rendering, never a second id.
     pub fn reserved_text(&self) -> String {
-        let base = self.tabs.lock().expect("tab registry").reserved_line();
         let suite = self.suite.lock().expect("suite state");
         let parity = match (&suite.overall, suite.started) {
             (Some(Verdict::Pass), _) => "PASS",
@@ -86,8 +87,26 @@ impl ConsoleState {
             (None, true) => "running\u{2026}",
             (None, false) => "not run",
         };
-        let denials = self.denials.lock().expect("denial log").len();
-        format!("{base} \u{2014} parity suite: {parity} \u{2014} authority denials: {denials}")
+        let tabs = self.tabs.lock().expect("tab registry");
+        match tabs.focused() {
+            Some(tab) => {
+                let ordinal = tab.label().rsplit('-').next().and_then(|n| n.parse::<u32>().ok());
+                let tx = match ordinal {
+                    Some(n) => format!("tx{n:02}"),
+                    None => tab.label().to_string(),
+                };
+                let kind = match tab.kind() {
+                    TabKind::Dos => "MS-DOS",
+                    TabKind::Parity => "PARITY",
+                };
+                format!(
+                    "{tx} {kind} \u{2014} {} tab(s) \u{2014} parity: {parity} \u{2014} authority denials: {}",
+                    tabs.infos().len(),
+                    tab.denials()
+                )
+            }
+            None => "Ti-OS \u{2014} no session focused".into(),
+        }
     }
 }
 
@@ -218,14 +237,25 @@ pub fn terminate(state: State<'_, ConsoleState>) -> Result<String, String> {
 
 /// Open a tab (`"dos"` or `"parity"`). Chrome verb: tabs are opened by the tab bar,
 /// never by other tabs. The refusal beyond the enumerated capacity is typed and visible.
+/// `slot` (1-based, optional) opens the named enumerated slot so the chrome's tx-name
+/// and the host identity are one name (V1 Part B); omitted, the lowest free slot.
 #[tauri::command]
-pub fn open_tab(state: State<'_, ConsoleState>, kind: String) -> Result<TabInfo, String> {
+pub fn open_tab(
+    state: State<'_, ConsoleState>,
+    kind: String,
+    slot: Option<usize>,
+) -> Result<TabInfo, String> {
     let kind = match kind.as_str() {
         "dos" => TabKind::Dos,
         "parity" => TabKind::Parity,
         other => return Err(format!("unknown tab kind '{other}': expected 'dos' or 'parity'")),
     };
-    state.tabs.lock().expect("tab registry").open(kind).map_err(|e| e.to_string())
+    let mut tabs = state.tabs.lock().expect("tab registry");
+    match slot {
+        Some(slot) => tabs.open_at(kind, slot),
+        None => tabs.open(kind),
+    }
+    .map_err(|e| e.to_string())
 }
 
 /// Give a tab the focus (chrome verb).
@@ -318,6 +348,49 @@ pub fn run_parity<R: tauri::Runtime>(
     }
     parity_suite::spawn_suite(state.os_dir.clone(), state.suite.clone());
     Ok("parity suite started: cargo test -p shell --lib, then check-shell-parity".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    fn state() -> ConsoleState {
+        ConsoleState::new(
+            "C:/nonexistent-os-dir".into(),
+            std::env::temp_dir().join("stage-e-reserved-tests"),
+            Arc::new(Mutex::new(Vec::new())),
+            vec!["open_tab".into()],
+            vec!["run_line".into()],
+        )
+    }
+
+    /// V1 system line (work/UX-V1 V1-STRATEGY Part D/H item 4): tx-name + flavour,
+    /// tab count, parity state, and the focused session's audited denial count. The
+    /// layout token is chrome state the host cannot know and is honestly absent —
+    /// recorded as a Part A4.1 divergence note in the 06A close-out.
+    #[test]
+    fn reserved_text_is_the_v1_system_line() {
+        let state = state();
+        assert_eq!(state.reserved_text(), "Ti-OS \u{2014} no session focused");
+        state.tabs().lock().unwrap().open(TabKind::Dos).unwrap();
+        assert_eq!(
+            state.reserved_text(),
+            "tx01 MS-DOS \u{2014} 1 tab(s) \u{2014} parity: not run \u{2014} authority denials: 0"
+        );
+        // A real audited denial in the focused session is counted on the line.
+        state.tabs().lock().unwrap().run_line("tab-1", "TASKKILL RT-CTRL").unwrap();
+        assert_eq!(
+            state.reserved_text(),
+            "tx01 MS-DOS \u{2014} 1 tab(s) \u{2014} parity: not run \u{2014} authority denials: 1"
+        );
+        // The parity tab takes focus as tx02 and owns no DOS session (0 denials).
+        state.tabs().lock().unwrap().open(TabKind::Parity).unwrap();
+        assert_eq!(
+            state.reserved_text(),
+            "tx02 PARITY \u{2014} 2 tab(s) \u{2014} parity: not run \u{2014} authority denials: 0"
+        );
+    }
 }
 
 /// The invoke handler with exactly the manifest's verbs registered.

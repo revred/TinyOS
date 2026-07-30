@@ -1,19 +1,23 @@
-//! 17G — the windowed multi-tab operator console.
+//! V1 — the Ti64 operator console (06A / work/UX-V1), windowed.
 //!
 //! Composition, and nothing else: the signed manifest (embedded at rest, verified before
 //! anything runs), the `ConsoleAuthority` resolver installed over the fork's Stage C seam,
-//! the verbs from `stage-e-console::commands`, and **one window, sibling webviews** — the
-//! `a3` shape made visible:
+//! the verbs from `stage-e-console::commands`, and **one window, sibling webviews**:
 //!
-//! - `reserved` — the host-owned reserved region (top strip). Its label is enumerated
-//!   nowhere in the manifest, so it holds no verbs (e8/R6); it is repainted exclusively
-//!   by [`reconcile`] on the Rust side, and no tab content can reach it.
-//! - `console` — the tab-bar chrome. Holds the chrome verbs only.
-//! - `tab-1`…`tab-6` — tab content webviews, siblings under the same window, created by
-//!   the reconciler from registry state. Each holds the tab verbs under its own label.
+//! - `console` — the V1 chrome (`ui/index.html`, the work/UX-V1 reference build): every
+//!   visible pixel except the system line. Holds the chrome verbs only.
+//! - `reserved` — the host-owned system line, the LAST line of the window (SPEC §10.1).
+//!   Its label is enumerated nowhere in the manifest, so it holds no verbs (e8/R6); it
+//!   is repainted exclusively by [`reconcile`] on the Rust side, and no tab content can
+//!   reach it.
+//! - `tab-1`…`tab-6` — per-tab identity satellites, siblings created by the reconciler
+//!   from registry state. Each holds the tab verbs under its own runtime label and
+//!   relays snapshots to the chrome over the same-origin UI bus; no capability crosses
+//!   that bus.
 //!
-//! `STAGE_E_SMOKE=1` runs the 17G acceptance sequence unattended — tabs opened, `DIR`
-//! run, isolation shown, `SAMPLE.TCB` run, the parity suite run from its tab — writing
+//! `STAGE_E_SMOKE=1` runs the V1 acceptance sequence unattended, driving the chrome's
+//! keyboard grammar via `window.smokeKey` (`STORY-UX-04`) — boot pre-run + audited
+//! denial, Ctrl+T, typed isolation, `SAMPLE.TCB`, F8 parity, resolver denials — writing
 //! PNG screenshots and the evidence JSON, then exits with the aggregate verdict.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -32,12 +36,20 @@ use tauri::{LogicalPosition, LogicalSize, Manager, WebviewUrl};
 const MANIFEST_JSON: &str = include_str!("../../stage-e-console/manifest/console-manifest.json");
 const PUBKEY_HEX: &str = include_str!("../../stage-e-console/manifest/console-pubkey.hex");
 
-/// Window geometry — fixed for the PoC (the window is non-resizable; a resize-following
-/// layout is presentation work the demo does not need).
-const WIN_W: f64 = 1280.0;
-const WIN_H: f64 = 800.0;
-const RESERVED_H: f64 = 44.0;
-const CHROME_H: f64 = 96.0;
+/// Window geometry — the V1 acceptance boot is 1440×860 (V1-STRATEGY Part H). Still
+/// non-resizable: `STORY-UX-01` (V1.3) removes these constants and derives regions from
+/// `WindowEvent::Resized`.
+const WIN_W: f64 = 1440.0;
+const WIN_H: f64 = 860.0;
+/// The host-owned system line: the LAST line of the window (SPEC §10.1), 28 px tall,
+/// overlaying the chrome's `.reserved` status-text segment — after the Ti64 pill
+/// (2 + 92 + 6 margin + 14 gap = x 114) and clear of the budget readout and layout
+/// picker on the right. Its label is enumerated in no grant table; `reconcile` is its
+/// only writer.
+const RESERVED_X: f64 = 114.0;
+const RESERVED_Y: f64 = WIN_H - 28.0;
+const RESERVED_W: f64 = 820.0;
+const RESERVED_H: f64 = 28.0;
 
 /// The TinyOS `os/` directory: `TINYOS_OS_DIR`, or found by walking up from this crate to
 /// the repository root — the tree lives in-repo at `external/tauri/tinyos-poc/`, so the
@@ -54,15 +66,15 @@ fn os_dir() -> PathBuf {
         .expect("no TinyOS os/ directory above this crate and TINYOS_OS_DIR is unset")
 }
 
-/// One reconciler tick, on the main thread: create missing tab webviews as siblings,
-/// show the focused tab and hide the rest, and repaint the host-owned reserved region.
+/// One reconciler tick, on the main thread: create missing tab identity satellites as
+/// siblings, and repaint the host-owned system line. The V1 chrome (`index.html`)
+/// renders every visible pixel except that line; a tab webview exists per open tab
+/// because only its runtime label may invoke the tab verbs — it is a 1×1 identity
+/// satellite, not a visual region, until `STORY-UX-02` (V1.3) adds real suspension.
 /// The only writer the reserved webview ever has is the `eval` below.
 fn reconcile(app: &tauri::AppHandle) {
     let state = app.state::<ConsoleState>();
-    let (infos, focused) = {
-        let tabs = state.tabs().lock().expect("tab registry");
-        (tabs.infos(), tabs.focused().map(|t| t.label().to_string()))
-    };
+    let infos = state.tabs().lock().expect("tab registry").infos();
     if let Some(window) = app.get_window("host") {
         for info in &infos {
             if app.get_webview(&info.label).is_none() {
@@ -71,16 +83,14 @@ fn reconcile(app: &tauri::AppHandle) {
                         info.label.clone(),
                         WebviewUrl::App("tab.html".into()),
                     ),
-                    LogicalPosition::new(0.0, RESERVED_H + CHROME_H),
-                    LogicalSize::new(WIN_W, WIN_H - RESERVED_H - CHROME_H),
+                    LogicalPosition::new(WIN_W - 1.0, 0.0),
+                    LogicalSize::new(1.0, 1.0),
                 );
             }
+            // Always shown: a hidden webview throttles its timers, and the satellite
+            // must keep polling read_tab under its own identity (Part F seam 3).
             if let Some(webview) = app.get_webview(&info.label) {
-                let _ = if focused.as_deref() == Some(info.label.as_str()) {
-                    webview.show()
-                } else {
-                    webview.hide()
-                };
+                let _ = webview.show();
             }
         }
     }
@@ -141,9 +151,10 @@ fn wait_for(
     }
 }
 
-/// The unattended 17G acceptance sequence. Every step is driven through a page (`eval`
-/// of a smoke hook), so each action travels the real UI path from the correct identity.
-/// Returns the evidence JSON and the process exit code.
+/// The unattended V1 acceptance sequence (`STORY-UX-04`): the run drives the chrome's
+/// keyboard grammar through `window.smokeKey`, so every step travels the real UI path —
+/// chrome keystrokes → UI bus → the tab's own identity satellite → `run_line`. Returns
+/// the evidence JSON and the process exit code.
 fn smoke_sequence(
     app: &tauri::AppHandle,
     window: &tauri::Window<tauri::Wry>,
@@ -151,113 +162,108 @@ fn smoke_sequence(
 ) -> (serde_json::Value, i32) {
     let mut shots: Vec<Option<String>> = Vec::new();
     let mut shot = |name: &str| {
-        // Give the reconciler and the pages two ticks to paint before capturing.
+        // Give the reconciler and the pages two ticks to paint before capturing, and
+        // re-assert the window first — a minimized window captures as uniform black.
+        let _ = window.unminimize();
+        let _ = window.set_focus();
         std::thread::sleep(Duration::from_millis(1200));
         shots.push(screenshot(window, shots_dir, name).map(|p| format!("{name}.png: {p}")));
     };
-
-    std::thread::sleep(Duration::from_secs(3)); // let the pages boot
-    let _ = window.set_focus();
-    shot("01-boot");
-
-    // Tabs: two DOS sessions and the parity tab, opened by the chrome. The sequence is
-    // label-independent from here: it reads the registry for the first two DOS tabs and
-    // the parity tab, so a stray extra tab (this runs on a live desktop; an errant
-    // click on "+ DOS tab" is possible) degrades nothing — the mandate says ≥3 tabs.
-    eval_in(app, "console", "window.smokeOpenTabs()");
-    let three_tabs = wait_for(app, Duration::from_secs(20), |state| {
-        let infos = state.tabs().lock().expect("registry").infos();
-        infos.iter().filter(|i| i.kind == TabKind::Dos).count() >= 2
-            && infos.iter().any(|i| i.kind == TabKind::Parity)
-    });
-    shot("02-three-tabs");
-
-    let (dos_a, dos_b, parity_tab) = {
-        let state = app.state::<ConsoleState>();
-        let infos = state.tabs().lock().expect("registry").infos();
-        let mut dos = infos.iter().filter(|i| i.kind == TabKind::Dos).map(|i| i.label.clone());
-        (
-            dos.next().unwrap_or_else(|| "tab-1".into()),
-            dos.next().unwrap_or_else(|| "tab-2".into()),
-            infos
-                .iter()
-                .find(|i| i.kind == TabKind::Parity)
-                .map(|i| i.label.clone())
-                .unwrap_or_else(|| "tab-3".into()),
-        )
+    let key = |name: &str| {
+        eval_in(app, "console", &format!("window.smokeKey('{name}')"));
+        std::thread::sleep(Duration::from_millis(300));
     };
 
-    // A live DIR in the first DOS tab.
-    eval_in(app, "console", &format!("window.smokeFocus('{dos_a}')"));
-    eval_in(app, &dos_a, "window.smokeRunLine('DIR')");
-    let dir_ran = wait_for(app, Duration::from_secs(20), |state| {
+    std::thread::sleep(Duration::from_secs(4)); // chrome boot: tx01 + pre-run sequence
+    let _ = window.set_focus();
+
+    // Boot: the chrome opened tx01 (tab-1) and pre-ran VER · DIR · SET · TASKMGR ·
+    // TASKKILL RT-CTRL · TYPE README.TXT — the transcript must show the real banner
+    // AND the audited TASKKILL denial (deep red on screen, counted on the system line).
+    let boot_ran = wait_for(app, Duration::from_secs(30), |state| {
+        state.tabs().lock().expect("registry").get("tab-1").is_some_and(|t| {
+            t.transcript().contains("TinyOS Version")
+                && t.transcript().contains("Access denied")
+                && t.transcript().contains("Directory of A:\\")
+        })
+    });
+    shot("01-boot-cockpit");
+
+    // Ctrl+T duplicates the focused kind: a second DOS session. The chrome names it
+    // tx04 (tx02/tx03 are the rt/agent display tabs) and opens host slot 4 to match.
+    key("Ctrl+T");
+    let second_dos = wait_for(app, Duration::from_secs(20), |state| {
+        let infos = state.tabs().lock().expect("registry").infos();
+        infos.iter().filter(|i| i.kind == TabKind::Dos).count() >= 2
+    });
+    shot("02-second-dos-via-ctrl-t");
+
+    // Isolation, typed at the prompt: SET in the new tab (tab-4), the same variable
+    // undefined in tx01 (tab-1) — the per-tab World boundary, visibly.
+    key("type-line:SET GREET=HELLO-17G");
+    key("Enter");
+    key("type-line:SET GREET");
+    key("Enter");
+    let set_ran = wait_for(app, Duration::from_secs(20), |state| {
         state
             .tabs()
             .lock()
             .expect("registry")
-            .get(&dos_a)
-            .is_some_and(|t| t.transcript().contains("Directory of A:\\"))
+            .get("tab-4")
+            .is_some_and(|t| t.transcript().contains("GREET=HELLO-17G"))
     });
-    shot("03-dir-in-first-dos-tab");
-
-    // The SPOOR verb (`LE-56`), honestly host-side: the banner names the
-    // host-side journal and the empty answer states there are no kernel spoors
-    // here — the kernel-journaled rows live in the parity lane's transcript.
-    eval_in(app, &dos_a, "window.smokeRunLine('SPOOR')");
-    let spoor_ran = wait_for(app, Duration::from_secs(20), |state| {
-        state
-            .tabs()
-            .lock()
-            .expect("registry")
-            .get(&dos_a)
-            .is_some_and(|t| t.transcript().contains("Spoor journal (host-side journal):"))
-    });
-    shot("03b-spoor-verb-host-side");
-
-    // Isolation, visibly: SET in the first DOS tab, the same variable undefined in the
-    // second.
-    eval_in(app, &dos_a, "window.smokeRunLine('SET GREET=HELLO-17G')");
-    eval_in(app, &dos_a, "window.smokeRunLine('SET GREET')");
-    std::thread::sleep(Duration::from_millis(700));
-    eval_in(app, &dos_b, "window.smokeRunLine('SET GREET')");
+    shot("03-set-in-new-tab");
+    key("Ctrl+1");
+    key("type-line:SET GREET");
+    key("Enter");
     let isolated = wait_for(app, Duration::from_secs(20), |state| {
-        let tabs = state.tabs().lock().expect("registry");
-        tabs.get(&dos_a).is_some_and(|t| t.transcript().contains("GREET=HELLO-17G"))
-            && tabs.get(&dos_b).is_some_and(|t| {
-                t.transcript().contains("Environment variable GREET not defined")
-            })
+        state.tabs().lock().expect("registry").get("tab-1").is_some_and(|t| {
+            t.transcript().contains("Environment variable GREET not defined")
+        })
     });
-    eval_in(app, "console", &format!("window.smokeFocus('{dos_b}')"));
-    shot("04-isolation-second-dos-tab");
+    shot("04-isolation-in-tx01");
 
-    // The sample batch: SAMPLE.TCB typed at the second DOS tab's prompt runs the real
-    // .TCB runner.
-    eval_in(app, &dos_b, "window.smokeRunLine('SAMPLE.TCB')");
+    // The sample batch, typed by name at tx01's prompt: the real .TCB runner.
+    key("type-line:SAMPLE.TCB");
+    key("Enter");
     let sample_ran = wait_for(app, Duration::from_secs(20), |state| {
         state
             .tabs()
             .lock()
             .expect("registry")
-            .get(&dos_b)
+            .get("tab-1")
             .is_some_and(|t| t.transcript().contains("RUNNING batch complete"))
     });
     shot("05-sample-tcb");
 
-    // The whole parity suite, from the parity tab's own identity.
-    eval_in(app, "console", &format!("window.smokeFocus('{parity_tab}')"));
-    eval_in(app, &parity_tab, "window.smokeRunParity()");
+    // F8 runs the whole three-signal parity suite: the chrome opens the parity tab
+    // (chrome verb) and the intent crosses the bus to that tab's own identity, which
+    // alone may invoke run_parity.
+    key("F8");
+    let parity_started = wait_for(app, Duration::from_secs(30), |state| {
+        state.suite().lock().expect("suite").started
+    });
     let parity_done = wait_for(app, Duration::from_secs(1800), |state| {
         state.suite().lock().expect("suite").overall.is_some()
     });
     shot("06-parity-wall");
 
-    // Denials, visibly: an unlisted verb and a tab verb from the chrome identity.
+    // Denials, visibly: an unlisted verb and a tab verb from the chrome identity —
+    // refused at the resolver and painted into tx01's transcript in deny red.
+    key("Ctrl+1");
     eval_in(app, "console", "window.smokeDenials()");
     let denials_visible = wait_for(app, Duration::from_secs(10), |state| {
         state.denials().lock().expect("denials").len() >= 2
     });
-    eval_in(app, "console", &format!("window.smokeFocus('{dos_a}')"));
     shot("07-denials-visible");
+
+    // Keyboard chrome, for the record: the master menu and the F1 key map.
+    key("Ctrl+Esc");
+    shot("08-master-menu");
+    key("Escape");
+    key("F1");
+    shot("09-keyboard-map");
+    key("Escape");
 
     let state = app.state::<ConsoleState>();
     let suite = state.suite().lock().expect("suite").clone();
@@ -267,11 +273,12 @@ fn smoke_sequence(
         suite.overall,
         Some(stage_e_console::harness::Verdict::Pass)
     );
-    let all_good = three_tabs
-        && dir_ran
-        && spoor_ran
+    let all_good = boot_ran
+        && second_dos
+        && set_ran
         && isolated
         && sample_ran
+        && parity_started
         && parity_done
         && parity_pass
         && denials_visible;
@@ -280,13 +287,13 @@ fn smoke_sequence(
         "smoke": if all_good { "pass" } else { "fail" },
         "tab_count": tabs.len(),
         "tabs": tabs,
-        "roles": { "dos_a": dos_a, "dos_b": dos_b, "parity": parity_tab },
         "checks": {
-            "three_tabs_open": three_tabs,
-            "dir_ran_in_tab_1": dir_ran,
-            "spoor_verb_ran_in_tab_1": spoor_ran,
-            "isolation_visible": isolated,
-            "sample_tcb_ran_in_tab_2": sample_ran,
+            "boot_prerun_and_taskkill_denial_in_tx01": boot_ran,
+            "second_dos_via_ctrl_t": second_dos,
+            "set_ran_in_new_tab": set_ran,
+            "isolation_visible_in_tx01": isolated,
+            "sample_tcb_ran_in_tx01": sample_ran,
+            "parity_suite_started_via_f8": parity_started,
             "parity_suite_finished": parity_done,
             "parity_overall_pass": parity_pass,
             "denials_visible": denials_visible,
@@ -301,7 +308,7 @@ fn smoke_sequence(
         "denials": denials,
         "reserved_line": state.reserved_text(),
         "screenshots": shots,
-        "ui_driven": true,
+        "ui_driven": "keyboard (window.smokeKey, STORY-UX-04)",
     });
     (evidence, if all_good { 0 } else { 1 })
 }
@@ -334,25 +341,38 @@ fn main() {
         .setup(move |app| {
             app.set_authority_resolver(authority);
             let window = tauri::window::WindowBuilder::new(app, "host")
-                .title("TinyOS \u{2014} single window, multi-tab OS UX (host-side, 17G)")
+                .title("Ti-OS \u{2014} operator console (single window, host-side V1)")
                 .inner_size(WIN_W, WIN_H)
                 .resizable(false)
                 .build()?;
-            window.add_child(
-                tauri::webview::WebviewBuilder::new(
-                    "reserved",
-                    WebviewUrl::App("reserved.html".into()),
-                ),
-                LogicalPosition::new(0.0, 0.0),
-                LogicalSize::new(WIN_W, RESERVED_H),
-            )?;
+            // Smoke forensics: an unattended run that ends early must say who ended
+            // it — a CloseRequested is an outside actor, a Destroyed with none is not.
+            window.on_window_event(|event| match event {
+                tauri::WindowEvent::CloseRequested { .. } => {
+                    eprintln!("stage-e-console: host window close requested (outside actor)");
+                }
+                tauri::WindowEvent::Destroyed => {
+                    eprintln!("stage-e-console: host window destroyed");
+                }
+                _ => {}
+            });
             window.add_child(
                 tauri::webview::WebviewBuilder::new(
                     "console",
                     WebviewUrl::App("index.html".into()),
                 ),
-                LogicalPosition::new(0.0, RESERVED_H),
-                LogicalSize::new(WIN_W, CHROME_H),
+                LogicalPosition::new(0.0, 0.0),
+                LogicalSize::new(WIN_W, WIN_H),
+            )?;
+            // Added after the chrome so it composes above it: the system line is the
+            // last line of the window, under the prompt, unlabelled (SPEC §10.1).
+            window.add_child(
+                tauri::webview::WebviewBuilder::new(
+                    "reserved",
+                    WebviewUrl::App("reserved.html".into()),
+                ),
+                LogicalPosition::new(RESERVED_X, RESERVED_Y),
+                LogicalSize::new(RESERVED_W, RESERVED_H),
             )?;
 
             // The reconciler: registry state → window composition, every 200 ms, always

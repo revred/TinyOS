@@ -2,132 +2,100 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>TinyOS tab</title>
-<style>
-  :root { color-scheme: dark; }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: #05070c; color: #d7dde6; height: 100vh;
-    font: 14px/1.45 Consolas, "Cascadia Mono", monospace;
-    display: grid; grid-template-rows: 1fr auto;
-  }
-  /* DOS session layout */
-  #screen { overflow-y: auto; padding: 10px 14px; white-space: pre-wrap; word-break: break-all; }
-  #inputrow { display: flex; border-top: 1px solid #1d2735; background: #0a0e16; }
-  #prompt { padding: 8px 0 8px 14px; color: #7ee787; flex: none; }
-  #line {
-    flex: 1; background: transparent; border: 0; outline: none; color: #d7dde6;
-    font: inherit; padding: 8px 14px 8px 6px;
-  }
-  /* Parity suite layout */
-  #suite { display: none; overflow-y: auto; padding: 10px 14px; }
-  #suite h2 { margin: 4px 0 10px; font-size: 15px; color: #58a6ff; }
-  #runrow { display: none; border-top: 1px solid #1d2735; background: #0a0e16; padding: 8px 14px; }
-  #run {
-    background: #1a7f37; color: #fff; border: 0; padding: 8px 16px; font: inherit;
-    font-weight: bold; border-radius: 4px; cursor: pointer;
-  }
-  #run:disabled { background: #30363d; cursor: default; }
-  table { border-collapse: collapse; width: 100%; }
-  td { padding: 2px 8px; border-bottom: 1px solid #10161f; }
-  td.v { width: 60px; font-weight: bold; text-align: center; border-radius: 3px; }
-  .pass { background: #123f1e; color: #7ee787; }
-  .fail { background: #4c1113; color: #ffa198; }
-  #signals { margin: 10px 0; padding: 8px; border: 1px solid #1d2735; border-radius: 4px; }
-  #log { margin-top: 10px; color: #8b949e; white-space: pre-wrap; word-break: break-all; font-size: 12px; }
-  #overall { font-weight: bold; padding: 4px 10px; border-radius: 4px; }
-</style>
+<title>tab identity satellite</title>
+<style>:root { color-scheme: dark; } body { margin: 0; background: #0C0C0C; }</style>
 </head>
 <body>
-<div id="screen"></div>
-<div id="suite">
-  <h2>MS-DOS parity suite — host <code>shell</code> tests + <code>shell-batch</code> under QEMU + golden comparison</h2>
-  <div><span id="overall">not run</span></div>
-  <div id="signals"></div>
-  <table id="wall"></table>
-  <div id="log"></div>
-</div>
-<div id="inputrow">
-  <span id="prompt">A:\&gt;</span>
-  <input id="line" autofocus spellcheck="false" placeholder="type a DOS line — try DIR, or SAMPLE.TCB">
-</div>
-<div id="runrow"><button id="run">RUN ALL MS-DOS PARITY TESTS</button></div>
+<!-- V1.1 (06A / work/UX-V1 Part F): the per-tab identity satellite.
+     The V1 chrome renders every pixel in index.html; THIS webview exists because the
+     signed manifest's grant tables are disjoint — only an enumerated tab label may
+     invoke run_line / read_tab / run_parity, and the session identity is this
+     webview's runtime label, never an argument. The chrome asks for work over the
+     same-origin UI bus (a rendering-layer channel: no capability crosses it — every
+     invoke below still resolves under THIS identity at the authority seam), and this
+     page relays the host's answers back for the chrome to paint. -->
 <script>
-  const invoke = window.__TAURI__.core.invoke;
-  const $ = (id) => document.getElementById(id);
-  let kind = null;
+(function () {
+  "use strict";
+  var invoke = window.__TAURI__ && window.__TAURI__.core.invoke;
+  if (!invoke) return;
 
-  function renderDos(snapshot) {
-    const screen = $("screen");
-    const stick = screen.scrollTop + screen.clientHeight >= screen.scrollHeight - 4;
-    if (screen.textContent !== snapshot.transcript) {
-      screen.textContent = snapshot.transcript;
-      if (stick) screen.scrollTop = screen.scrollHeight;
+  // UI bus: BroadcastChannel primary, localStorage storage-events as belt-and-braces.
+  // Receivers dedupe on message id, so hearing both copies is harmless.
+  var seen = {};
+  function makeBus(onMsg) {
+    function accept(m) {
+      if (!m || !m.id || seen[m.id]) return;
+      seen[m.id] = 1;
+      onMsg(m);
     }
-    const lines = snapshot.transcript.split("\n");
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const m = lines[i].match(/^(A:[^>]*>)/);
-      if (m) { $("prompt").textContent = m[1]; break; }
-    }
-  }
-
-  function renderSuite(s) {
-    const overall = $("overall");
-    if (!s || !s.started) { overall.textContent = "not run"; overall.className = ""; }
-    else if (!s.overall) { overall.textContent = "RUNNING\u2026"; overall.className = ""; }
-    else if (s.overall.kind === "Pass") { overall.textContent = "OVERALL: PASS"; overall.className = "pass"; }
-    else { overall.textContent = "OVERALL: " + (s.overall.kind || "FAIL").toUpperCase(); overall.className = "fail"; }
-    $("run").disabled = !!(s && s.started && !s.overall);
-    if (!s) return;
-    const sig = (v) => v === true ? "green" : v === false ? "RED" : "no signal yet";
-    $("signals").textContent =
-      "three-signal rule \u2014 fixture isa-debug-exit: " + sig(s.fixture_signal) +
-      " | transcript vs golden: " + sig(s.transcript_signal) +
-      " | spoor journal corroborates denials: " + sig(s.spoor_signal);
-    $("wall").innerHTML = "";
-    for (const e of s.entries) {
-      const row = document.createElement("tr");
-      const verdict = document.createElement("td");
-      verdict.className = "v " + (e.pass ? "pass" : "fail");
-      verdict.textContent = e.pass ? "PASS" : "FAIL";
-      const name = document.createElement("td");
-      name.textContent = e.name;
-      row.append(verdict, name);
-      $("wall").append(row);
-    }
-    $("log").textContent = (s.lines || []).join("\n");
-  }
-
-  async function poll() {
+    var bc = null;
     try {
-      const snapshot = await invoke("read_tab");
-      if (kind === null) {
-        kind = snapshot.info.kind;
-        const parity = kind === "parity";
-        $("suite").style.display = parity ? "block" : "none";
-        $("runrow").style.display = parity ? "flex" : "none";
-        $("screen").style.display = parity ? "none" : "block";
-        $("inputrow").style.display = parity ? "none" : "flex";
-        document.title = "TinyOS " + snapshot.info.label + " \u2014 " + kind;
+      bc = new BroadcastChannel("ti64-ui");
+      bc.onmessage = function (e) { accept(e.data); };
+    } catch (e) { /* storage path below still works */ }
+    window.addEventListener("storage", function (e) {
+      if (e.key === "ti64-ui" && e.newValue) {
+        try { accept(JSON.parse(e.newValue)); } catch (x) { /* not ours */ }
       }
-      if (kind === "parity") renderSuite(snapshot.suite); else renderDos(snapshot);
-    } catch (e) { /* registry slot may not exist yet; keep polling */ }
+    });
+    var n = 0;
+    return {
+      post: function (m) {
+        m.id = "s" + Math.random().toString(36).slice(2) + (++n);
+        if (bc) bc.postMessage(m);
+        try { localStorage.setItem("ti64-ui", JSON.stringify(m)); } catch (e) { /* bc carried it */ }
+      }
+    };
   }
-  setInterval(poll, 250);
-  poll();
 
-  $("line").addEventListener("keydown", async (event) => {
-    if (event.key !== "Enter") return;
-    const line = $("line").value;
-    $("line").value = "";
-    await invoke("run_line", { line }).catch(() => {});
+  var label = null;
+
+  // One line at a time, in arrival order: run_line, then a fresh snapshot, then the
+  // next line — so a queued boot sequence lands in the transcript in sequence.
+  var queue = [], busy = false;
+  function pump() {
+    if (busy || !queue.length) return;
+    busy = true;
+    var job = queue.shift();
+    var call = job.kind === "parity"
+      ? invoke("run_parity")
+      : invoke("run_line", { line: job.line });
+    call
+      .catch(function (e) {
+        bus.post({ type: "tab-error", label: label, line: job.line || "", error: String(e) });
+      })
+      .then(function () { return snap().catch(function () {}); })
+      .then(function () { busy = false; pump(); });
+  }
+
+  function snap() {
+    return invoke("read_tab").then(function (s) {
+      if (!label) {
+        label = s.info.label;
+        bus.post({ type: "hello", label: label });
+      }
+      bus.post({
+        type: "tab", label: label, info: s.info,
+        transcript: s.transcript, suite: s.suite || null
+      });
+    });
+  }
+
+  var bus = makeBus(function (m) {
+    if (!label) return;
+    if (m.type === "run" && m.label === label) { queue.push({ kind: "run", line: m.line }); pump(); }
+    if (m.type === "parity" && m.label === label) { queue.push({ kind: "parity" }); pump(); }
   });
-  $("run").onclick = () => invoke("run_parity").catch(() => {});
 
-  // Smoke hooks: the unattended sequence calls these so every step travels the real
-  // UI path from this tab's own identity.
-  window.smokeRunLine = (line) => invoke("run_line", { line }).catch(() => {});
-  window.smokeRunParity = () => invoke("run_parity").catch(() => {});
+  setInterval(function () { snap().catch(function () { /* slot may not exist yet */ }); }, 250);
+  snap().catch(function () {});
+
+  // Smoke hooks — the unattended run may still drive a line through this tab's own
+  // identity directly (the keyboard path in the chrome is the primary drive).
+  window.smokeRunLine = function (line) { queue.push({ kind: "run", line: line }); pump(); };
+  window.smokeRunParity = function () { queue.push({ kind: "parity" }); pump(); };
+})();
 </script>
 </body>
 </html>

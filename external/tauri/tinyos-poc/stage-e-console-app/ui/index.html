@@ -338,6 +338,137 @@
 (function () {
   var T = window.TinyOS, RT = window.TinyOSRT, AG = window.TinyOSAgent, B = window.TinyOSBodies;
   var tabs = [], active = 0, secondary = 1, view = "os", sideW = 232;
+
+  // ---- V1.1 host wiring (work/UX-V1 Part F) ---------------------------------
+  // The browser-side Session is gone. Chrome verbs (open_tab / focus_tab /
+  // read_console) are invoked HERE under the chrome identity; tab verbs (run_line /
+  // read_tab / run_parity) are invoked only by each tab's own identity satellite
+  // (tab.html), asked over the same-origin UI bus. No capability crosses the bus —
+  // the resolver's disjoint grant tables decide everything, exactly as before.
+  var invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
+
+  var busSeen = {}, busSeq = 0, busBC = null;
+  try {
+    busBC = new BroadcastChannel("ti64-ui");
+    busBC.onmessage = function (e) { busAccept(e.data); };
+  } catch (e) { /* storage path below still works */ }
+  window.addEventListener("storage", function (e) {
+    if (e.key === "ti64-ui" && e.newValue) {
+      try { busAccept(JSON.parse(e.newValue)); } catch (x) { /* not ours */ }
+    }
+  });
+  function busPost(m) {
+    m.id = "c" + Math.random().toString(36).slice(2) + (++busSeq);
+    if (busBC) busBC.postMessage(m);
+    try { localStorage.setItem("ti64-ui", JSON.stringify(m)); } catch (e) { /* bc carried it */ }
+  }
+
+  var byLabel = {}, outbox = {}, satReady = {};
+  function sendToTab(label, msg) {
+    if (satReady[label]) { busPost(msg); return; }
+    (outbox[label] = outbox[label] || []).push(msg);
+  }
+  function flushOutbox(label) {
+    satReady[label] = true;
+    (outbox[label] || []).forEach(function (m) { busPost(m); });
+    outbox[label] = [];
+  }
+
+  // The Session-surface proxy the bodies and the chrome render from. Host-backed for
+  // dos/parity; a display-model line buffer for rt/agent (Part F: they stay display
+  // models until Phases 3/6 provide real state).
+  function TabModel(kind, name) {
+    this.tkind = kind;
+    this.flavour = KIND[kind].flavour;
+    this.session = name;
+    this.hostLabel = null;
+    this.lines = [];
+    this.spoors = [];
+    this.history = [];
+    this.listeners = [];
+    this.cwd = "\\";
+    this.vol = { label: "TINYOS", serial: "1234-ABCD" };
+    this.env = {};
+    this.consumed = 0;   // chars of the host transcript already classified
+  }
+  TabModel.prototype.prompt = function () { return T.FLAVOURS[this.flavour].prompt(this.cwd); };
+  TabModel.prototype.on = function (fn) { this.listeners.push(fn); };
+  TabModel.prototype.emit = function (cls, text) {
+    var line = { c: cls, s: text };
+    this.lines.push(line);
+    if (this.lines.length > 5000) this.lines.shift();   // SPEC §6 ring
+    for (var i = 0; i < this.listeners.length; i++) this.listeners[i](line, this);
+  };
+  TabModel.prototype.out = function (t) { this.emit("out", t); };
+  TabModel.prototype.run = function (raw) {
+    var line = (raw || "").trim();
+    if (!line) return;
+    this.history.push(line);
+    if (this.hostLabel) {
+      sendToTab(this.hostLabel, { type: "run", label: this.hostLabel, line: line });
+    } else if (this.tkind === "dos" || this.tkind === "parity") {
+      (this.pending = this.pending || []).push(line);   // open_tab still in flight
+    } else {
+      this.emit("meta", "no host session behind this tab — line not run");
+    }
+  };
+
+  // LE-59, EPIC-P2 §6.5 rule 3: colour is applied by the renderer over CLASSIFIED
+  // output — the payload carries no escapes. Classification is over the real shell's
+  // register shapes (os/src/shell/src/verbs.rs strings).
+  function classify(s) {
+    if (/^Access denied/.test(s)) return "deny";
+    if (/^(Bad command or file name|File not found|Invalid )/.test(s)) return "err";
+    if (/^Environment variable \S+ not defined$/.test(s)) return "err";
+    if (/^(A:[^>]*>|tinyos:[^$]*\$ |rt> )/.test(s)) return "echo";
+    return "out";
+  }
+
+  function onTabSnapshot(m) {
+    var s = byLabel[m.label];
+    if (!s) return;
+    var structural = false;
+    if (typeof m.transcript === "string" && m.transcript.length > s.consumed) {
+      var chunk = m.transcript.slice(s.consumed);
+      var upto = chunk.lastIndexOf("\n");
+      if (upto >= 0) {
+        s.consumed += upto + 1;
+        chunk.slice(0, upto).split("\n").forEach(function (raw) {
+          var c = classify(raw);
+          if (c === "deny") {
+            s.spoors.push({ cat: "shell", actor: "session", act: "verb-denied",
+              out: "failed", target: raw, cost: 0 });
+            structural = true;
+          }
+          if (c === "echo") {
+            var cm = raw.match(/^A:([^>]*)>/);
+            if (cm && cm[1] !== s.cwd) { s.cwd = cm[1] || "\\"; structural = true; }
+          }
+          s.emit(c, raw);
+        });
+      }
+    }
+    if (m.suite) {
+      var p = m.suite.overall ? (m.suite.overall.kind === "Pass" ? "PASS" : "FAIL")
+        : m.suite.started ? "running…" : "not run";
+      if (p !== B.state.parity) { B.state.parity = p; structural = true; }
+    }
+    if (structural && tabs[active]) {
+      renderMain();
+      document.querySelector(".inputrow .p").textContent = tabs[active].prompt();
+    }
+  }
+
+  function busAccept(m) {
+    if (!m || !m.id || busSeen[m.id]) return;
+    busSeen[m.id] = 1;
+    if (m.type === "hello") { flushOutbox(m.label); return; }
+    if (m.type === "tab") { flushOutbox(m.label); onTabSnapshot(m); return; }
+    if (m.type === "tab-error") {
+      var s = byLabel[m.label];
+      if (s) { s.emit("meta", m.error); if (tabs[active] === s) renderMain(); }
+    }
+  }
   var LAYOUTS = {
     focus:   { t: "Focus",   d: "one session pane — the frugal edge posture" },
     cockpit: { t: "Cockpit", d: "session plus a live column that follows the tab kind" },
@@ -369,10 +500,37 @@
 
   var tabSeq = 0;
   function newTab(kind) {
+    // Part F seam 1: `new Session(...)` became `invoke("open_tab", {kind})` + registry.
+    // rt/agent are display models (no host session yet — Phases 3/6); posix is honest
+    // about FEAT-P2-05 being pending rather than opening a DOS world dressed as Linux.
+    if (kind === "posix") {
+      var cur = tabs[active];
+      if (cur) {
+        cur.emit("meta", "NEW LINUX SESSION: POSIX front-end over the same verb core — " +
+          "FEAT-P2-05 (pending; not resident in this host build)");
+        renderMain();
+      }
+      return cur;
+    }
     var name = "tx" + (++tabSeq < 10 ? "0" : "") + tabSeq;
-    var s = new T.Session({ flavour: KIND[kind].flavour, label: name, session: name });
-    s.tkind = kind; tabs.push(s);
+    var s = new TabModel(kind, name);
+    tabs.push(s);
     if (kind === "rt") RT.authority.holder = name + " (local)"; // the holding session's own name
+    if ((kind === "dos" || kind === "parity") && invoke) {
+      // Part B: one name — the host opens the enumerated slot matching this tx name,
+      // so the strip, the session identity and the system line can never disagree.
+      invoke("open_tab", { kind: kind, slot: tabSeq }).then(function (info) {
+        s.hostLabel = info.label;
+        byLabel[info.label] = s;
+        (s.pending || []).forEach(function (line) {
+          sendToTab(info.label, { type: "run", label: info.label, line: line });
+        });
+        s.pending = [];
+      }).catch(function (e) {
+        s.emit("meta", "open_tab refused: " + e);
+        if (tabs[active] === s) renderMain();
+      });
+    }
     select(tabs.length - 1); return s;
   }
   function paintTabs() {
@@ -451,20 +609,25 @@
         e.pane.appendChild(B.context(s)); m.appendChild(e.root);
       }
     }
+    // A remount rebuilds panes before layout, so the in-flow autoscroll is a no-op:
+    // land every transcript at its newest line once the panes are in the document.
+    Array.prototype.forEach.call(m.querySelectorAll(".scrollpane"), function (p) {
+      p.scrollTop = p.scrollHeight;
+    });
   }
 
   function host() {
-    var s = tabs[active];
-    document.getElementById("reserved").textContent =
-      s.session + " " + KIND[s.tkind].label + " · " + LAYOUTS[layout].t +
-      " — " + tabs.length + " tab(s) — parity: " + B.state.parity +
-      " — authority denials: " + s.spoors.length +
-      (s.tkind === "rt" || layout === "split"
-        ? " — command authority: " + RT.authority.lease + ", e-stop " + RT.interlocks[0].s : "");
+    // Part F seam 5: the system line is painted by main.rs::reconcile into the
+    // host-owned reserved webview overlaying this span. The chrome writes nothing —
+    // the span stays empty so no second writer can ever exist page-side.
+    document.getElementById("reserved").textContent = "";
   }
 
   function select(i) {
     active = i; var s = tabs[i];
+    // Part F seam 4: focus follows the registry, so the host's system line names the
+    // focused session (display tabs have no host label and change no host focus).
+    if (s.hostLabel && invoke) invoke("focus_tab", { label: s.hostLabel }).catch(function () {});
     if (layout === "split" && secondary === active)
       secondary = (active + 1) % Math.max(1, tabs.length);
     paintTabs(); renderMain();
@@ -758,6 +921,20 @@
     });
   }
 
+  // F8 runs the REAL three-signal suite: run_parity resolves only under the parity
+  // tab's own identity, so the intent travels the bus to that tab's satellite. A
+  // missing parity tab is opened first (open_tab — a chrome verb, this identity's own).
+  function runParitySuite() {
+    var p = null;
+    tabs.forEach(function (t) { if (t.tkind === "parity") p = t; });
+    if (!p) p = newTab("parity");
+    var ask = function () {
+      if (p.hostLabel) sendToTab(p.hostLabel, { type: "parity", label: p.hostLabel });
+      else setTimeout(ask, 150);   // open_tab is in flight
+    };
+    ask();
+  }
+
   // ---- prompt ----------------------------------------------------------------
   var input = document.getElementById("line");
   input.addEventListener("keydown", function (e) {
@@ -945,11 +1122,7 @@
     else if (e.key === "F1") { h.dataset.open = h.dataset.open === "1" ? "0" : "1"; e.preventDefault(); }
     else if (e.key === "Escape") { h.dataset.open = "0"; if (document.body.dataset.gui === "1") gui(false); }
     else if (e.key === "F12") { gui(document.body.dataset.gui === "0"); e.preventDefault(); }
-    else if (e.key === "F8") {
-      B.state.parity = "running…"; renderMain(); host();
-      setTimeout(function () { B.state.parity = "PASS"; renderMain(); host(); }, 900);
-      e.preventDefault();
-    }
+    else if (e.key === "F8") { runParitySuite(); e.preventDefault(); }
     else if (e.ctrlKey && e.shiftKey && /^[!@#123]$/.test(e.key)) {
       setLayout(["focus", "cockpit", "split"][{ "!": 0, "@": 1, "#": 2, "1": 0, "2": 1, "3": 2 }[e.key]]);
       e.preventDefault();
@@ -987,6 +1160,64 @@
     document.getElementById("budget").textContent =
       T.countNodes() + " nodes · " + T.stats.paint + " ms · 4 Hz · " + tabs.length + " tab(s)";
   });
+
+  // Part F seam 4 + the "denials visible, never swallowed" invariant: the chrome polls
+  // read_console (its own verb) and paints every NEW resolver denial into the focused
+  // transcript as host commentary in the denial colour. Nothing is swallowed.
+  if (invoke) {
+    var denCount = null, denBusy = false;
+    T.tickers.push(function () {
+      if (denBusy) return;
+      denBusy = true;
+      invoke("read_console").then(function (snap) {
+        if (denCount === null) denCount = 0;
+        var fresh = snap.denials.length > denCount;
+        // Paint into a tab whose body renders a transcript (the focused one when it
+        // does; else the first shell tab) — a denial in a bufferless panel would be
+        // recorded but not seen, and "visible" means on screen.
+        var target = tabs[active];
+        if (!target || (target.tkind !== "dos" && target.tkind !== "posix")) {
+          for (var j = 0; j < tabs.length; j++) {
+            if (tabs[j].tkind === "dos" || tabs[j].tkind === "posix") { target = tabs[j]; break; }
+          }
+        }
+        for (var i = denCount; i < snap.denials.length; i++) {
+          var d = snap.denials[i];
+          if (target) target.emit("deny",
+            "DENIED " + d.command + " (webview=" + d.webview + ", origin=" + d.origin + "): " + d.reason);
+        }
+        denCount = snap.denials.length;
+        if (fresh) renderMain();
+      }).catch(function () {}).then(function () { denBusy = false; });
+    });
+  }
+
+  // STORY-UX-04: the unattended smoke drives the keyboard grammar, not the mouse.
+  window.smokeKey = function (name) {
+    if (name.indexOf("type-line:") === 0) {
+      input.value = name.slice(10); input.focus(); return;
+    }
+    if (name === "Enter") {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      return;
+    }
+    var parts = name.split("+"), key = parts.pop();
+    document.dispatchEvent(new KeyboardEvent("keydown", {
+      key: key,
+      ctrlKey: parts.indexOf("Ctrl") >= 0,
+      shiftKey: parts.indexOf("Shift") >= 0,
+      altKey: parts.indexOf("Alt") >= 0,
+      bubbles: true, cancelable: true
+    }));
+  };
+  // Authority probes from the chrome identity: an unlisted verb, then a tab verb —
+  // both must be denied at the resolver and land, visibly, in the transcript above.
+  window.smokeDenials = function () {
+    if (!invoke) return;
+    invoke("format_disk").catch(function () {});
+    invoke("run_line", { line: "DIR" }).catch(function () {});
+  };
+
   T.startClock();
   input.focus();
 })();

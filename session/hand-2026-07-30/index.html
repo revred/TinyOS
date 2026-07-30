@@ -121,6 +121,10 @@
     <span class="num">06A</span><a href="06A-ux-v1-delivery-mandate.md">Next-session mandate: deliver the Ti64 console UX V1</a>
     <p>The owner-signed work order for <code>work/UX-V1/</code>: V1-STRATEGY.md binding (exact strings, geometry with load-bearing ids, behaviour contracts, all-must-pass Part H checklist), SPEC.md for honesty rule / render budget / keyboard contract / the six TDD stories. Phased V1.0 static parity &rarr; V1.1 Tauri wiring &rarr; V1.2 generated <code>verbs.json</code>/<code>workbench.json</code> &rarr; V1.3 responsive window + suspended tabs; copy-never-re-derive from <code>work/UX-V1/v3-console.html</code> (truth-path correction: the docs cite <code>work/tinyos-console-ux/</code>, which does not exist). Interlocks stated with LE-57..LE-61; shell output and the parity golden must not change.</p>
   </li>
+  <li class="entry">
+    <span class="num">07A</span><a href="07A-ux-v1-0-1-executed.md">06A executed: V1.0 + V1.1 of the Ti64 console are delivered</a>
+    <p>V1.0 (<code>de0a9d4</code>): the five <code>work/UX-V1/</code> files land byte-identical in <code>stage-e-console-app/ui/</code>; <code>reserved.html</code> restyled, contract untouched. V1.1: the Part F seams exactly — browser <code>Session</code> deleted, <code>open_tab</code>/<code>run_line</code>/<code>read_tab</code>/<code>read_console</code>/<code>focus_tab</code> carry the console, the system line painted only by <code>reconcile</code>. Architecture note that V1.2/V1.3 must read first: <strong>identity satellites + a same-origin UI bus</strong> resolve the single-page-UI vs disjoint-grant-tables contradiction; no capability crosses the bus (E6/E7/E8 and R1&ndash;R6 unchanged, green). Part B second-id defect found by the smoke and fixed with slot-named <code>open_at</code> (T8). Keyboard-driven smoke (<code>window.smokeKey</code>, STORY-UX-04) green end to end, three parity signals, <code>REPORT-2026-07-30-03</code>; <code>LE-59</code> closed; nine A4.1 divergence notes recorded incl. the &le;40&nbsp;KB payload figure the verbatim reference cannot meet.</p>
+  </li>
 </ol>
 
 <footer>
