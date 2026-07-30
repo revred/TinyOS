@@ -618,16 +618,24 @@ fn main() -> ExitCode {
                 }
                 let actual = std::fs::read_to_string(&capture)
                     .map_err(|e| format!("cannot read serial capture: {e}"))?;
+                // `LE-56`'s third signal: split the capture at the spoor
+                // trailer — the transcript before it stays byte-sacred for
+                // the golden comparison; the trailer itself must be present,
+                // well-formed and self-corroborating (missing/malformed is a
+                // FAIL, never a skip).
+                let (transcript, trailer) = shell_parity::split_capture(&actual)?;
                 let golden_path =
                     root.join("src").join("shell").join("golden").join("parity-smoke.golden.txt");
                 let golden = std::fs::read_to_string(&golden_path)
                     .map_err(|e| format!("cannot read golden transcript: {e}"))?;
-                shell_parity::compare_transcript(&actual, &golden)
+                let lines = shell_parity::compare_transcript(&transcript, &golden)?;
+                let corroborated = trailer.corroborated()?;
+                Ok((lines, corroborated))
             });
             match result {
-                Ok(lines) => {
+                Ok((lines, corroborated)) => {
                     println!(
-                        "shell-parity: transcript matches golden ({lines} lines) and the fixture's in-guest assertions passed"
+                        "shell-parity: transcript matches golden ({lines} lines), the fixture's in-guest assertions passed, and the spoor journal corroborates the denial count (TINYOS-SPOOR/1 len={corroborated} denials={corroborated})"
                     );
                     ExitCode::SUCCESS
                 }

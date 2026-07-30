@@ -1,0 +1,5 @@
+# Golden transcripts are byte-exact evidence (TEST-P2-07-01-A): no eol
+# smudging, ever — a Windows checkout with core.autocrlf=true must see the
+# same bytes CI's Linux checkout sees, or the host golden test reds on a
+# fake divergence (found 2026-07-30 while executing hand-2026-07-30/04A).
+*.golden.txt -text

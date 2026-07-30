@@ -1,6 +1,6 @@
 # FEAT-P2-07 — The `.TCB` Batch Runtime
 
-Status: **In progress — Story 01 started 2026-07-30** (assurance `baseline-debt`, `D23`)
+Status: **In progress — Story 01 started 2026-07-30; Story 02 (the spoor gate, `LE-56`) Verified 2026-07-30** (assurance `baseline-debt`, `D23`)
 Epic: [`EPIC-P2`](../epics/EPIC-P2.md) §7 priority 7 — deliberately late in the Epic's own
 ordering because *"a batch runtime is an authority multiplier"*; pulled into this vertical
 slice because the owner's parity harness **is** a batch file, and a batch that can only run

@@ -109,6 +109,10 @@
     <span class="num">04A</span><a href="04A-spoor-gate-action-plan.md">Action plan: fix the spoor gate (<code>LE-56</code>)</a>
     <p>The TDD-ordered work order that closes the spoor gap: a journaling decorator policy at the existing <code>VerbPolicy</code> seam (zero shell-crate changes, shell stays <code>no_std</code>/kernel-free), the <code>shell-batch</code> fixture asserting <code>spoor_journal_len</code> in-guest, a <code>TINYOS-SPOOR/1</code> serial trailer parsed by <code>check-shell-parity</code> as a <strong>third signal</strong> (golden byte-comparison untouched), the parity tab and <code>smoke.json</code> rendering it, and a register-decided <code>SPOOR</code> journal-dump verb over an injected view so the transcript itself shows spoors. Seven acceptance criteria, all-or-nothing; denial spoors only, host tabs honestly kernel-spoorless until the on-target tab host exists.</p>
   </li>
+  <li class="entry">
+    <span class="num">05A</span><a href="05A-spoor-gate-executed.md">The spoor gate is closed (<code>LE-56</code>): 04A executed</a>
+    <p>All seven acceptance criteria of 04A in one change: <code>Category::Shell</code>/<code>Actor::Session</code>/<code>Action::VerbDenied</code> in the kernel vocabulary; the authorisation-neutral journaling decorator beside the fixture; the in-guest <code>spoor_journal_len</code> assertion (red observed under QEMU first); the <code>TINYOS-SPOOR/1</code> trailer split by <code>check-shell-parity</code> into a fail-closed <strong>third signal</strong>; the three-signal parity tab and <code>smoke.json</code>; the register-decided <code>SPOOR</code> verb rendering the journal in the 64-line golden on host and target byte-identically; <code>STORY-P2-07-02</code>, <code>REPORT-2026-07-30-02</code>, <code>LE-56</code> closed, spine green. Plus an incidental fix: goldens are now <code>-text</code> in <code>.gitattributes</code> (CRLF smudge made <code>p1</code> red on Windows checkouts).</p>
+  </li>
 </ol>
 
 <footer>

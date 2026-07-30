@@ -200,6 +200,20 @@ fn smoke_sequence(
     });
     shot("03-dir-in-first-dos-tab");
 
+    // The SPOOR verb (`LE-56`), honestly host-side: the banner names the
+    // host-side journal and the empty answer states there are no kernel spoors
+    // here — the kernel-journaled rows live in the parity lane's transcript.
+    eval_in(app, &dos_a, "window.smokeRunLine('SPOOR')");
+    let spoor_ran = wait_for(app, Duration::from_secs(20), |state| {
+        state
+            .tabs()
+            .lock()
+            .expect("registry")
+            .get(&dos_a)
+            .is_some_and(|t| t.transcript().contains("Spoor journal (host-side journal):"))
+    });
+    shot("03b-spoor-verb-host-side");
+
     // Isolation, visibly: SET in the first DOS tab, the same variable undefined in the
     // second.
     eval_in(app, &dos_a, "window.smokeRunLine('SET GREET=HELLO-17G')");
@@ -255,6 +269,7 @@ fn smoke_sequence(
     );
     let all_good = three_tabs
         && dir_ran
+        && spoor_ran
         && isolated
         && sample_ran
         && parity_done
@@ -269,6 +284,7 @@ fn smoke_sequence(
         "checks": {
             "three_tabs_open": three_tabs,
             "dir_ran_in_tab_1": dir_ran,
+            "spoor_verb_ran_in_tab_1": spoor_ran,
             "isolation_visible": isolated,
             "sample_tcb_ran_in_tab_2": sample_ran,
             "parity_suite_finished": parity_done,
@@ -279,6 +295,7 @@ fn smoke_sequence(
             "entries": suite.entries,
             "fixture_signal": suite.fixture_signal,
             "transcript_signal": suite.transcript_signal,
+            "spoor_signal": suite.spoor_signal,
             "overall": suite.overall,
         },
         "denials": denials,

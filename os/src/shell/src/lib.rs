@@ -21,6 +21,23 @@ pub mod parity;
 pub mod verbs;
 pub mod volume;
 
+/// Host-side test compilation of the spoor-journaling policy decorator
+/// (`LE-56`). The decorator lives beside the fixture binary in
+/// `spoor_policy.rs` and is **not** part of this library's shipped code —
+/// this `#[cfg(test)]`-only include exists so its unit tests run under
+/// `cargo test -p shell --lib` (the exact surface CI and the parity tab
+/// drive), while the library itself stays kernel-free.
+#[cfg(test)]
+pub(crate) mod spoor_policy_host {
+    use crate::policy::{GrantSet, VerbPolicy};
+    use crate::verbs::{SpoorRow, SpoorView, VerbKind};
+
+    /// The decorator, compiled here for its host-side tests — and for the
+    /// parity harness's own tests, which install it to mirror the fixture.
+    #[path = "../spoor_policy.rs"]
+    pub mod spoor_policy;
+}
+
 /// Fixed capacities — the single reviewable location, per the capacities doctrine.
 pub mod capacities {
     /// Maximum files the RAM volume holds.

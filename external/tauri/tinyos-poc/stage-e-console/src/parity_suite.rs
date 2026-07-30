@@ -36,6 +36,10 @@ pub struct SuiteState {
     pub fixture_signal: Option<bool>,
     /// Signal 2: the byte comparison against the committed golden transcript.
     pub transcript_signal: Option<bool>,
+    /// Signal 3 (`LE-56`): the spoor journal corroborates the denial count —
+    /// the fixture's `TINYOS-SPOOR/1` trailer, parsed and checked by
+    /// `check-shell-parity`.
+    pub spoor_signal: Option<bool>,
     /// The aggregate — set once, at the end. `None` while running.
     pub overall: Option<Verdict>,
     /// Whether a run has been started (refuses double starts).
@@ -61,38 +65,58 @@ pub fn parse_cargo_test_line(line: &str) -> Option<SuiteEntry> {
     }
 }
 
-/// Map `check-shell-parity`'s exit and output to the two signals.
+/// Map `check-shell-parity`'s exit and output to the three signals
+/// (fixture, transcript, spoor).
 ///
-/// Exit 0 prints one success line naming both facts → `(true, true)`. On failure the
-/// error message distinguishes them: an in-guest assertion failure means the fixture
-/// signal is red and the comparison never ran; a divergence message means the fixture
-/// was green and the comparison is red. Anything else is a harness failure: both
-/// signals stay unknown — and unknown never passes.
-pub fn parse_parity_signals(exit_zero: bool, output: &str) -> (Option<bool>, Option<bool>) {
+/// Exit 0 prints one success line naming all three facts → all true; a success
+/// line that never names the spoor fact leaves the third signal unknown (and
+/// unknown never passes). On failure the error message distinguishes them: an
+/// in-guest assertion failure means the fixture signal is red and nothing after
+/// it ran; a missing/malformed spoor trailer reds the spoor signal before the
+/// comparison ever runs (the split precedes the compare); a divergence message
+/// means the fixture was green and the comparison is red; a corroboration
+/// mismatch means both earlier signals held and the spoor signal alone is red.
+/// Anything else is a harness failure: all three stay unknown.
+pub fn parse_parity_signals(
+    exit_zero: bool,
+    output: &str,
+) -> (Option<bool>, Option<bool>, Option<bool>) {
     if exit_zero && output.contains("transcript matches golden") {
-        return (Some(true), Some(true));
+        let spoor = if output.contains("spoor journal corroborates the denial count") {
+            Some(true)
+        } else {
+            None
+        };
+        return (Some(true), Some(true), spoor);
     }
     if output.contains("in-guest assertion failure") {
-        return (Some(false), None);
+        return (Some(false), None, None);
+    }
+    if output.contains("spoor trailer missing") || output.contains("spoor trailer malformed") {
+        return (Some(true), None, Some(false));
     }
     if output.contains("diverges from golden")
         || output.contains("extra content")
         || output.contains("ends early")
         || output.contains("trailing bytes")
     {
-        return (Some(true), Some(false));
+        return (Some(true), Some(false), None);
     }
-    (None, None)
+    if output.contains("does not corroborate the denial count") {
+        return (Some(true), Some(true), Some(false));
+    }
+    (None, None, None)
 }
 
 /// The aggregate verdict: PASS only if there is at least one host test, every entry
-/// passed, and *both* parity signals are affirmatively true. Anything less is FAIL —
-/// a missing signal, an empty wall and a red row all fail the same way.
+/// passed, and *all three* parity signals are affirmatively true. Anything less is
+/// FAIL — a missing signal, an empty wall and a red row all fail the same way.
 pub fn overall_verdict(state: &SuiteState) -> Verdict {
     let host_green = !state.entries.is_empty() && state.entries.iter().all(|e| e.pass);
-    let two_signals =
-        state.fixture_signal == Some(true) && state.transcript_signal == Some(true);
-    if host_green && two_signals {
+    let three_signals = state.fixture_signal == Some(true)
+        && state.transcript_signal == Some(true)
+        && state.spoor_signal == Some(true);
+    if host_green && three_signals {
         Verdict::Pass
     } else {
         Verdict::Fail
@@ -200,10 +224,11 @@ pub fn spawn_suite(os_dir: std::path::PathBuf, state: SharedSuiteState) {
         // so a host-test failure message can never masquerade as a target signal.
         let logged: String = state.lines[phase2_start..].join("\n");
         let exit_zero = matches!(parity_green, Ok(true));
-        let (fixture, transcript) =
+        let (fixture, transcript, spoor) =
             parse_parity_signals(exit_zero, &format!("{parity_output}\n{logged}"));
         state.fixture_signal = fixture;
         state.transcript_signal = transcript;
+        state.spoor_signal = spoor;
         state.entries.push(SuiteEntry {
             name: "shell-batch fixture: in-guest assertions (isa-debug-exit)".into(),
             pass: fixture == Some(true),
@@ -211,6 +236,10 @@ pub fn spawn_suite(os_dir: std::path::PathBuf, state: SharedSuiteState) {
         state.entries.push(SuiteEntry {
             name: "transcript vs committed golden (check-shell-parity)".into(),
             pass: transcript == Some(true),
+        });
+        state.entries.push(SuiteEntry {
+            name: "spoor journal corroborates denials (TINYOS-SPOOR/1)".into(),
+            pass: spoor == Some(true),
         });
         if let Err(error) = host_green {
             state.lines.push(format!("[suite] host tests could not run: {error}"));
@@ -245,39 +274,67 @@ mod tests {
         assert_eq!(parse_cargo_test_line("running 22 tests"), None);
     }
 
-    /// S2 — the two signals map exactly as `check-shell-parity` speaks: success names
-    /// both; an assertion failure reds the fixture and leaves the comparison unknown; a
-    /// divergence greens the fixture and reds the comparison; noise stays unknown.
+    /// S2 — the three signals map exactly as `check-shell-parity` speaks: success names
+    /// all three; an assertion failure reds the fixture and leaves the rest unknown; a
+    /// missing/malformed spoor trailer reds the spoor signal before the comparison ever
+    /// runs; a divergence greens the fixture and reds the comparison; a corroboration
+    /// mismatch reds only the spoor signal; noise stays unknown.
     #[test]
     fn s2_parity_signals_map() {
-        let ok = "shell-parity: transcript matches golden (61 lines) and the fixture's in-guest assertions passed";
-        assert_eq!(parse_parity_signals(true, ok), (Some(true), Some(true)));
+        let ok = "shell-parity: transcript matches golden (64 lines), the fixture's in-guest assertions passed, and the spoor journal corroborates the denial count (TINYOS-SPOOR/1 len=1 denials=1)";
+        assert_eq!(parse_parity_signals(true, ok), (Some(true), Some(true), Some(true)));
+        // A success line that never names the spoor fact (pre-LE-56 xtask): the
+        // third signal stays unknown — and unknown never passes.
+        let legacy = "shell-parity: transcript matches golden (61 lines) and the fixture's in-guest assertions passed";
+        assert_eq!(parse_parity_signals(true, legacy), (Some(true), Some(true), None));
         assert_eq!(
             parse_parity_signals(
                 false,
                 "xtask: shell parity failed: shell-batch fixture reported in-guest assertion failure (exit 1)"
             ),
-            (Some(false), None)
+            (Some(false), None, None)
+        );
+        assert_eq!(
+            parse_parity_signals(
+                false,
+                "xtask: shell parity failed: spoor trailer missing: no line starts with TINYOS-SPOOR/1"
+            ),
+            (Some(true), None, Some(false))
+        );
+        assert_eq!(
+            parse_parity_signals(
+                false,
+                "xtask: shell parity failed: spoor trailer malformed (len is not a number)"
+            ),
+            (Some(true), None, Some(false))
         );
         assert_eq!(
             parse_parity_signals(
                 false,
                 "xtask: shell parity failed: transcript diverges from golden at line 7:"
             ),
-            (Some(true), Some(false))
+            (Some(true), Some(false), None)
         );
-        assert_eq!(parse_parity_signals(false, "error: could not compile"), (None, None));
+        assert_eq!(
+            parse_parity_signals(
+                false,
+                "xtask: shell parity failed: spoor journal does not corroborate the denial count (TINYOS-SPOOR/1 len=2 denials=1)"
+            ),
+            (Some(true), Some(true), Some(false))
+        );
+        assert_eq!(parse_parity_signals(false, "error: could not compile"), (None, None, None));
     }
 
-    /// S3 — the two-signal rule: a missing signal is never a pass, and neither is an
+    /// S3 — the three-signal rule: a missing signal is never a pass, and neither is an
     /// empty wall or one red host test.
     #[test]
-    fn s3_two_signal_rule_holds() {
+    fn s3_three_signal_rule_holds() {
         let green = |name: &str| SuiteEntry { name: name.into(), pass: true };
         let mut state = SuiteState {
             entries: vec![green("a"), green("b")],
             fixture_signal: Some(true),
             transcript_signal: Some(true),
+            spoor_signal: Some(true),
             ..Default::default()
         };
         assert_eq!(overall_verdict(&state), Verdict::Pass);
@@ -288,11 +345,17 @@ mod tests {
         state.fixture_signal = None;
         assert_eq!(overall_verdict(&state), Verdict::Fail);
         state.fixture_signal = Some(true);
+        state.spoor_signal = None; // spoor corroboration missing — never a pass
+        assert_eq!(overall_verdict(&state), Verdict::Fail);
+        state.spoor_signal = Some(false); // and red is red
+        assert_eq!(overall_verdict(&state), Verdict::Fail);
+        state.spoor_signal = Some(true);
         state.entries.push(SuiteEntry { name: "red".into(), pass: false });
         assert_eq!(overall_verdict(&state), Verdict::Fail);
         let empty = SuiteState {
             fixture_signal: Some(true),
             transcript_signal: Some(true),
+            spoor_signal: Some(true),
             ..Default::default()
         };
         assert_eq!(overall_verdict(&empty), Verdict::Fail);

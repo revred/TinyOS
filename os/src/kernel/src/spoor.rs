@@ -73,6 +73,13 @@ pub enum Category {
     /// most needs to filter for "did anything reach the actuator" is the one
     /// who can least afford to guess which category it was folded into.
     Actuation,
+    /// `shell` — the ACI verb seam: authorisation verdicts on canonical-verb
+    /// requests (`FEAT-P2-01`'s deny-by-default policy, audited per `LE-56`).
+    /// A new variant on the established grounds: a verb-authorisation
+    /// decision is neither an `Exec` load nor a kernel-subsystem event, and
+    /// the auditor filtering for "what did a session try and get refused"
+    /// must never have to guess which category it was folded into.
+    Shell,
 }
 
 impl Category {
@@ -87,6 +94,7 @@ impl Category {
             Category::Boot => 6,
             Category::Fault => 7,
             Category::Actuation => 8,
+            Category::Shell => 9,
         }
     }
 
@@ -101,6 +109,7 @@ impl Category {
             6 => Ok(Category::Boot),
             7 => Ok(Category::Fault),
             8 => Ok(Category::Actuation),
+            9 => Ok(Category::Shell),
             _ => Err(SpoorError::UnknownCategory),
         }
     }
@@ -115,6 +124,13 @@ pub enum Actor {
     Kernel,
     /// A loaded executable's own request, mediated by `exec::win32_shim`.
     Exec,
+    /// An ACI session caller — a shell/tab session acting through the
+    /// deny-by-default verb policy seam (`LE-56`). Distinct from [`Actor::Exec`]:
+    /// a session is an authority-scoped identity issuing verbs, not a loaded
+    /// executable's own syscall-shaped request. The session's identity itself
+    /// travels in `TARGET`-adjacent context (the journaling site records the
+    /// denied verb as `TARGET`); the `WHO` nibble says *what kind* of actor.
+    Session,
 }
 
 impl Actor {
@@ -122,6 +138,7 @@ impl Actor {
         match self {
             Actor::Kernel => 0,
             Actor::Exec => 1,
+            Actor::Session => 2,
         }
     }
 
@@ -129,6 +146,7 @@ impl Actor {
         match bits {
             0 => Ok(Actor::Kernel),
             1 => Ok(Actor::Exec),
+            2 => Ok(Actor::Session),
             _ => Err(SpoorError::UnknownActor),
         }
     }
@@ -183,6 +201,12 @@ pub enum Action {
     /// of a specific command. One says the window closed; the other says
     /// something tried to drive the line after it had.
     Deadline,
+    /// A canonical-verb request was refused by the deny-by-default policy
+    /// seam (`Category::Shell`, `LE-56`). `TARGET` is the denied verb's
+    /// kind discriminant, so an auditor can name *what* was refused;
+    /// paired with [`Outcome::Failed`] — the request did not succeed, and
+    /// the refusal is the audited fact.
+    VerbDenied,
 }
 
 impl Action {
@@ -201,6 +225,7 @@ impl Action {
             Action::Degrade => 10,
             Action::Actuate => 11,
             Action::Deadline => 12,
+            Action::VerbDenied => 13,
         }
     }
 
@@ -219,6 +244,7 @@ impl Action {
             10 => Ok(Action::Degrade),
             11 => Ok(Action::Actuate),
             12 => Ok(Action::Deadline),
+            13 => Ok(Action::VerbDenied),
             _ => Err(SpoorError::UnknownAction),
         }
     }
@@ -406,7 +432,7 @@ impl Spoor {
 mod tests {
     use super::*;
 
-    const ALL_CATEGORIES: [Category; 9] = [
+    const ALL_CATEGORIES: [Category; 10] = [
         Category::Scheduling,
         Category::Lock,
         Category::Wcet,
@@ -416,9 +442,10 @@ mod tests {
         Category::Boot,
         Category::Fault,
         Category::Actuation,
+        Category::Shell,
     ];
-    const ALL_ACTORS: [Actor; 2] = [Actor::Kernel, Actor::Exec];
-    const ALL_ACTIONS: [Action; 13] = [
+    const ALL_ACTORS: [Actor; 3] = [Actor::Kernel, Actor::Exec, Actor::Session];
+    const ALL_ACTIONS: [Action; 14] = [
         Action::Create,
         Action::Boost,
         Action::Restore,
@@ -432,6 +459,7 @@ mod tests {
         Action::Degrade,
         Action::Actuate,
         Action::Deadline,
+        Action::VerbDenied,
     ];
     const ALL_OUTCOMES: [Outcome; 8] = [
         Outcome::Ok,
@@ -494,30 +522,33 @@ mod tests {
     // (STORY-P0-06-01 acceptance criterion 2).
     #[test]
     fn decode_rejects_an_unknown_category_nibble() {
-        // Category 0..=8 are valid (7 = `Fault`, added by `STORY-P1-02-01`;
-        // 8 = `Actuation`, added by `STORY-P1-06-01`); 9 is not yet assigned.
-        let bits = 9u64 << CAT_SHIFT;
+        // Category 0..=9 are valid (7 = `Fault`, added by `STORY-P1-02-01`;
+        // 8 = `Actuation`, added by `STORY-P1-06-01`; 9 = `Shell`, added by
+        // `LE-56`'s shell audit lane); 10 is not yet assigned.
+        let bits = 10u64 << CAT_SHIFT;
         assert_eq!(Spoor::decode(bits), Err(SpoorError::UnknownCategory));
     }
 
     #[test]
     fn decode_rejects_an_unknown_actor_nibble() {
-        // Actor 0..=1 are valid; 2 is not yet assigned. Category 0 (valid)
-        // so only the WHO field is under test.
-        let bits = 2u64 << WHO_SHIFT;
+        // Actor 0..=2 are valid (2 = `Session`, added by `LE-56`'s shell
+        // audit lane); 3 is not yet assigned. Category 0 (valid) so only
+        // the WHO field is under test.
+        let bits = 3u64 << WHO_SHIFT;
         assert_eq!(Spoor::decode(bits), Err(SpoorError::UnknownActor));
     }
 
     #[test]
     fn decode_rejects_an_unknown_action_nibble() {
-        // Action 0..=12 are valid (7 = `Fault`, 8 = `Terminate`, added by
+        // Action 0..=13 are valid (7 = `Fault`, 8 = `Terminate`, added by
         // `STORY-P1-02-01`; 9 = `Restart`, 10 = `Degrade`, added by
         // `STORY-P1-04-02`; 11 = `Actuate`, 12 = `Deadline`, added by
-        // `STORY-P1-06-01`); 13 is not yet assigned. The nibble's remaining
-        // range is 13..=15, so the vocabulary has three verbs of headroom
-        // before the `ACT` field itself has to widen — worth watching, since
+        // `STORY-P1-06-01`; 13 = `VerbDenied`, added by `LE-56`'s shell
+        // audit lane); 14 is not yet assigned. The nibble's remaining range
+        // is 14..=15, so the vocabulary has two verbs of headroom before
+        // the `ACT` field itself has to widen — worth watching, since
         // widening it is a wire-format change to every stored spoor.
-        let bits = 13u64 << ACT_SHIFT;
+        let bits = 14u64 << ACT_SHIFT;
         assert_eq!(Spoor::decode(bits), Err(SpoorError::UnknownAction));
     }
 

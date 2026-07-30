@@ -1,0 +1,214 @@
+{
+  "checks": {
+    "denials_visible": true,
+    "dir_ran_in_tab_1": true,
+    "isolation_visible": true,
+    "parity_overall_pass": true,
+    "parity_suite_finished": true,
+    "sample_tcb_ran_in_tab_2": true,
+    "spoor_verb_ran_in_tab_1": true,
+    "three_tabs_open": true
+  },
+  "denials": [
+    {
+      "command": "format_disk",
+      "origin": "local",
+      "reason": "verb is not enumerated for the console identity in the signed manifest",
+      "webview": "console",
+      "window": "host"
+    },
+    {
+      "command": "run_line",
+      "origin": "local",
+      "reason": "verb is not enumerated for the console identity in the signed manifest",
+      "webview": "console",
+      "window": "host"
+    }
+  ],
+  "parity": {
+    "entries": [
+      {
+        "name": "batch::tests::b1_echo_discipline",
+        "pass": true
+      },
+      {
+        "name": "batch::tests::b2_denied_line_continues",
+        "pass": true
+      },
+      {
+        "name": "dos::tests::d1_bindings_dispatch",
+        "pass": true
+      },
+      {
+        "name": "spoor_policy_host::spoor_policy::tests::sp3_the_decorator_never_alters_the_wrapped_verdict",
+        "pass": true
+      },
+      {
+        "name": "batch::tests::b3_line_budget_is_loud",
+        "pass": true
+      },
+      {
+        "name": "dos::tests::d2_refusal_shapes",
+        "pass": true
+      },
+      {
+        "name": "parity::tests::p1_transcript_matches_golden",
+        "pass": true
+      },
+      {
+        "name": "batch::tests::b4_prompt_is_public_and_batch_shaped",
+        "pass": true
+      },
+      {
+        "name": "dos::tests::d5_find_grammar",
+        "pass": true
+      },
+      {
+        "name": "render::tests::escape_sequences_are_neutralised",
+        "pass": true
+      },
+      {
+        "name": "spoor_policy_host::spoor_policy::tests::sp2_a_granted_verb_journals_nothing",
+        "pass": true
+      },
+      {
+        "name": "dos::tests::d1b_spoor_binding_dispatches",
+        "pass": true
+      },
+      {
+        "name": "parity::tests::p2_two_runs_identical",
+        "pass": true
+      },
+      {
+        "name": "dos::tests::d4_percent_expansion",
+        "pass": true
+      },
+      {
+        "name": "spoor_policy_host::spoor_policy::tests::sp1_a_denied_verb_journals_exactly_one_spoor_with_the_decided_shape",
+        "pass": true
+      },
+      {
+        "name": "dos::tests::d3_adversarial_totality",
+        "pass": true
+      },
+      {
+        "name": "spoor_policy_host::spoor_policy::tests::sp4_the_withheld_verb_is_a_journaled_denial",
+        "pass": true
+      },
+      {
+        "name": "spoor_policy_host::spoor_policy::tests::sp5_a_batch_run_over_the_decorator_journals_exactly_the_counted_denials",
+        "pass": true
+      },
+      {
+        "name": "verbs::tests::c1_deny_all_denies_and_audits",
+        "pass": true
+      },
+      {
+        "name": "verbs::tests::c2_grants_are_exact_and_unknown_is_dos_shaped",
+        "pass": true
+      },
+      {
+        "name": "verbs::tests::c3_rt_critical_kill_needs_supervisor",
+        "pass": true
+      },
+      {
+        "name": "verbs::tests::c5_world_static_is_send",
+        "pass": true
+      },
+      {
+        "name": "verbs::tests::c4_dir_is_deterministic_and_inert",
+        "pass": true
+      },
+      {
+        "name": "verbs::tests::sv1_spoor_verb_renders_the_empty_journal_shape",
+        "pass": true
+      },
+      {
+        "name": "verbs::tests::sv2_spoor_verb_renders_rows_oldest_first_and_deterministically",
+        "pass": true
+      },
+      {
+        "name": "verbs::tests::sv3_spoor_verb_is_deny_by_default",
+        "pass": true
+      },
+      {
+        "name": "verbs::tests::sv4_verb_kind_register_names_round_trip_through_indices",
+        "pass": true
+      },
+      {
+        "name": "volume::tests::v1_create_read_list",
+        "pass": true
+      },
+      {
+        "name": "volume::tests::v2_labels_survive_transform_chains",
+        "pass": true
+      },
+      {
+        "name": "volume::tests::v3_traversal_refused",
+        "pass": true
+      },
+      {
+        "name": "volume::tests::v4_exhaustion_fails_closed",
+        "pass": true
+      },
+      {
+        "name": "volume::tests::v5_read_only_and_non_empty_refuse",
+        "pass": true
+      },
+      {
+        "name": "shell-batch fixture: in-guest assertions (isa-debug-exit)",
+        "pass": true
+      },
+      {
+        "name": "transcript vs committed golden (check-shell-parity)",
+        "pass": true
+      },
+      {
+        "name": "spoor journal corroborates denials (TINYOS-SPOOR/1)",
+        "pass": true
+      }
+    ],
+    "fixture_signal": true,
+    "overall": {
+      "kind": "Pass"
+    },
+    "spoor_signal": true,
+    "transcript_signal": true
+  },
+  "reserved_line": "TINYOS HOST CONSOLE — focused tab-1 [DOS session TAB-1] — 3 tab(s) open — parity suite: PASS — authority denials: 2",
+  "roles": {
+    "dos_a": "tab-1",
+    "dos_b": "tab-2",
+    "parity": "tab-3"
+  },
+  "screenshots": [
+    "01-boot.png: C:/Users/ENDUSE~1/AppData/Local/Temp/claude/c--Code-TinyOS/5bf22414-4f86-426e-8134-3cba1cad5117/scratchpad/shots\\01-boot.png",
+    "02-three-tabs.png: C:/Users/ENDUSE~1/AppData/Local/Temp/claude/c--Code-TinyOS/5bf22414-4f86-426e-8134-3cba1cad5117/scratchpad/shots\\02-three-tabs.png",
+    "03-dir-in-first-dos-tab.png: C:/Users/ENDUSE~1/AppData/Local/Temp/claude/c--Code-TinyOS/5bf22414-4f86-426e-8134-3cba1cad5117/scratchpad/shots\\03-dir-in-first-dos-tab.png",
+    "03b-spoor-verb-host-side.png: C:/Users/ENDUSE~1/AppData/Local/Temp/claude/c--Code-TinyOS/5bf22414-4f86-426e-8134-3cba1cad5117/scratchpad/shots\\03b-spoor-verb-host-side.png",
+    "04-isolation-second-dos-tab.png: C:/Users/ENDUSE~1/AppData/Local/Temp/claude/c--Code-TinyOS/5bf22414-4f86-426e-8134-3cba1cad5117/scratchpad/shots\\04-isolation-second-dos-tab.png",
+    "05-sample-tcb.png: C:/Users/ENDUSE~1/AppData/Local/Temp/claude/c--Code-TinyOS/5bf22414-4f86-426e-8134-3cba1cad5117/scratchpad/shots\\05-sample-tcb.png",
+    "06-parity-wall.png: C:/Users/ENDUSE~1/AppData/Local/Temp/claude/c--Code-TinyOS/5bf22414-4f86-426e-8134-3cba1cad5117/scratchpad/shots\\06-parity-wall.png",
+    "07-denials-visible.png: C:/Users/ENDUSE~1/AppData/Local/Temp/claude/c--Code-TinyOS/5bf22414-4f86-426e-8134-3cba1cad5117/scratchpad/shots\\07-denials-visible.png"
+  ],
+  "smoke": "pass",
+  "tab_count": 3,
+  "tabs": [
+    {
+      "kind": "dos",
+      "label": "tab-1",
+      "session": "TAB-1"
+    },
+    {
+      "kind": "dos",
+      "label": "tab-2",
+      "session": "TAB-2"
+    },
+    {
+      "kind": "parity",
+      "label": "tab-3",
+      "session": "TAB-3"
+    }
+  ],
+  "ui_driven": true
+}

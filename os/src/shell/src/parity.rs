@@ -3,8 +3,8 @@
 //! can only drift by failing.
 
 use crate::labels::Labels;
-use crate::policy::GrantSet;
-use crate::verbs::{Env, TaskInfo, VerbKind, World};
+use crate::policy::{GrantSet, VerbPolicy};
+use crate::verbs::{Env, NoSpoors, SpoorView, TaskInfo, VerbKind, World};
 use crate::volume::RamVolume;
 
 /// Every verb the parity session is granted — the MVP set minus [`WITHHELD`].
@@ -29,6 +29,7 @@ pub const GRANTED: &[VerbKind] = &[
     VerbKind::VolumeInfo,
     VerbKind::MemInfo,
     VerbKind::TaskList,
+    VerbKind::SpoorJournal,
 ];
 
 /// Deliberately withheld (STORY-P2-07-01 acceptance 3): the batch tries it, the seam
@@ -79,6 +80,7 @@ CLS
 DEL /Y DOCS\\KEEP.TXT
 RD DOCS
 DIR
+SPOOR
 WHATNOW
 ECHO %FLAVOR% batch complete
 ";
@@ -86,6 +88,18 @@ ECHO %FLAVOR% batch complete
 /// Build the seeded parity world. Deterministic by construction: fixed serial, fixed
 /// seed files, fixed task table, fixed timestamps in the renderer.
 pub fn world() -> World<'static> {
+    world_with(&POLICY, &NoSpoors)
+}
+
+/// [`world`], with the policy and spoor view injected — the seam through which
+/// both halves of the parity lane (the host golden test and the QEMU fixture)
+/// install the *same* spoor-journaling decorator over [`POLICY`] (`LE-56`), so
+/// the `SPOOR` line in [`SCRIPT`] renders byte-identically on both. Everything
+/// else stays fixed here, where determinism is owned.
+pub fn world_with<'a>(
+    policy: &'a (dyn VerbPolicy + Sync),
+    spoors: &'a (dyn SpoorView + Sync),
+) -> World<'a> {
     let mut volume = RamVolume::new(Some("TINYOS"), (0x1234, 0xABCD));
     volume
         .create(
@@ -103,9 +117,10 @@ pub fn world() -> World<'static> {
         env: Env::new(),
         cwd: 0,
         echo: true,
-        policy: &POLICY,
+        policy,
         session: "PARITY",
         tasks: TASKS,
+        spoors,
         denials: 0,
     }
 }
@@ -120,6 +135,20 @@ pub fn expected_denials() -> u32 {
 mod tests {
     use super::*;
     use crate::batch;
+    use crate::spoor_policy_host::spoor_policy::{DenialJournal, SpoorPolicy};
+
+    /// One parity run over a fresh spoor-journaling decorator — the exact
+    /// configuration the QEMU fixture boots (`LE-56`): same policy, same
+    /// script, same decorator semantics, so the `SPOOR` line renders the same
+    /// rows on both sides. A fresh journal per run keeps runs independent.
+    fn journaled_run() -> (String, batch::BatchStats) {
+        let journal: DenialJournal<64> = DenialJournal::new();
+        let policy = SpoorPolicy::new(&POLICY, &journal);
+        let mut world = world_with(&policy, &journal);
+        let mut transcript = String::new();
+        let stats = batch::run(&mut world, SCRIPT, &mut transcript).expect("batch runs");
+        (transcript, stats)
+    }
 
     /// P1 — the golden transcript (STORY-P2-07-01 acceptance 1/2/4, host half).
     /// Byte-compares the batch run against the committed golden file; on divergence
@@ -127,10 +156,12 @@ mod tests {
     /// tree. The QEMU fixture runs the *same* world and script on the target.
     #[test]
     fn p1_transcript_matches_golden() {
-        let golden = include_str!("../golden/parity-smoke.golden.txt");
-        let mut world = world();
-        let mut transcript = String::new();
-        let stats = batch::run(&mut world, SCRIPT, &mut transcript).unwrap();
+        // CRLF→LF on the golden side only: the transcript is generated (never
+        // CRLF), but a checkout's eol policy may have smudged the golden file
+        // — the same normalisation xtask's `compare_transcript` states, so a
+        // Windows checkout can neither fake a divergence nor hide one.
+        let golden = include_str!("../golden/parity-smoke.golden.txt").replace("\r\n", "\n");
+        let (transcript, stats) = journaled_run();
         assert_eq!(stats.denials, expected_denials(), "exactly the withheld verb denies");
         assert!(!stats.truncated);
         if transcript != golden {
@@ -152,9 +183,7 @@ mod tests {
     #[test]
     #[ignore = "rewrites golden/parity-smoke.golden.txt; run deliberately and review the diff"]
     fn regenerate_golden() {
-        let mut world = world();
-        let mut transcript = String::new();
-        batch::run(&mut world, SCRIPT, &mut transcript).unwrap();
+        let (transcript, _) = journaled_run();
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/golden/parity-smoke.golden.txt");
         std::fs::write(path, &transcript).expect("write golden");
     }
@@ -162,12 +191,6 @@ mod tests {
     /// P2 — determinism: two runs are byte-identical (acceptance 4, host half).
     #[test]
     fn p2_two_runs_identical() {
-        let run = || {
-            let mut w = world();
-            let mut out = String::new();
-            batch::run(&mut w, SCRIPT, &mut out).unwrap();
-            out
-        };
-        assert_eq!(run(), run());
+        assert_eq!(journaled_run().0, journaled_run().0);
     }
 }

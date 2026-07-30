@@ -310,6 +310,9 @@ pub fn run_line(world: &mut World<'_>, raw: &str, sink: &mut dyn Write) -> fmt::
     } else if word.eq_ignore_ascii_case("TASKKILL") {
         need!(1);
         Request::TaskKill(args[0])
+    } else if word.eq_ignore_ascii_case("SPOOR") {
+        need!(0);
+        Request::SpoorJournal
     } else {
         Request::Unknown
     };
@@ -347,6 +350,7 @@ mod tests {
         VerbKind::MemInfo,
         VerbKind::TaskList,
         VerbKind::TaskKill,
+        VerbKind::SpoorJournal,
     ];
     const POLICY: GrantSet = GrantSet { granted: ALL, withheld: None, supervisor: false };
 
@@ -359,6 +363,7 @@ mod tests {
             policy: &POLICY,
             session: "TEST",
             tasks: &[TaskInfo { name: "IDLE", priority: 9, state: "ready" }],
+            spoors: &crate::verbs::NoSpoors,
             denials: 0,
         };
         w.volume.create(0, "NOTES.TXT", b"alpha\nbeta\nalpha again", Labels::seeded()).unwrap();
@@ -383,6 +388,17 @@ mod tests {
         run(&mut w, "CHDIR DOCS");
         assert_eq!(run(&mut w, "CD"), "A:\\DOCS\n");
         assert_eq!(run(&mut w, "WHATNOW"), "Bad command or file name\n");
+    }
+
+    /// D1b — the `SPOOR` binding (`LE-56`, terminal-gap `verb:spoor-journal`)
+    /// dispatches to the journal-dump verb, case-insensitively, and takes no
+    /// parameters.
+    #[test]
+    fn d1b_spoor_binding_dispatches() {
+        let mut w = world();
+        assert!(run(&mut w, "SPOOR").starts_with("Spoor journal ("), "SPOOR dispatches");
+        assert!(run(&mut w, "spoor").contains("No spoors journaled"), "case-insensitive");
+        assert_eq!(run(&mut w, "SPOOR EXTRA"), "Too many parameters\n");
     }
 
     /// D2 — message-shape parity for refusals (STORY-P2-04-01 acceptance 2).

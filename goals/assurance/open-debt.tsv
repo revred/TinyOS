@@ -30,3 +30,5 @@ STORY-P2-02-01	D23	design	Same design-readiness debt as STORY-P2-01-01 for the s
 STORY-P2-04-01	D23	design	The DOS front-end executes through the same unmeasured shell subsystem; parser throughput is TG-P07's future measurement	2026-07-30
 STORY-P2-07-01	D14	stand-in-only	The parity fixture exercises file verbs against the RAM stand-in only	2026-07-30
 STORY-P2-07-01	D23	design	The batch fixture is the natural first D23 measurement host but no number is claimed until the measurement harness covers it	2026-07-30
+STORY-P2-07-02	D14	stand-in-only	The spoor-gate parity run exercises file verbs against the RAM stand-in only, same debt as STORY-P2-07-01	2026-07-30
+STORY-P2-07-02	D23	design	The SPOOR verb and decorator run in the same unmeasured shell subsystem; no D23 number is claimable until the measurement harness covers the shell lane	2026-07-30

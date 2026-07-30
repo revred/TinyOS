@@ -31,6 +31,17 @@ MVP verb set minus one deliberately withheld verb, and the embedded parity `.TCB
    harness error, never a pass.
 3. Two consecutive boots produce byte-identical transcripts (determinism, acceptance 4 of
    the Story).
+4. **The third signal** (`STORY-P2-07-02`, closing `LE-56`): after the transcript the
+   fixture emits one `TINYOS-SPOOR/1 len=<n> denials=<n>` marker line — the length of the
+   in-guest spoor journal into which a decorator policy stamped every verb denial as a
+   kernel `Spoor`, and the batch runner's own denial counter. `check-shell-parity` splits
+   the capture at the marker (the transcript before it stays byte-sacred for signal 1),
+   requires the trailer present, well-formed and self-corroborating (`len == denials`),
+   and names all three facts in its success line. A missing or malformed trailer is a
+   **FAIL, never a skip**. The in-guest assertion additionally requires
+   `spoor_journal_len == denials == expected_denials()` before the success exit (signal
+   2's half of the same fact), and the transcript itself shows the journal via the `SPOOR`
+   verb — the golden encodes the spoor row.
 
 The golden file is the **parity oracle**: its content encodes the terminal-gap register's
 decided output shapes (4.0 message strings where adopted, recorded divergences where

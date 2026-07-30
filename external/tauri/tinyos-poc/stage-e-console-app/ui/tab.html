@@ -81,8 +81,9 @@
     if (!s) return;
     const sig = (v) => v === true ? "green" : v === false ? "RED" : "no signal yet";
     $("signals").textContent =
-      "two-signal rule \u2014 fixture isa-debug-exit: " + sig(s.fixture_signal) +
-      " | transcript vs golden: " + sig(s.transcript_signal);
+      "three-signal rule \u2014 fixture isa-debug-exit: " + sig(s.fixture_signal) +
+      " | transcript vs golden: " + sig(s.transcript_signal) +
+      " | spoor journal corroborates denials: " + sig(s.spoor_signal);
     $("wall").innerHTML = "";
     for (const e of s.entries) {
       const row = document.createElement("tr");

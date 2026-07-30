@@ -94,6 +94,7 @@ mod tests {
             policy,
             session: "BATCH",
             tasks: &[],
+            spoors: &crate::verbs::NoSpoors,
             denials: 0,
         }
     }

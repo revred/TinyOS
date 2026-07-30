@@ -66,3 +66,4 @@ STORY-P2-01-01	FEAT-P2-01	D23	SEC-05,SEC-14,SEC-20	C1,C2	baseline-debt	The verb 
 STORY-P2-02-01	FEAT-P2-02	D14,D23	SEC-06,SEC-07,SEC-20	C1,C2	baseline-debt	G-SEC-5 labels must be designed into the volume and shown to survive copy move and rename before three flavours of file verbs exist
 STORY-P2-04-01	FEAT-P2-04	D23	SEC-05,SEC-09,SEC-14	C1,C2	baseline-debt	The DOS front-end is a hostile-format parser and its totality and register-shape parity are the claim
 STORY-P2-07-01	FEAT-P2-07	D14,D23	SEC-05,SEC-06,SEC-07,SEC-14,SEC-20	C1,C2	baseline-debt	The MS-DOS parity tests are TCB batch files under QEMU compared byte-wise against committed golden transcripts
+STORY-P2-07-02	FEAT-P2-07	D14,D23	SEC-05,SEC-14	C1,C2	baseline-debt	The spoor gate: verb denials journaled as kernel spoors at the policy seam, asserted in-guest, corroborated by the TINYOS-SPOOR/1 trailer as check-shell-parity third signal, and rendered by the SPOOR verb in the golden transcript (LE-56)

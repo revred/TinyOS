@@ -53,6 +53,7 @@ name = "shell"
 version = "0.1.0"
 dependencies = [
  "hal-x86_64",
+ "kernel",
 ]
 
 [[package]]

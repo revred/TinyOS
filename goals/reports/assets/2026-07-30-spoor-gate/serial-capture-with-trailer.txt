@@ -62,3 +62,4 @@ Spoor journal (policy-seam denial journal):
   1  shell       session   verb-denied   failed      clear-screen         0
 Bad command or file name
 DOS batch complete
+TINYOS-SPOOR/1 len=1 denials=1

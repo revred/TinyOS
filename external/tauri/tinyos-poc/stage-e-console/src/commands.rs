@@ -148,6 +148,8 @@ pub struct SuiteSnapshot {
     pub fixture_signal: Option<bool>,
     /// Signal 2: transcript-vs-golden comparison.
     pub transcript_signal: Option<bool>,
+    /// Signal 3 (`LE-56`): spoor journal corroborates the denial count.
+    pub spoor_signal: Option<bool>,
     /// The aggregate verdict, once both children finished.
     pub overall: Option<Verdict>,
 }
@@ -282,6 +284,7 @@ pub fn read_tab<R: tauri::Runtime>(
                 lines: suite.lines.iter().rev().take(40).rev().cloned().collect(),
                 fixture_signal: suite.fixture_signal,
                 transcript_signal: suite.transcript_signal,
+                spoor_signal: suite.spoor_signal,
                 overall: suite.overall.clone(),
             })
         }

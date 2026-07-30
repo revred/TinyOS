@@ -9,6 +9,11 @@ description = "TINYCMD: canonical verb core + ACI policy seam (FEAT-P2-01), labe
 [dependencies]
 # Fixture binary only — the library itself is pure core.
 hal-x86_64 = { path = "../hal-x86_64" }
+# Fixture binary and the `#[cfg(test)]`-only spoor_policy include (`LE-56`) —
+# the shipped library never uses it: the shell crate stays kernel-free and
+# flavour-agnostic (EPIC-P2 §3.2). The dependency exists so the journaling
+# decorator beside the fixture can stamp real kernel spoors.
+kernel = { path = "../kernel" }
 
 [[bin]]
 # `TEST-P2-07-01-A`'s Tier 0 QEMU fixture: seeds the labelled RAM volume,

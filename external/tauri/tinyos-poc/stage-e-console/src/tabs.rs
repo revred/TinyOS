@@ -16,7 +16,7 @@ use shell::dos;
 use shell::labels::Labels;
 use shell::parity;
 use shell::policy::GrantSet;
-use shell::verbs::{Env, VerbKind, World};
+use shell::verbs::{Env, SpoorRow, SpoorView, VerbKind, World};
 use shell::volume::RamVolume;
 
 /// Maximum concurrent tabs — one reviewable constant, mirrored by the manifest's
@@ -55,11 +55,32 @@ const TAB_GRANTED: &[VerbKind] = &[
     VerbKind::MemInfo,
     VerbKind::TaskList,
     VerbKind::TaskKill,
+    VerbKind::SpoorJournal,
 ];
 
 /// The interactive tab policy: the full canonical verb set, no supervisor scope.
 static TAB_POLICY: GrantSet =
     GrantSet { granted: TAB_GRANTED, withheld: None, supervisor: false };
+
+/// The host tab's spoor view (`LE-56`, honest by design): a host-run session
+/// has no kernel journal until the on-target tab host exists, and the `SPOOR`
+/// verb's banner says exactly that instead of blurring host state into kernel
+/// evidence. The kernel-journaled half lives in the parity lane's transcript.
+struct HostSpoors;
+
+impl SpoorView for HostSpoors {
+    fn source(&self) -> &'static str {
+        "host-side journal"
+    }
+    fn len(&self) -> usize {
+        0
+    }
+    fn entry(&self, _index: usize) -> Option<SpoorRow> {
+        None
+    }
+}
+
+static HOST_SPOORS: HostSpoors = HostSpoors;
 
 /// What kind of session a tab hosts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -195,6 +216,7 @@ fn seeded_world(session: &'static str) -> World<'static> {
         policy: &TAB_POLICY,
         session,
         tasks: parity::TASKS,
+        spoors: &HOST_SPOORS,
         denials: 0,
     }
 }

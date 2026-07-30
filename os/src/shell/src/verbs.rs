@@ -60,6 +60,123 @@ pub enum VerbKind {
     TaskList,
     /// `kill` analogue.
     TaskKill,
+    /// `SPOOR` — dump the session-visible spoor journal (`LE-56`,
+    /// terminal-gap `verb:spoor-journal`). Renders from the injected
+    /// [`SpoorView`], so this crate stays kernel-free.
+    SpoorJournal,
+}
+
+impl VerbKind {
+    /// Every verb kind, in discriminant order — the table [`Self::from_index`]
+    /// walks, so a spoor `TARGET` (the denied verb's discriminant) can be
+    /// rendered back to its name.
+    pub const ALL: &'static [VerbKind] = &[
+        VerbKind::List,
+        VerbKind::ChangeDir,
+        VerbKind::PrintCwd,
+        VerbKind::Copy,
+        VerbKind::Move,
+        VerbKind::Delete,
+        VerbKind::MakeDir,
+        VerbKind::RemoveDir,
+        VerbKind::ViewFile,
+        VerbKind::FindText,
+        VerbKind::SortStream,
+        VerbKind::Page,
+        VerbKind::TreeView,
+        VerbKind::AttribView,
+        VerbKind::Env,
+        VerbKind::Echo,
+        VerbKind::ClearScreen,
+        VerbKind::VersionInfo,
+        VerbKind::VolumeInfo,
+        VerbKind::MemInfo,
+        VerbKind::TaskList,
+        VerbKind::TaskKill,
+        VerbKind::SpoorJournal,
+    ];
+
+    /// The verb kind whose discriminant is `index`, if any.
+    pub fn from_index(index: u16) -> Option<VerbKind> {
+        Self::ALL.get(index as usize).copied()
+    }
+
+    /// The verb's canonical register name — the `verb:` row key in
+    /// `goals/context/terminal-gap.tsv`, minus the prefix.
+    pub const fn register_name(self) -> &'static str {
+        match self {
+            VerbKind::List => "list",
+            VerbKind::ChangeDir => "change-dir",
+            VerbKind::PrintCwd => "print-cwd",
+            VerbKind::Copy => "copy",
+            VerbKind::Move => "move",
+            VerbKind::Delete => "delete",
+            VerbKind::MakeDir => "make-dir",
+            VerbKind::RemoveDir => "remove-dir",
+            VerbKind::ViewFile => "view-file",
+            VerbKind::FindText => "find-text",
+            VerbKind::SortStream => "sort-stream",
+            VerbKind::Page => "page",
+            VerbKind::TreeView => "tree-view",
+            VerbKind::AttribView => "attrib-view",
+            VerbKind::Env => "env",
+            VerbKind::Echo => "echo",
+            VerbKind::ClearScreen => "clear-screen",
+            VerbKind::VersionInfo => "version-info",
+            VerbKind::VolumeInfo => "volume-info",
+            VerbKind::MemInfo => "mem-info",
+            VerbKind::TaskList => "task-list",
+            VerbKind::TaskKill => "task-kill",
+            VerbKind::SpoorJournal => "spoor-journal",
+        }
+    }
+}
+
+/// One rendered spoor row, injected by the host of the session. All names are
+/// static strings chosen by the injector (the parity lane maps the kernel
+/// taxonomy; a host tab maps its own) — this crate never sees a kernel type.
+#[derive(Debug, Clone, Copy)]
+pub struct SpoorRow {
+    /// The `CAT` field's name (e.g. `shell`).
+    pub category: &'static str,
+    /// The `WHO` field's name (e.g. `session`).
+    pub actor: &'static str,
+    /// The `ACT` field's name (e.g. `verb-denied`).
+    pub action: &'static str,
+    /// The `OUT` field's name (e.g. `failed`).
+    pub outcome: &'static str,
+    /// The `TARGET` field: for denials, the denied verb's discriminant.
+    pub target: u16,
+    /// The `COST` field.
+    pub cost: u32,
+}
+
+/// The injected journal view the `SPOOR` verb renders — host-injectable
+/// exactly like [`World::tasks`], so the crate stays kernel-free. The source
+/// string is part of the honesty contract: a host tab says `host-side
+/// journal`, the parity lane names the policy-seam journal.
+pub trait SpoorView {
+    /// What journal this view renders, named in the output's first line.
+    fn source(&self) -> &'static str;
+    /// Number of visible entries.
+    fn len(&self) -> usize;
+    /// The `index`-th entry, oldest first.
+    fn entry(&self, index: usize) -> Option<SpoorRow>;
+}
+
+/// The default view: no journal attached — `SPOOR` answers the empty shape.
+pub struct NoSpoors;
+
+impl SpoorView for NoSpoors {
+    fn source(&self) -> &'static str {
+        "no journal attached"
+    }
+    fn len(&self) -> usize {
+        0
+    }
+    fn entry(&self, _index: usize) -> Option<SpoorRow> {
+        None
+    }
 }
 
 /// One task-table row, injected by the host (fixture or, later, the scheduler).
@@ -162,6 +279,8 @@ pub enum Request<'a> {
     TaskList,
     /// Kill a task by name.
     TaskKill(&'a str),
+    /// Dump the spoor journal (`SPOOR`).
+    SpoorJournal,
     /// A command word no front-end recognises.
     Unknown,
 }
@@ -192,6 +311,7 @@ impl Request<'_> {
             Request::MemInfo => VerbKind::MemInfo,
             Request::TaskList => VerbKind::TaskList,
             Request::TaskKill(_) => VerbKind::TaskKill,
+            Request::SpoorJournal => VerbKind::SpoorJournal,
             Request::Unknown => return None,
         })
     }
@@ -282,6 +402,8 @@ pub struct World<'a> {
     pub session: &'a str,
     /// Injected task table.
     pub tasks: &'a [TaskInfo],
+    /// Injected spoor-journal view (`LE-56`) — what the `SPOOR` verb renders.
+    pub spoors: &'a (dyn SpoorView + Sync),
     /// Denials observed (the fixture's in-guest assertion counter).
     pub denials: u32,
 }
@@ -675,6 +797,61 @@ pub fn execute(world: &mut World<'_>, request: &Request<'_>, sink: &mut dyn Writ
             }
             writeln!(sink, "Task {} signalled", task.name)
         }
+        Request::SpoorJournal => {
+            // The register-decided shape (terminal-gap `verb:spoor-journal`):
+            // source-naming banner, then either the empty answer or fixed-width
+            // columns, oldest first. Deterministic: no timestamps, no ordering
+            // beyond the journal's own.
+            write!(sink, "Spoor journal (")?;
+            write_inert(sink, world.spoors.source())?;
+            writeln!(sink, "):")?;
+            if world.spoors.len() == 0 {
+                return writeln!(sink, "No spoors journaled");
+            }
+            // Column widths: fixed, padded left-aligned except # and COST.
+            fn pad(sink: &mut dyn Write, text: &str, width: usize) -> fmt::Result {
+                write_inert(sink, text)?;
+                for _ in text.len()..width {
+                    write!(sink, " ")?;
+                }
+                Ok(())
+            }
+            write!(sink, "{:>3}  ", "#")?;
+            pad(sink, "CATEGORY", 10)?;
+            write!(sink, "  ")?;
+            pad(sink, "ACTOR", 8)?;
+            write!(sink, "  ")?;
+            pad(sink, "ACTION", 12)?;
+            write!(sink, "  ")?;
+            pad(sink, "OUTCOME", 10)?;
+            write!(sink, "  ")?;
+            pad(sink, "TARGET", 14)?;
+            writeln!(sink, "  {:>6}", "COST")?;
+            for index in 0..world.spoors.len() {
+                let Some(row) = world.spoors.entry(index) else {
+                    // A view whose length outruns its entries (e.g. a bounded
+                    // journal that dropped records) says so rather than
+                    // rendering silence.
+                    writeln!(sink, "{:>3}  (not retained)", index + 1)?;
+                    continue;
+                };
+                write!(sink, "{:>3}  ", index + 1)?;
+                pad(sink, row.category, 10)?;
+                write!(sink, "  ")?;
+                pad(sink, row.actor, 8)?;
+                write!(sink, "  ")?;
+                pad(sink, row.action, 12)?;
+                write!(sink, "  ")?;
+                pad(sink, row.outcome, 10)?;
+                write!(sink, "  ")?;
+                match VerbKind::from_index(row.target) {
+                    Some(verb) => pad(sink, verb.register_name(), 14)?,
+                    None => write!(sink, "{:<14}", row.target)?,
+                }
+                writeln!(sink, "  {:>6}", row.cost)?;
+            }
+            Ok(())
+        }
         Request::Unknown => unreachable!("handled before policy"),
     }
 }
@@ -683,6 +860,9 @@ pub fn execute(world: &mut World<'_>, request: &Request<'_>, sink: &mut dyn Writ
 mod tests {
     use super::*;
     use crate::policy::{DenyAll, GrantSet};
+
+    // Note for the SPOOR tests below: `world()` injects `&NoSpoors`; SV2
+    // overrides the view with a canned journal.
 
     const ALL: &[VerbKind] =
         &[VerbKind::List, VerbKind::PrintCwd, VerbKind::Echo, VerbKind::TaskKill];
@@ -699,6 +879,7 @@ mod tests {
                 TaskInfo { name: "RT-CTRL", priority: 0, state: "ready" },
                 TaskInfo { name: "IDLE", priority: 9, state: "ready" },
             ],
+            spoors: &NoSpoors,
             denials: 0,
         }
     }
@@ -755,6 +936,105 @@ mod tests {
         let mut out = String::new();
         execute(&mut w, &Request::TaskKill("rt-ctrl"), &mut out).unwrap();
         assert_eq!(out, "Task RT-CTRL signalled\n");
+    }
+
+    /// A canned journal view for the SPOOR rendering tests: two rows, the
+    /// second carrying a target no verb kind maps to (renders numerically).
+    struct CannedSpoors;
+    impl SpoorView for CannedSpoors {
+        fn source(&self) -> &'static str {
+            "canned journal"
+        }
+        fn len(&self) -> usize {
+            2
+        }
+        fn entry(&self, index: usize) -> Option<SpoorRow> {
+            match index {
+                0 => Some(SpoorRow {
+                    category: "shell",
+                    actor: "session",
+                    action: "verb-denied",
+                    outcome: "failed",
+                    target: VerbKind::ClearScreen as u16,
+                    cost: 0,
+                }),
+                1 => Some(SpoorRow {
+                    category: "shell",
+                    actor: "session",
+                    action: "verb-denied",
+                    outcome: "failed",
+                    target: 999,
+                    cost: 7,
+                }),
+                _ => None,
+            }
+        }
+    }
+
+    /// SV1 — the empty journal answers the register-decided refusal shape:
+    /// banner naming the source, then `No spoors journaled`.
+    #[test]
+    fn sv1_spoor_verb_renders_the_empty_journal_shape() {
+        let policy =
+            GrantSet { granted: &[VerbKind::SpoorJournal], withheld: None, supervisor: false };
+        let mut w = world(&policy);
+        let mut out = String::new();
+        execute(&mut w, &Request::SpoorJournal, &mut out).unwrap();
+        assert_eq!(out, "Spoor journal (no journal attached):\nNo spoors journaled\n");
+    }
+
+    /// SV2 — a populated view renders oldest-first with the fixed columns,
+    /// deterministically; a target that maps to a verb kind renders its
+    /// register name, one that doesn't renders numerically.
+    #[test]
+    fn sv2_spoor_verb_renders_rows_oldest_first_and_deterministically() {
+        let policy =
+            GrantSet { granted: &[VerbKind::SpoorJournal], withheld: None, supervisor: false };
+        let render = || {
+            let mut w = world(&policy);
+            w.spoors = &CannedSpoors;
+            let mut out = String::new();
+            execute(&mut w, &Request::SpoorJournal, &mut out).unwrap();
+            out
+        };
+        let first = render();
+        assert_eq!(first, render(), "SPOOR output must be deterministic");
+        assert!(first.starts_with("Spoor journal (canned journal):\n"), "{first}");
+        let lines: Vec<&str> = first.lines().collect();
+        assert!(lines[1].contains("CATEGORY") && lines[1].contains("COST"), "{first}");
+        assert!(
+            lines[2].contains("verb-denied") && lines[2].contains("clear-screen"),
+            "row 1 names the denied verb: {first}"
+        );
+        assert!(
+            lines[3].contains("999") && lines[3].contains("verb-denied"),
+            "unmapped target renders numerically: {first}"
+        );
+        assert!(lines[2].starts_with("  1  "), "rows are numbered oldest-first: {first}");
+        assert!(lines[3].starts_with("  2  "), "{first}");
+    }
+
+    /// SV3 — SPOOR sits behind the same deny-by-default seam as every verb.
+    #[test]
+    fn sv3_spoor_verb_is_deny_by_default() {
+        let mut w = world(&DenyAll);
+        let mut out = String::new();
+        execute(&mut w, &Request::SpoorJournal, &mut out).unwrap();
+        assert!(out.contains("Access denied"), "{out}");
+        assert_eq!(w.denials, 1);
+    }
+
+    /// SV4 — every verb kind's register name round-trips through its
+    /// discriminant, so a spoor `TARGET` always names the right verb.
+    #[test]
+    fn sv4_verb_kind_register_names_round_trip_through_indices() {
+        for (index, &kind) in VerbKind::ALL.iter().enumerate() {
+            assert_eq!(kind as u16, index as u16, "ALL must be in discriminant order");
+            assert_eq!(VerbKind::from_index(index as u16), Some(kind));
+        }
+        assert_eq!(VerbKind::from_index(VerbKind::ALL.len() as u16), None);
+        assert_eq!(VerbKind::ClearScreen.register_name(), "clear-screen");
+        assert_eq!(VerbKind::SpoorJournal.register_name(), "spoor-journal");
     }
 
     /// C4 — deterministic output: two identical worlds render byte-identical DIR
