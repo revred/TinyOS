@@ -158,7 +158,8 @@ fn workspace_members(manifest: &str) -> Vec<String> {
 /// paths whose whole defect is that they point at something outside the tree
 /// the workspace may build.
 fn resolves_outside_os(base_dir: &str, relative: &str) -> bool {
-    let mut depth: isize = base_dir.split('/').filter(|c| !c.is_empty() && *c != ".").count() as isize;
+    let mut depth: isize =
+        base_dir.split('/').filter(|c| !c.is_empty() && *c != ".").count() as isize;
     for component in relative.replace('\\', "/").split('/') {
         match component {
             "" | "." => {}
@@ -192,7 +193,8 @@ mod tests {
     // on the vendored fork.
     #[test]
     fn a_path_dependency_escaping_os_is_detected() {
-        let manifest = "[dependencies]\ntauri = { path = \"../../../external/tauri/crates/tauri\" }\n";
+        let manifest =
+            "[dependencies]\ntauri = { path = \"../../../external/tauri/crates/tauri\" }\n";
         let deps = path_dependencies(manifest);
         assert_eq!(deps, vec!["../../../external/tauri/crates/tauri"]);
         assert!(resolves_outside_os("src/kernel", &deps[0]));
@@ -232,7 +234,8 @@ mod tests {
     // positive a naive `contains("path")` would produce.
     #[test]
     fn a_key_merely_containing_path_is_not_a_path_dependency() {
-        let manifest = "[package.metadata]\nhookspath = \"../outside\"\ndatapath = \"../outside\"\n";
+        let manifest =
+            "[package.metadata]\nhookspath = \"../outside\"\ndatapath = \"../outside\"\n";
         assert!(path_dependencies(manifest).is_empty());
     }
 
