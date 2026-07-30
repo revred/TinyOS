@@ -105,6 +105,10 @@
     <span class="num">03A</span><a href="03A-android-plan-and-the-spoor-gap.md">The Android Device Enabler Plan is documented; the spoor question answered honestly</a>
     <p><a href="../../docs/android-device-enabler-plan.md"><code>docs/android-device-enabler-plan.md</code></a>: six gated phases from governance rows and an ARM64 devboard HAL through mmap&#39;d read-only weights, sensors as C4-inspected labelled producers, a WCET-budgeted inference domain, fleet serving, and phone bring-up last (baseband behind IOMMU, ADR 0005 qualification). And the audit-evidence correction: <strong>no console/tab run has ever captured a kernel spoor</strong> &mdash; what was captured is console denials, TINYCMD audited refusals and transcripts, not the 64-bit spoor atom &mdash; registered as <code>LE-56</code> with the repair path (shell-lane spoor journaling + a journal-dump verb, making the claim screenshotable).</p>
   </li>
+  <li class="entry">
+    <span class="num">04A</span><a href="04A-spoor-gate-action-plan.md">Action plan: fix the spoor gate (<code>LE-56</code>)</a>
+    <p>The TDD-ordered work order that closes the spoor gap: a journaling decorator policy at the existing <code>VerbPolicy</code> seam (zero shell-crate changes, shell stays <code>no_std</code>/kernel-free), the <code>shell-batch</code> fixture asserting <code>spoor_journal_len</code> in-guest, a <code>TINYOS-SPOOR/1</code> serial trailer parsed by <code>check-shell-parity</code> as a <strong>third signal</strong> (golden byte-comparison untouched), the parity tab and <code>smoke.json</code> rendering it, and a register-decided <code>SPOOR</code> journal-dump verb over an injected view so the transcript itself shows spoors. Seven acceptance criteria, all-or-nothing; denial spoors only, host tabs honestly kernel-spoorless until the on-target tab host exists.</p>
+  </li>
 </ol>
 
 <footer>
