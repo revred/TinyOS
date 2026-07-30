@@ -100,23 +100,29 @@ fn reconcile(app: &tauri::AppHandle) {
     }
 }
 
-/// Capture the window's on-screen rectangle to `dir/<name>.png` via the host screenshot
-/// API (GDI `CopyFromScreen` — 17G acceptance 1 allows exactly this). Returns the path
-/// on success; a failed capture is reported in the smoke JSON, never a panic.
+/// Capture the window's OWN rendered surface to `dir/<name>.png` via `PrintWindow`
+/// with `PW_RENDERFULLCONTENT` (DWM renders the window regardless of z-order), so the
+/// unattended run never needs the window on top, focused, or unobstructed — the
+/// operator's desktop stays theirs while the smoke runs. Returns the path on success;
+/// a failed capture is reported in the smoke JSON, never a panic.
 fn screenshot(window: &tauri::Window<tauri::Wry>, dir: &Path, name: &str) -> Option<String> {
-    let position = window.outer_position().ok()?;
+    let hwnd = window.hwnd().ok()?.0 as isize;
     let size = window.outer_size().ok()?;
     let path = dir.join(format!("{name}.png"));
     let script = format!(
         "Add-Type -AssemblyName System.Drawing; \
+         $sig = '[System.Runtime.InteropServices.DllImport(\"user32.dll\")] public static extern bool PrintWindow(System.IntPtr hwnd, System.IntPtr hdc, uint flags);'; \
+         Add-Type -MemberDefinition $sig -Name Native -Namespace Cap; \
          $b = New-Object System.Drawing.Bitmap({w}, {h}); \
          $g = [System.Drawing.Graphics]::FromImage($b); \
-         $g.CopyFromScreen({x}, {y}, 0, 0, $b.Size); \
+         $hdc = $g.GetHdc(); \
+         $null = [Cap.Native]::PrintWindow([System.IntPtr]{hwnd}, $hdc, 2); \
+         $g.ReleaseHdc($hdc); \
+         $g.Dispose(); \
          $b.Save('{path}', [System.Drawing.Imaging.ImageFormat]::Png)",
         w = size.width,
         h = size.height,
-        x = position.x,
-        y = position.y,
+        hwnd = hwnd,
         path = path.display(),
     );
     let status = Command::new("powershell")
@@ -162,10 +168,12 @@ fn smoke_sequence(
 ) -> (serde_json::Value, i32) {
     let mut shots: Vec<Option<String>> = Vec::new();
     let mut shot = |name: &str| {
-        // Give the reconciler and the pages two ticks to paint before capturing, and
-        // re-assert the window first — a minimized window captures as uniform black.
-        let _ = window.unminimize();
-        let _ = window.set_focus();
+        // Give the reconciler and the pages two ticks to paint before capturing.
+        // PrintWindow captures the occluded window fine; only a minimized one has no
+        // surface to render, so restore it in that single case — never steal focus.
+        if window.is_minimized().unwrap_or(false) {
+            let _ = window.unminimize();
+        }
         std::thread::sleep(Duration::from_millis(1200));
         shots.push(screenshot(window, shots_dir, name).map(|p| format!("{name}.png: {p}")));
     };
@@ -175,7 +183,9 @@ fn smoke_sequence(
     };
 
     std::thread::sleep(Duration::from_secs(4)); // chrome boot: tx01 + pre-run sequence
-    let _ = window.set_focus();
+    // No set_focus and no always-on-top anywhere in this run: every check reads host
+    // state over IPC, smokeKey dispatches in-page events, and PrintWindow captures an
+    // occluded window — the smoke must never fight the operator for the desktop.
 
     // Boot: the chrome opened tx01 (tab-1) and pre-ran VER · DIR · SET · TASKMGR ·
     // TASKKILL RT-CTRL · TYPE README.TXT — the transcript must show the real banner
@@ -395,7 +405,6 @@ fn main() {
                 let handle = app.handle().clone();
                 std::thread::spawn(move || {
                     let window = handle.get_window("host").expect("host window exists");
-                    let _ = window.set_always_on_top(true);
                     let (evidence, code) = smoke_sequence(&handle, &window, &shots_dir);
                     let _ = std::fs::write(&out, serde_json::to_vec_pretty(&evidence).unwrap());
                     handle.exit(code);

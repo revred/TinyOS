@@ -116,6 +116,18 @@ line are one name. Display-model tabs (rt/agent) hold tx names with no host sess
 5. Then the full Part H checklist, every item, fresh boot 1440×860, and the close-out
    report against it.
 
+## 5a. Addendum (owner feedback, same day): the smoke no longer touches the desktop
+
+The first delivery inherited 17G's `CopyFromScreen` capture, which needs the window
+visible and unobstructed — so the smoke set the window always-on-top and stole focus
+per shot, and it blocked the owner's view while they analysed regression reports (it
+also cost three interrupted runs). That was never an IPC need: every check reads host
+state over the invoke path and `smokeKey` dispatches in-page events. Capture now uses
+`PrintWindow` + `PW_RENDERFULLCONTENT` (DWM renders the window's own surface
+regardless of z-order); `set_always_on_top` and every `set_focus` are deleted, and a
+minimized window is restored only in that one case. The smoke runs green fully
+occluded, and the captures are cleaner (no desktop bleed at the frame).
+
 ## 6. Session discipline notes
 
 Hooks were installed; staging was narrow throughout; the soak logger's
