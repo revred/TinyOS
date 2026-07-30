@@ -1,6 +1,6 @@
 # STORY-P1-07-05 — Host-Side Run Path: SD Image, Serial Capture, and the Same Exit-Code Scheme
 
-Status: **Specified — not started; needs `TEST-P1-07-05-A` Red first**
+Status: **In progress — host half Green 2026-07-30 (31 host tests, Red first; the one command builds `kernel8.img` and prints placement); criteria 2 and 3 await a live board capture through this same path. Not Verified.**
 Feature: [`FEAT-P1-07`](../features/FEAT-P1-07.md)
 Introduced in: [`session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md`](../../session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md) §5, piece 5 of the `LE-09` slice
 
@@ -29,6 +29,26 @@ The point is not convenience. Hardware evidence that no tool can reproduce is an
 - **No CI integration.** Per the recorded §7.4 decision (option (b), [Handover 19](../../session/hand-2026-07-28/19-feat-p1-07-acceptance-and-spine.md)), hardware runs stay manual and land in Reports; CI stays Tier 0. The ratio baselines therefore stay Tier 0 and `LE-23` is unaffected either way.
 - **No deploy loop.** This is a bring-up run path, not `EPIC-P1_5`'s deploy tooling, and it makes no signing, atomicity or rollback claim.
 - `LE-26` is raised, not closed.
+
+## Progress, 2026-07-30
+
+Split along the line the board draws, the way `-01` and `-02` split before it.
+**The half that needs no hardware is done and Green on the x86_64 dev machine;
+the live capture through a real serial port has not happened, and this Story is
+not Verified.**
+
+| Criterion | State |
+|---|---|
+| 1 — one command builds a placeable image and prints placement | **Green, and executed.** `cargo run -p xtask -- pi5 --fixture=boot` linked the first AArch64 binary in this workspace's history (`pi5-image`, packaging only — every behaviour stays host-tested in `hal-arm64`), flattened it in-process (no `objcopy`; the ELF parser is a tested pure function that *validates* entry = load address = `0x80000`), and produced an 82,916-byte `kernel8.img` whose first bytes are the divergence record's pinned `A4 00 38 D5`. The placement text carries `os_check=0`, `kernel=kernel8.img` and the 3-pin-connector/115200 facts, each pinned by a test. |
+| 2 — serial capture drives the exit code, existing protocol | **Half.** The verdict is read by the *same* `timing::parse_result` the Tier 0 gate uses (no second parser, no new protocol), and `hal-arm64`'s boot path now emits the `TINYOS-RESULT/1` line after its vector install, self-checked (EL1 reached, `VBAR_EL1` readback matches) — both sides pinned by cross-tests. The live half — a real port, a real board — is the open half. |
+| 3 — timeout and silence are distinguishable failures | **Half.** Silence (exit 3), spoke-without-verdict (exit 4), reported failure (1), pass (0) and harness error (2) are five pairwise-distinct process exits; the capture loop (bounded at 1 MiB, `SEC-20`) distinguishes never-spoke / spoke-and-stopped / verdict-seen under a scripted clock. The live half is the same open half as criterion 2. |
+| 4 — registered like every other fixture | **Green.** `list-fixtures` prints the `pi5` namespace with its owning `TEST-*`, beside (not inside) the Tier 0 and measurable namespaces. |
+| 5 — host-side logic unit-tested without a board | **Green.** 31 host tests, written Red first: classification, exit mapping, capture bounds/endings, ELF flattening (including truncation, wrong-arch, wrong-address and oversize rejection), placement text, run-record rendering, SHA-256 against FIPS vectors. The serial-port open is the only I/O and is the seam. |
+
+Every run writes an attribution record (`TEST-P1-07-05-A` clause 7): commit,
+fixture, port, baud, operator-supplied board revision and firmware version
+("unrecorded" rather than omitted), image and capture SHA-256, capture end
+reason, outcome, exit code, timestamp — beside the raw capture.
 
 ## Tests
 

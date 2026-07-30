@@ -15,6 +15,7 @@ mod external_isolation;
 mod gate;
 mod governance;
 mod performance_catalogue;
+mod pi5;
 mod probe_pe;
 mod shell_parity;
 mod spine_files;
@@ -28,12 +29,22 @@ use std::process::{Command, ExitCode};
 /// Process exit codes `xtask` itself returns, distinguishing "the thing
 /// under test failed" from "the harness couldn't even run the test" — the
 /// distinction `STORY-P0-01-03`'s acceptance criteria require.
+///
+/// `STORY-P1-07-05` extends the scheme with the two outcomes only hardware
+/// can produce: a board with no `isa-debug-exit` port can also *say nothing*
+/// (the common bring-up case) or *speak and stop without a verdict*, and
+/// `TEST-P1-07-05-A` clause 3 requires each to exit differently. `0`/`1`/`2`
+/// keep exactly their Tier 0 meanings.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XtaskExit {
     KernelBootSucceeded = 0,
     KernelBootFailed = 1,
     HarnessError = 2,
+    /// Not one byte arrived from the board before the deadline.
+    BoardSilent = 3,
+    /// The board spoke but no trustworthy verdict arrived.
+    BoardSpokeWithoutVerdict = 4,
 }
 
 /// A fixture that emits a `TINYOS-MEAS/2` envelope, identified by what has
@@ -455,7 +466,11 @@ struct Subcommand {
 const SUBCOMMANDS: &[Subcommand] = &[
     Subcommand { name: "help", summary: "Print this text" },
     Subcommand { name: "qemu-x86_64", summary: "Boot a Tier 0 fixture under QEMU" },
-    Subcommand { name: "list-fixtures", summary: "List every Tier 0 fixture and its owning Test" },
+    Subcommand {
+        name: "pi5",
+        summary: "Build the Pi 5 SD image, capture serial, and verdict a hardware run",
+    },
+    Subcommand { name: "list-fixtures", summary: "List every fixture and its owning Test" },
     Subcommand { name: "list-status", summary: "Emit Epic/Feature/Story state as TSV on stdout" },
     Subcommand { name: "measure", summary: "Run a measurable fixture and emit its envelope" },
     Subcommand {
@@ -564,6 +579,21 @@ fn main() -> ExitCode {
                 let target = measurable_fixture(name).expect("listed fixture must resolve");
                 println!("{:<22} {:<7} {}", name, target.package, target.binary);
             }
+            // A third namespace: Tier 1 hardware, registered here per
+            // `STORY-P0-01-04`'s rule even though (FEAT-P1-07 §7.4, decision b)
+            // no CI step will ever run it — runs are manual and land in Reports.
+            println!("\npi5 --fixture= (Tier 1 hardware run path; manual, never CI)\n");
+            println!("{:<22} {:<9} {:<10} TEST", "FIXTURE", "PACKAGE", "BINARY");
+            for fixture in pi5::PI5_FIXTURES {
+                println!(
+                    "{:<22} {:<9} {:<10} {}",
+                    fixture.name,
+                    pi5::IMAGE_PACKAGE,
+                    pi5::IMAGE_BINARY,
+                    fixture.owning_test
+                );
+                println!("{:<22} {}", "", fixture.summary);
+            }
             ExitCode::SUCCESS
         }
         "qemu-x86_64" => {
@@ -589,6 +619,48 @@ fn main() -> ExitCode {
             let (package, binary, feature) = (selected.package, selected.binary, selected.feature);
             match qemu_x86_64(package, binary, feature, serial_capture.as_deref(), Profile::Dev) {
                 Ok(code) => ExitCode::from(code as u8),
+                Err(message) => {
+                    eprintln!("xtask: {message}");
+                    ExitCode::from(XtaskExit::HarnessError as u8)
+                }
+            }
+        }
+        // `STORY-P1-07-05`: the Tier 1 hardware run path. One command builds
+        // the placeable image, prints where it goes, captures the debug UART
+        // and exits on the Tier 0 scheme extended with the two outcomes only
+        // hardware can produce (silence, spoke-without-verdict).
+        "pi5" => {
+            let rest: Vec<String> = args.collect();
+            let flag = |prefix: &str| {
+                rest.iter().find_map(|arg| arg.strip_prefix(prefix).map(str::to_string))
+            };
+            let Some(fixture_name) = flag("--fixture=") else {
+                eprintln!("xtask: pi5 needs --fixture=<name>");
+                eprintln!("xtask: run `cargo run -p xtask -- list-fixtures` for every fixture");
+                return ExitCode::from(XtaskExit::HarnessError as u8);
+            };
+            let Some(fixture) = pi5::pi5_fixture(&fixture_name) else {
+                eprintln!("xtask: unknown pi5 --fixture value '{fixture_name}'");
+                eprintln!("xtask: run `cargo run -p xtask -- list-fixtures` for every fixture");
+                return ExitCode::from(XtaskExit::HarnessError as u8);
+            };
+            let baud = flag("--baud=").and_then(|v| v.parse::<u32>().ok()).unwrap_or(115_200);
+            let timeout_secs =
+                flag("--timeout-secs=").and_then(|v| v.parse::<u64>().ok()).unwrap_or(90);
+            let quiet_secs =
+                flag("--quiet-secs=").and_then(|v| v.parse::<u64>().ok()).unwrap_or(10);
+            let board_revision = flag("--board-rev=").unwrap_or_else(|| "unrecorded".to_string());
+            let firmware_version = flag("--firmware=").unwrap_or_else(|| "unrecorded".to_string());
+            match pi5_run(
+                fixture,
+                flag("--port=").as_deref(),
+                baud,
+                timeout_secs,
+                quiet_secs,
+                &board_revision,
+                &firmware_version,
+            ) {
+                Ok(exit) => ExitCode::from(exit as u8),
                 Err(message) => {
                     eprintln!("xtask: {message}");
                     ExitCode::from(XtaskExit::HarnessError as u8)
@@ -1070,6 +1142,231 @@ fn qemu_x86_64(
     }
 }
 
+/// `STORY-P1-07-05`: builds the bootable AArch64 image, flattens it to a
+/// placeable `kernel8.img`, prints the SD-card placement, and — when `--port`
+/// is given — captures the debug UART and verdicts the run.
+///
+/// Everything here is I/O and process glue; every *decision* (flattening,
+/// bounded capture, outcome classification, exit mapping, the run record) is
+/// a pure, host-tested function in [`pi5`]. Exit-code discipline matches
+/// `qemu-x86_64`'s own, extended: 0 pass, 1 the board's own verdict said
+/// failure, 2 this harness could not run, 3 silence, 4 spoke-without-verdict.
+fn pi5_run(
+    fixture: &pi5::Pi5Fixture,
+    port: Option<&str>,
+    baud: u32,
+    timeout_secs: u64,
+    quiet_secs: u64,
+    board_revision: &str,
+    firmware_version: &str,
+) -> Result<XtaskExit, String> {
+    let os_root = os_root()?;
+    let target_spec = os_root.join("targets").join("aarch64-tinyos.json");
+
+    let mut build = Command::new("cargo");
+    build
+        .current_dir(&os_root)
+        .arg("build")
+        .arg("-p")
+        .arg(pi5::IMAGE_PACKAGE)
+        .arg("--target")
+        .arg(&target_spec)
+        // `-Z json-target-spec` is required by the pinned toolchain, and
+        // `build-std=core` alone leaves memcpy/memcmp undefined at link time
+        // (divergence record, build recipe).
+        .arg("-Z")
+        .arg("json-target-spec")
+        .arg("-Z")
+        .arg("build-std=core,compiler_builtins")
+        .arg("-Z")
+        .arg("build-std-features=compiler-builtins-mem");
+    if let Some(feature) = fixture.feature {
+        build.arg("--features").arg(feature);
+    }
+    let build_status = build.status().map_err(|e| format!("failed to invoke cargo build: {e}"))?;
+    if !build_status.success() {
+        return Err(format!("{} build failed", pi5::IMAGE_PACKAGE));
+    }
+
+    let elf_path =
+        os_root.join("target").join("aarch64-tinyos").join("debug").join(pi5::IMAGE_BINARY);
+    let elf = std::fs::read(&elf_path)
+        .map_err(|e| format!("cannot read built ELF {}: {e}", elf_path.display()))?;
+    let image = pi5::flatten_elf(&elf)?;
+    let image_sha256 = pi5::sha256_hex(&image.bytes);
+
+    let out_dir = os_root.join("target").join("pi5");
+    std::fs::create_dir_all(&out_dir)
+        .map_err(|e| format!("cannot create {}: {e}", out_dir.display()))?;
+    let image_path = out_dir.join("kernel8.img");
+    std::fs::write(&image_path, &image.bytes)
+        .map_err(|e| format!("cannot write {}: {e}", image_path.display()))?;
+
+    println!(
+        "pi5: built {} ({} bytes, entry {:#x} = first byte of the file)",
+        image_path.display(),
+        image.bytes.len(),
+        image.entry
+    );
+    println!();
+    print!("{}", pi5::placement_instructions(image.bytes.len(), &image_sha256));
+
+    let Some(port) = port else {
+        println!();
+        println!("no --port given: image built and placement printed. To capture a run:");
+        println!(
+            "  cargo run -p xtask -- pi5 --fixture={} --port=COM3   (or /dev/ttyUSB0)",
+            fixture.name
+        );
+        return Ok(XtaskExit::KernelBootSucceeded);
+    };
+
+    let serial = open_serial(port, baud)?;
+    let policy = pi5::CapturePolicy {
+        max_bytes: pi5::CapturePolicy::BRING_UP.max_bytes,
+        overall_ms: timeout_secs.saturating_mul(1000),
+        quiet_ms: quiet_secs.saturating_mul(1000),
+    };
+    println!();
+    println!(
+        "pi5: capturing {port} at {baud} baud — power-cycle the board now \
+         (window {timeout_secs}s, quiet window {quiet_secs}s)"
+    );
+    let mut source = pi5::ChannelChunks::spawn(serial, std::time::Duration::from_millis(100));
+    let clock = pi5::SystemClock::new();
+    let (captured, end) = pi5::capture(&mut source, &clock, &policy);
+    let outcome = pi5::classify(&captured);
+
+    // Attribution (`TEST-P1-07-05-A` clause 7): the capture and its record
+    // land together, named by time and fixture, so a Report quoting the bytes
+    // can name the invocation that produced them.
+    let timestamp_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0);
+    let run_dir = out_dir.join("runs").join(format!("{timestamp_unix}-{}", fixture.name));
+    std::fs::create_dir_all(&run_dir)
+        .map_err(|e| format!("cannot create {}: {e}", run_dir.display()))?;
+    let capture_path = run_dir.join("capture.log");
+    std::fs::write(&capture_path, &captured)
+        .map_err(|e| format!("cannot write {}: {e}", capture_path.display()))?;
+    let commit = git_head(&os_root);
+    let capture_sha256 = pi5::sha256_hex(&captured);
+    let record = pi5::RunRecord {
+        commit: &commit,
+        fixture: fixture.name,
+        port,
+        baud,
+        board_revision,
+        firmware_version,
+        image_sha256: &image_sha256,
+        image_bytes: image.bytes.len(),
+        capture_sha256: &capture_sha256,
+        capture_bytes: captured.len(),
+        capture_end: end,
+        outcome: &outcome,
+        timestamp_unix,
+    };
+    let record_path = run_dir.join("record.tsv");
+    std::fs::write(&record_path, pi5::render_run_record(&record))
+        .map_err(|e| format!("cannot write {}: {e}", record_path.display()))?;
+
+    // Print what was seen, always — clause 3: each outcome "prints what it
+    // saw", and on a bring-up the transcript IS the diagnostic.
+    println!();
+    println!("pi5: capture ended ({}) after {} bytes", end.as_str(), captured.len());
+    println!("----------------------------------------------------------------");
+    print!("{}", String::from_utf8_lossy(&captured));
+    println!("----------------------------------------------------------------");
+    match &outcome {
+        pi5::Pi5Outcome::Pass { fixture } => {
+            println!("pi5: PASS — the board's own `{fixture}` verdict is ok=true");
+        }
+        pi5::Pi5Outcome::ReportedFailure { fixture } => {
+            println!("pi5: REPORTED FAILURE — the board's own `{fixture}` verdict is ok=false");
+        }
+        pi5::Pi5Outcome::Silence => {
+            println!(
+                "pi5: SILENCE — not one byte arrived. Check in this order: adapter \
+                 loopback, connector muxing (SWD vs UART), config.txt has os_check=0, \
+                 THEN suspect the code (divergence record §§1-4)"
+            );
+        }
+        pi5::Pi5Outcome::SpokeWithoutVerdict { detail } => {
+            println!(
+                "pi5: SPOKE WITHOUT VERDICT — bytes arrived but no trustworthy verdict \
+                 did ({detail})"
+            );
+        }
+    }
+    println!("pi5: retained {} and {}", capture_path.display(), record_path.display());
+    Ok(pi5::outcome_exit(&outcome))
+}
+
+/// Best-effort `git rev-parse HEAD` — "unrecorded" rather than an error, so a
+/// capture taken outside a git checkout still gets a record that says so.
+fn git_head(os_root: &Path) -> String {
+    Command::new("git")
+        .current_dir(os_root)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|stdout| stdout.trim().to_string())
+        .filter(|commit| !commit.is_empty())
+        .unwrap_or_else(|| "unrecorded".to_string())
+}
+
+/// Opens the serial device after configuring its line settings through the
+/// platform's own tool (`mode` / `stty`) — the one seam `TEST-P1-07-05-A`
+/// clause 6 leaves untested, kept exactly as thin as it reads.
+fn open_serial(port: &str, baud: u32) -> Result<std::fs::File, String> {
+    #[cfg(windows)]
+    {
+        let configure =
+            format!("mode {port}: BAUD={baud} PARITY=n DATA=8 STOP=1 to=off xon=off octs=off");
+        let status = Command::new("cmd")
+            .args(["/C", &configure])
+            .status()
+            .map_err(|e| format!("failed to invoke `mode`: {e}"))?;
+        if !status.success() {
+            return Err(format!("`{configure}` failed — is {port} present and free?"));
+        }
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(format!(r"\\.\{port}"))
+            .map_err(|e| format!("cannot open {port}: {e}"))
+    }
+    #[cfg(not(windows))]
+    {
+        let status = Command::new("stty")
+            .args([
+                "-F",
+                port,
+                &baud.to_string(),
+                "raw",
+                "cs8",
+                "-cstopb",
+                "-parenb",
+                "-echo",
+                "clocal",
+                "-crtscts",
+            ])
+            .status()
+            .map_err(|e| format!("failed to invoke `stty`: {e}"))?;
+        if !status.success() {
+            return Err(format!("stty could not configure {port}"));
+        }
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(port)
+            .map_err(|e| format!("cannot open {port}: {e}"))
+    }
+}
+
 /// Runs the Tier 0 measurement fixture `runs` times, parsing each run's
 /// captured COM1 stream into structured percentile records and reporting
 /// per-metric run-to-run variance — `STORY-P1-01-01`'s acceptance criteria 2
@@ -1149,7 +1446,11 @@ fn run_measurements(
         let exit_ok = match outcome {
             XtaskExit::KernelBootSucceeded => true,
             XtaskExit::KernelBootFailed => false,
-            XtaskExit::HarnessError => {
+            // The board-only codes cannot come out of `qemu_x86_64` — they
+            // exist for the `pi5` path, which has no isa-debug-exit port.
+            XtaskExit::HarnessError
+            | XtaskExit::BoardSilent
+            | XtaskExit::BoardSpokeWithoutVerdict => {
                 return Err(format!("run {run} could not be executed"));
             }
         };

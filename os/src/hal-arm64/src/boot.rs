@@ -132,6 +132,30 @@ pub fn report_ready<M: Mmio>(uart: &Pl011<M>) -> Result<(), Pl011Error> {
     uart.write_bytes(KNOWN_BYTE_SEQUENCE)
 }
 
+/// The fixture name the default boot image reports in its verdict line.
+pub const BOOT_FIXTURE_NAME: &str = "boot";
+
+/// Writes the UART pass/fail verdict — `STORY-P1-01-02`'s `TINYOS-RESULT/1`
+/// protocol, byte-compatible with what every Tier 0 fixture emits, because
+/// `STORY-P1-07-05`'s run path drives its exit code with the parser that
+/// already exists and no new protocol is invented for hardware. The framer
+/// owns the CR; this line supplies LF only, like every other report here.
+pub fn report_result<M: Mmio>(uart: &Pl011<M>, fixture: &str, ok: bool) -> Result<(), Pl011Error> {
+    uart.write_str("TINYOS-RESULT/1 fixture=")?;
+    uart.write_str(fixture)?;
+    uart.write_str(" ok=")?;
+    uart.write_str(if ok { "true\n" } else { "false\n" })
+}
+
+/// The boot image's own self-consistency verdict: the two facts
+/// `continue_at_el1` can actually observe after the drop and the vector
+/// install. Anything less than both is `ok=false` — a wrong execution level
+/// or a `VBAR_EL1` write that did not take is a hang deferred, not a pass.
+pub fn boot_self_check(current_el_raw: u64, vbar_requested: u64, vbar_readback: u64) -> bool {
+    matches!(ExceptionLevel::decode(current_el_raw), Some(ExceptionLevel::El1))
+        && vbar_requested == vbar_readback
+}
+
 /// Writes a `u64` as sixteen hex digits.
 fn write_hex<M: Mmio>(uart: &Pl011<M>, value: u64) -> Result<(), Pl011Error> {
     uart.write_bytes(&hex_u64(value))
@@ -343,9 +367,24 @@ extern "C" fn continue_at_el1() -> ! {
     let (requested, readback) = unsafe { crate::fault::install() };
     let _ = crate::fault::report_vbar(&uart, requested, readback);
 
-    // Park. Not a halt loop out of laziness: with no scheduler and no resume
-    // path, a safe state is the only correct terminal state, and
-    // `agent/CODING_STANDARDS.md` resolves this as fail-safe over keep-trying.
+    // `STORY-P1-07-05`: the verdict line the host run path's exit code is
+    // driven by, emitted last so it vouches for every claim above it. This is
+    // the line that turns a capture into a pass/fail rather than a transcript.
+    let _ =
+        report_result(&uart, BOOT_FIXTURE_NAME, boot_self_check(current_el, requested, readback));
+
+    park()
+}
+
+/// Parks the core in `wfe` forever.
+///
+/// Not a halt loop out of laziness: with no scheduler and no resume path, a
+/// safe state is the only correct terminal state, and
+/// `agent/CODING_STANDARDS.md` resolves this as fail-safe over keep-trying.
+/// Public so `pi5-image`'s panic handler lands in the same state instead of
+/// duplicating the `unsafe`.
+#[cfg(target_arch = "aarch64")]
+pub fn park() -> ! {
     loop {
         // SAFETY: `wfe` is architecturally permitted at every exception level
         // and has no effect on any state this code owns.
@@ -546,6 +585,53 @@ mod tests {
         report_entry(&uart, &entered_at(0b1000)).expect("ready");
         report_drop(&uart, ExceptionLevel::El2).expect("ready");
         assert!(!wire.captured().contains("\r\r"), "got: {:?}", wire.captured());
+    }
+
+    // `STORY-P1-07-05` clause 2: the host run path's exit code is driven by
+    // the *existing* UART pass/fail protocol — `TINYOS-RESULT/1`, exactly as
+    // `STORY-P1-01-02` shipped it and exactly as `xtask`'s `parse_result`
+    // consumes it. No new protocol is invented for hardware, so the line this
+    // board emits must be byte-compatible with the Tier 0 one.
+    #[test]
+    fn the_boot_verdict_line_is_the_tier_0_result_protocol_verbatim() {
+        let wire = Wire::new();
+        let uart = Pl011::new(&wire);
+        report_result(&uart, BOOT_FIXTURE_NAME, true).expect("ready");
+        // The framer owns the CR (see the no-doubled-CR test above), so the
+        // wire carries CRLF while the source supplies LF only.
+        assert_eq!(wire.captured(), "TINYOS-RESULT/1 fixture=boot ok=true\r\n");
+    }
+
+    #[test]
+    fn a_failed_self_check_reports_ok_false_rather_than_staying_silent() {
+        // A board whose self-check fails and says nothing is indistinguishable
+        // from a board that hung — and `TEST-P1-07-05-A` clause 3 spends its
+        // whole third paragraph on why that ambiguity wastes a session.
+        let wire = Wire::new();
+        let uart = Pl011::new(&wire);
+        report_result(&uart, BOOT_FIXTURE_NAME, false).expect("ready");
+        assert_eq!(wire.captured(), "TINYOS-RESULT/1 fixture=boot ok=false\r\n");
+    }
+
+    #[test]
+    fn the_verdict_passes_only_at_el1_with_the_vbar_it_asked_for() {
+        const EL1: u64 = 0b0100;
+        const EL2: u64 = 0b1000;
+        const VBAR: u64 = 0x8_0800;
+        // The two facts `continue_at_el1` can actually observe: the re-read
+        // exception level, and the `VBAR_EL1` readback. Both right is the only
+        // pass.
+        assert!(boot_self_check(EL1, VBAR, VBAR));
+        // Still at EL2: the `eret` did not do what it was told.
+        assert!(!boot_self_check(EL2, VBAR, VBAR));
+        // A `VBAR_EL1` readback that disagrees: the vector install silently
+        // did not take, which is a hang wearing a success banner.
+        assert!(!boot_self_check(EL1, VBAR, VBAR + 0x800));
+        // An undecodable level is a wrong read, never a pass.
+        assert!(!boot_self_check(0xFFFF, VBAR, VBAR));
+        // EL0 is impossible as an execution level here; a capture claiming it
+        // means the read is wrong.
+        assert!(!boot_self_check(0b0000, VBAR, VBAR));
     }
 
     // The report is one transmit path, and it stops on the first failure like

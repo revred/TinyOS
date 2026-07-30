@@ -1,0 +1,18 @@
+# The bootable Raspberry Pi 5 image (`STORY-P1-07-05`).
+#
+# Packaging only: every behaviour in the image — entry report, EL2→EL1 drop,
+# READY sequence, vector install, UART verdict — lives in `hal-arm64`, where
+# it is host-tested behind the MMIO seam. This crate exists because a flat
+# `kernel8.img` needs an AArch64 *binary* to flatten, and `STORY-P1-07-01`
+# deliberately left producing one to the run-path Story.
+
+[package]
+name = "pi5-image"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Bootable Raspberry Pi 5 image, flattened to kernel8.img by `xtask pi5` (STORY-P1-07-05)"
+
+[dependencies]
+hal-arm64 = { path = "../hal-arm64" }

@@ -1,6 +1,6 @@
 # TEST-P1-07-05-A — One Command, Three Distinguishable Outcomes, and No Second Harness
 
-Status: **Specified — written before implementation, per the TDD mandate**
+Status: **Partially Verified (Host), 2026-07-30** — every host-testable clause Green (31 host tests, written Red first and observed failing; the one command built an 82,916-byte `kernel8.img` whose first bytes are the divergence record's pinned `A4 00 38 D5`); the Tier 1 live-board capture through this path has not happened. **Specification unchanged since it was written before implementation.**
 Story: [`STORY-P1-07-05`](../stories/STORY-P1-07-05.md)
 Tier: Host unit tests (capture parsing, verdict extraction, timeout handling, exit-code mapping, fixture registration) **plus** a Tier 1 hardware run driving a real board over the debug UART, per [Target Hardware & Test Matrix](../../README.md#target-hardware--test-matrix)
 Assurance contract: [`goals/assurance/story-contracts.tsv`](../assurance/story-contracts.tsv)

@@ -49,6 +49,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi5-image"
+version = "0.1.0"
+dependencies = [
+ "hal-arm64",
+]
+
+[[package]]
 name = "shell"
 version = "0.1.0"
 dependencies = [

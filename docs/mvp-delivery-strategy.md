@@ -35,6 +35,7 @@ The repository root separates **project documentation and governance** (which a 
     /hal/
     /hal-x86_64/
     /hal-arm64/
+    /pi5-image/
     /aci/
     /shell/
     /deploy-device/
@@ -64,6 +65,7 @@ Every entry below is an `os/src/<name>/` directory with its own `Cargo.toml`. Th
 | `hal` | Bus enumeration, ACPI/Device-Tree manifest normalization, arch-neutral HAL trait definitions | Yes | Permitted | Phase 0 |
 | `hal-x86_64` | x86_64-specific HAL backend | Yes | Permitted | Phase 0 |
 | `hal-arm64` | ARM64-specific HAL backend | Yes | Permitted | **Phase 1, narrowly** — `STORY-P1-01-03` created it holding only the generic-timer cycle source and timebase, so the measurement harness's arch seam has a second implementor to be checked against before any board exists. Boot, UART, MMU and device-tree remain Phase 7 (Jetson/Pi 5 bring-up) |
+| `pi5-image` | Bootable Raspberry Pi 5 image: packaging around `hal-arm64`'s boot path, flattened to `kernel8.img` by `xtask pi5` | Yes (AArch64 build; inert host stub otherwise) | `#![forbid(unsafe_code)]` — every register touch stays in `hal-arm64` | **Phase 1, narrowly** — `STORY-P1-07-05` created it because a flat image needs an AArch64 *binary* to flatten; behaviour accumulating here would be behaviour escaping `hal-arm64`'s host tests |
 | `aci` | Capability registry, policy engine, audit log | Yes | `#![forbid(unsafe_code)]` | Phase 5 |
 | `shell` | TINYCMD canonical verb core + DOS/POSIX front-ends | Yes | `#![forbid(unsafe_code)]` | Phase 2 |
 | `deploy-device` | On-device deploy/hot-swap/A-B-boot logic | Yes | Permitted (bootloader interaction) | Phase 1.5 |

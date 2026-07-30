@@ -45,18 +45,21 @@ jobs:
         env:
           RUSTDOCFLAGS: "-D missing-docs"
 
-      # TEST-P1-07-01-A clause 2. The AArch64 target spec is only meaningful if
-      # something builds against it, and nothing in this workspace links an
-      # AArch64 binary yet (that is STORY-P1-07-05's image build). Without this
-      # step the spec, the boot stub's inline assembly and the `VolatileMmio`
-      # seam would compile nowhere and rot silently between hardware sessions —
-      # which is the state `timer::SystemRegisters` was in for three Features.
+      # TEST-P1-07-01-A clause 2, upgraded by STORY-P1-07-05. This used to
+      # build only the hal-arm64 *library*, because nothing in the workspace
+      # linked an AArch64 binary; pi5-image now does, so the step builds the
+      # bootable binary and thereby also proves the target spec, the boot
+      # stub's inline assembly, the linker script and the `VolatileMmio` seam
+      # all still LINK — the failure class `build-std=core`'s missing
+      # memcpy/memcmp made invisible to a library-only build. The flattening
+      # to kernel8.img stays out of CI: hardware runs are manual and land in
+      # Reports (FEAT-P1-07 §7.4, decision b).
       #
       # `compiler_builtins` with `compiler-builtins-mem` is not optional: a
       # `build-std=core` alone leaves memcpy/memcmp undefined at link time.
-      - name: AArch64 target spec builds hal-arm64 (STORY-P1-07-01)
+      - name: AArch64 target spec links the Pi 5 boot image (STORY-P1-07-01/-05)
         run: >
-          cargo build -p hal-arm64
+          cargo build -p pi5-image
           --target targets/aarch64-tinyos.json
           -Z build-std=core,compiler_builtins
           -Z build-std-features=compiler-builtins-mem
