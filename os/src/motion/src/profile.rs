@@ -1,5 +1,5 @@
 //! The declared shape of one motion group: which feedback channels are
-//! mandatory, which axis each one reports for, and which axes an active
+//! mandatory, which owner each one reports for, and which axes an active
 //! command frame must cover. The profile is configuration decided at
 //! admission time — validation compares hostile frames *against* it; nothing
 //! in the cyclic path ever mutates it.
@@ -10,23 +10,20 @@
 //! contract §2).
 
 use crate::command::AxisMask;
-use crate::feedback::{FeedbackMask, FeedbackRole};
+use crate::feedback::{FeedbackMask, FeedbackOwner};
 use crate::ident::{AxisId, FeedbackId, MotionGroupId, MAX_FEEDBACK};
 
-/// Which axis and role one declared feedback channel reports for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FeedbackBinding {
-    /// The axis the channel belongs to.
-    pub axis: AxisId,
-    /// What the channel measures.
-    pub role: FeedbackRole,
-}
-
 /// The declared shape of one motion group.
+///
+/// Since `STORY-P1-08-02` a channel's declared identity is its
+/// [`FeedbackOwner`] — axis-owned, end-effector-owned, or
+/// group/process-owned — so the Hexapod's probe and metrology channels are
+/// declared with the same mechanism as motor/load channels and validated in
+/// the same atomic epoch, never aliased into an axis (`R4`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GroupProfile {
     group: MotionGroupId,
-    bindings: [Option<FeedbackBinding>; MAX_FEEDBACK],
+    bindings: [Option<FeedbackOwner>; MAX_FEEDBACK],
     mandatory_feedback: FeedbackMask,
     mandatory_axes: AxisMask,
 }
@@ -50,11 +47,11 @@ impl GroupProfile {
         self.group
     }
 
-    /// Declares one mandatory feedback channel and the identity it must
-    /// report with. A frame missing this bit — or reporting it with a
-    /// different axis or role — is invalid for active control.
-    pub fn require_feedback(&mut self, id: FeedbackId, axis: AxisId, role: FeedbackRole) {
-        self.bindings[id.index()] = Some(FeedbackBinding { axis, role });
+    /// Declares one mandatory feedback channel and the owner it must report
+    /// with. A frame missing this bit — or reporting it with a different
+    /// owner in any respect — is invalid for active control.
+    pub fn require_feedback(&mut self, id: FeedbackId, owner: FeedbackOwner) {
+        self.bindings[id.index()] = Some(owner);
         self.mandatory_feedback = self.mandatory_feedback.with(id);
     }
 
@@ -75,9 +72,9 @@ impl GroupProfile {
         self.mandatory_axes
     }
 
-    /// The declared identity of one channel, if the profile declared it.
+    /// The declared owner of one channel, if the profile declared it.
     #[must_use]
-    pub fn binding(&self, id: FeedbackId) -> Option<&FeedbackBinding> {
+    pub fn binding(&self, id: FeedbackId) -> Option<&FeedbackOwner> {
         self.bindings[id.index()].as_ref()
     }
 }
@@ -86,8 +83,10 @@ impl GroupProfile {
 mod tests {
     use super::*;
     use crate::command::AxisMask;
-    use crate::feedback::{FeedbackMask, FeedbackRole};
-    use crate::ident::{AxisId, FeedbackId, MotionGroupId};
+    use crate::feedback::{
+        AxisFeedbackRole, EffectorFeedbackRole, FeedbackMask, FeedbackOwner, GroupFeedbackRole,
+    };
+    use crate::ident::{AxisId, EffectorId, FeedbackId, MotionGroupId};
 
     fn axis(index: u8) -> AxisId {
         AxisId::new(index).expect("test index in range")
@@ -106,15 +105,28 @@ mod tests {
     }
 
     #[test]
-    fn requiring_feedback_records_its_binding_and_its_mask_bit() {
+    fn requiring_feedback_records_its_owner_and_its_mask_bit() {
         let mut profile = GroupProfile::new(MotionGroupId::new(1));
-        profile.require_feedback(feedback(4), axis(2), FeedbackRole::MotorPosition);
+        let owner = FeedbackOwner::Axis { axis: axis(2), role: AxisFeedbackRole::MotorPosition };
+        profile.require_feedback(feedback(4), owner);
 
         assert!(profile.mandatory_feedback().contains(feedback(4)));
-        let binding = profile.binding(feedback(4)).expect("binding was declared");
-        assert_eq!(binding.axis, axis(2));
-        assert_eq!(binding.role, FeedbackRole::MotorPosition);
+        assert_eq!(profile.binding(feedback(4)), Some(&owner));
         assert!(profile.binding(feedback(5)).is_none());
+    }
+
+    #[test]
+    fn effector_and_group_owned_channels_are_declared_the_same_way() {
+        let mut profile = GroupProfile::new(MotionGroupId::new(1));
+        let probe = FeedbackOwner::EndEffector {
+            effector: EffectorId::new(0).expect("in range"),
+            role: EffectorFeedbackRole::ProbeDeflection,
+        };
+        let metrology = FeedbackOwner::Group { role: GroupFeedbackRole::Metrology };
+        profile.require_feedback(feedback(6), probe);
+        profile.require_feedback(feedback(7), metrology);
+        assert_eq!(profile.binding(feedback(6)), Some(&probe));
+        assert_eq!(profile.binding(feedback(7)), Some(&metrology));
     }
 
     #[test]

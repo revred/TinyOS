@@ -11,6 +11,12 @@ pub const MAX_AXES: usize = 16;
 /// Compile-time bound on position/velocity feedback channels in one group.
 pub const MAX_FEEDBACK: usize = 32;
 
+/// Compile-time bound on end effectors in one motion group. One for the
+/// Hexapod's probe-carrying disc; a small headroom for machines that carry
+/// more than one tool point, still a compile-time bound like every capacity
+/// in this crate.
+pub const MAX_EFFECTORS: usize = 4;
+
 /// A constructor was handed an index outside its compile-time bound.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IdentityError {
@@ -18,6 +24,8 @@ pub enum IdentityError {
     AxisOutOfRange(u8),
     /// The feedback index was not below [`MAX_FEEDBACK`].
     FeedbackOutOfRange(u8),
+    /// The effector index was not below [`MAX_EFFECTORS`].
+    EffectorOutOfRange(u8),
 }
 
 /// Bounded identity of one motion group.
@@ -71,6 +79,31 @@ impl FeedbackId {
     }
 
     /// The validated slot index — the only sanctioned path back to a number.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+/// Identity of one end effector, always below [`MAX_EFFECTORS`].
+///
+/// Added by `STORY-P1-08-02`: a probe or tool point is a first-class feedback
+/// owner, never an alias of an axis (`R4` in the de-risking contract).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EffectorId(u8);
+
+impl EffectorId {
+    /// Validates and wraps an effector index; out-of-range values are
+    /// refused, never clamped.
+    pub const fn new(index: u8) -> Result<Self, IdentityError> {
+        if (index as usize) < MAX_EFFECTORS {
+            Ok(Self(index))
+        } else {
+            Err(IdentityError::EffectorOutOfRange(index))
+        }
+    }
+
+    /// The validated index — the only sanctioned path back to a number.
     #[must_use]
     pub const fn index(self) -> usize {
         self.0 as usize
@@ -182,6 +215,20 @@ mod tests {
     fn feedback_id_refuses_the_bound_and_above() {
         assert_eq!(FeedbackId::new(MAX_FEEDBACK as u8), Err(IdentityError::FeedbackOutOfRange(32)));
         assert_eq!(FeedbackId::new(255), Err(IdentityError::FeedbackOutOfRange(255)));
+    }
+
+    #[test]
+    fn effector_id_accepts_every_index_below_the_bound() {
+        for index in 0..MAX_EFFECTORS as u8 {
+            let effector = EffectorId::new(index).expect("index below MAX_EFFECTORS is valid");
+            assert_eq!(effector.index(), index as usize);
+        }
+    }
+
+    #[test]
+    fn effector_id_refuses_the_bound_and_above() {
+        assert_eq!(EffectorId::new(MAX_EFFECTORS as u8), Err(IdentityError::EffectorOutOfRange(4)));
+        assert_eq!(EffectorId::new(255), Err(IdentityError::EffectorOutOfRange(255)));
     }
 
     #[test]

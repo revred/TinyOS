@@ -1,6 +1,6 @@
 # FEAT-P1-08 — Motion-Group Synchronisation Foundation: Contracts Before Transport
 
-Status: **In progress — `STORY-P1-08-01` Verified at the host tier (data contracts, validation and the deterministic transport double); every later work package (`MFS-02`…`MFS-11`: periodic release, full simulator, collector, executor, atomic commit on a timeline, process image, EtherCAT, NIC, CiA-402, HIL) is undecomposed and unclaimed**
+Status: **In progress — `STORY-P1-08-01` and `STORY-P1-08-02` Verified at the host tier (data contracts, validation, the deterministic transport double, and typed axis/end-effector/group feedback ownership per `ADR 0011`/`R4`); every later work package (`MFS-02`…`MFS-11`: periodic release, full simulator, collector, executor, atomic commit on a timeline, process image, EtherCAT, NIC, CiA-402, HIL) is undecomposed and unclaimed, and the `LAT-PHYS-10` architecture gate is open (`LE-63`)**
 Epic: [`EPIC-P1`](../epics/EPIC-P1.md)
 Introduced in: [`work/case-motion-controller/foundational-motion-synchronisation-delivery.md`](../../work/case-motion-controller/foundational-motion-synchronisation-delivery.md), the delivery contract this Feature promotes; decision recorded in [`ADR 0010`](../../docs/adr/0010-the-motion-group-is-the-unit-of-control.md)
 
@@ -51,6 +51,7 @@ changes: no `kernel`, `hal` or `xtask` implementation line is touched by `-01`.
 | Story | Summary | Status |
 |---|---|---|
 | [`STORY-P1-08-01`](../stories/STORY-P1-08-01.md) | Motion-group data contracts: typed identities, fixed frames, mandatory-mask and epoch-order validation, the `MotionGroupTransport` contract, and the deterministic in-memory double | Verified (Host, 2026-07-30) |
+| [`STORY-P1-08-02`](../stories/STORY-P1-08-02.md) | Typed feedback ownership — axis, end-effector, group/process — so the Hexapod probe and metrology channels share one validated epoch and the `R4` axis-cast is a driven rejection | Verified (Host, 2026-07-30) |
 
 Later Stories are decomposed just-in-time from the delivery contract's `MFS-02`…`MFS-11`
 table when each is started; pre-building the whole tree here would violate the

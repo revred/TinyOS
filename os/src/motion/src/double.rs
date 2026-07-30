@@ -159,7 +159,9 @@ impl MotionGroupTransport for InMemoryTransport {
 mod tests {
     use super::*;
     use crate::command::{ActuationFrame, AxisCommand, CommandLimits, CommandMode};
-    use crate::feedback::{FeedbackFrame, FeedbackQuality, FeedbackRole, FeedbackSample};
+    use crate::feedback::{
+        AxisFeedbackRole, FeedbackFrame, FeedbackOwner, FeedbackQuality, FeedbackSample,
+    };
     use crate::ident::{
         AxisId, Epoch, FeedbackId, MotionGroupId, MotionTime, MAX_AXES, MAX_FEEDBACK,
     };
@@ -180,18 +182,20 @@ mod tests {
 
     fn one_axis_profile() -> GroupProfile {
         let mut profile = GroupProfile::new(GROUP);
-        profile.require_feedback(feedback(0), axis(0), FeedbackRole::MotorPosition);
+        profile.require_feedback(
+            feedback(0),
+            FeedbackOwner::Axis { axis: axis(0), role: AxisFeedbackRole::MotorPosition },
+        );
         profile.require_axis(axis(0));
         profile
     }
 
     fn scripted_frame(profile: &GroupProfile, epoch: Epoch) -> FeedbackFrame<MAX_FEEDBACK> {
         let mut frame = FeedbackFrame::new(GROUP, epoch, MotionTime::new(epoch.raw() as u64));
-        let binding = profile.binding(feedback(0)).expect("declared");
+        let owner = *profile.binding(feedback(0)).expect("declared");
         frame.place(FeedbackSample {
             feedback_id: feedback(0),
-            axis_id: binding.axis,
-            role: binding.role,
+            owner,
             position: Position::new(5),
             velocity: Velocity::new(1),
             quality: FeedbackQuality::Valid,

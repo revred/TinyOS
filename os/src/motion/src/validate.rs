@@ -83,13 +83,14 @@ pub fn validate_feedback(
             return Err(FeedbackRejection::MissingMandatoryFeedback(id));
         }
         let sample = &frame.samples[id.index()];
-        let Some(binding) = profile.binding(id) else {
+        let Some(owner) = profile.binding(id) else {
             // A mandatory bit always has a binding: `require_feedback` sets
             // both together. Defensive arm, typed as identity failure.
             return Err(FeedbackRejection::IdentityMismatch(id));
         };
-        if sample.feedback_id != id || sample.axis_id != binding.axis || sample.role != binding.role
-        {
+        // Owner equality is total: wrong axis, wrong effector, wrong role or
+        // wrong ownership kind entirely (the `R4` cast) all reject here.
+        if sample.feedback_id != id || sample.owner != *owner {
             return Err(FeedbackRejection::IdentityMismatch(id));
         }
         if sample.quality != FeedbackQuality::Valid {
@@ -151,9 +152,12 @@ pub fn validate_actuation(
 mod tests {
     use super::*;
     use crate::command::{ActuationFrame, AxisCommand, CommandLimits, CommandMode};
-    use crate::feedback::{FeedbackFrame, FeedbackQuality, FeedbackRole, FeedbackSample};
+    use crate::feedback::{
+        AxisFeedbackRole, EffectorFeedbackRole, FeedbackFrame, FeedbackOwner, FeedbackQuality,
+        FeedbackSample, GroupFeedbackRole,
+    };
     use crate::ident::{
-        AxisId, Epoch, FeedbackId, MotionGroupId, MotionTime, MAX_AXES, MAX_FEEDBACK,
+        AxisId, EffectorId, Epoch, FeedbackId, MotionGroupId, MotionTime, MAX_AXES, MAX_FEEDBACK,
     };
     use crate::profile::GroupProfile;
     use crate::units::{Position, Torque, Velocity};
@@ -168,25 +172,58 @@ mod tests {
         FeedbackId::new(index).expect("test index in range")
     }
 
+    fn axis_owner(axis_index: u8, role: AxisFeedbackRole) -> FeedbackOwner {
+        FeedbackOwner::Axis { axis: axis(axis_index), role }
+    }
+
     /// Two axes, one motor-side and one load-side channel each — the smallest
     /// profile shaped like the delivery contract's first demonstration.
     fn two_axis_profile() -> GroupProfile {
         let mut profile = GroupProfile::new(GROUP);
-        profile.require_feedback(feedback(0), axis(0), FeedbackRole::MotorPosition);
-        profile.require_feedback(feedback(1), axis(0), FeedbackRole::LoadPosition);
-        profile.require_feedback(feedback(2), axis(1), FeedbackRole::MotorPosition);
-        profile.require_feedback(feedback(3), axis(1), FeedbackRole::LoadPosition);
+        profile.require_feedback(feedback(0), axis_owner(0, AxisFeedbackRole::MotorPosition));
+        profile.require_feedback(feedback(1), axis_owner(0, AxisFeedbackRole::LoadPosition));
+        profile.require_feedback(feedback(2), axis_owner(1, AxisFeedbackRole::MotorPosition));
+        profile.require_feedback(feedback(3), axis_owner(1, AxisFeedbackRole::LoadPosition));
         profile.require_axis(axis(0));
         profile.require_axis(axis(1));
         profile
     }
 
+    /// The Hexapod worked-case shape: three drive axes with motor- and
+    /// load-side channels each, one end-effector probe-deflection channel, one
+    /// group metrology channel — all mandatory, one epoch (`R4`).
+    fn hexapod_profile() -> GroupProfile {
+        let mut profile = GroupProfile::new(GROUP);
+        for arm in 0..3u8 {
+            profile.require_feedback(
+                feedback(arm * 2),
+                axis_owner(arm, AxisFeedbackRole::MotorPosition),
+            );
+            profile.require_feedback(
+                feedback(arm * 2 + 1),
+                axis_owner(arm, AxisFeedbackRole::LoadPosition),
+            );
+            profile.require_axis(axis(arm));
+        }
+        profile.require_feedback(
+            feedback(6),
+            FeedbackOwner::EndEffector {
+                effector: EffectorId::new(0).expect("in range"),
+                role: EffectorFeedbackRole::ProbeDeflection,
+            },
+        );
+        profile.require_feedback(
+            feedback(7),
+            FeedbackOwner::Group { role: GroupFeedbackRole::Metrology },
+        );
+        profile
+    }
+
     fn valid_sample(profile: &GroupProfile, id: FeedbackId) -> FeedbackSample {
-        let binding = profile.binding(id).expect("mandatory binding declared");
+        let owner = *profile.binding(id).expect("mandatory binding declared");
         FeedbackSample {
             feedback_id: id,
-            axis_id: binding.axis,
-            role: binding.role,
+            owner,
             position: Position::new(10),
             velocity: Velocity::new(1),
             quality: FeedbackQuality::Valid,
@@ -327,11 +364,109 @@ mod tests {
         let profile = two_axis_profile();
         let mut frame = complete_frame(&profile, Epoch::new(8));
         let mut sample = valid_sample(&profile, feedback(2));
-        sample.axis_id = axis(0); // profile binds feedback 2 to axis 1
+        // Profile binds feedback 2 to axis 1; the frame claims axis 0.
+        sample.owner = axis_owner(0, AxisFeedbackRole::MotorPosition);
         frame.place(sample);
         assert_eq!(
             validate_feedback(&profile, Some(Epoch::new(7)), &frame),
             Err(FeedbackRejection::IdentityMismatch(feedback(2)))
+        );
+    }
+
+    // --- typed ownership: the R4 kill rule as a positive control -------------
+
+    #[test]
+    fn a_probe_channel_cast_into_an_axis_rejects_the_whole_epoch() {
+        let profile = hexapod_profile();
+        let mut frame = complete_frame(&profile, Epoch::new(8));
+        // The forbidden cast: probe data presented as axis-owned feedback.
+        let mut sample = valid_sample(&profile, feedback(6));
+        sample.owner = axis_owner(0, AxisFeedbackRole::LoadPosition);
+        frame.place(sample);
+        assert_eq!(
+            validate_feedback(&profile, Some(Epoch::new(7)), &frame),
+            Err(FeedbackRejection::IdentityMismatch(feedback(6)))
+        );
+    }
+
+    #[test]
+    fn a_group_channel_cast_into_an_axis_rejects_the_whole_epoch() {
+        let profile = hexapod_profile();
+        let mut frame = complete_frame(&profile, Epoch::new(8));
+        let mut sample = valid_sample(&profile, feedback(7));
+        sample.owner = axis_owner(2, AxisFeedbackRole::Velocity);
+        frame.place(sample);
+        assert_eq!(
+            validate_feedback(&profile, Some(Epoch::new(7)), &frame),
+            Err(FeedbackRejection::IdentityMismatch(feedback(7)))
+        );
+    }
+
+    #[test]
+    fn a_wrong_effector_or_wrong_group_role_is_an_identity_mismatch() {
+        let profile = hexapod_profile();
+        // Right ownership kind, wrong effector identity.
+        let mut frame = complete_frame(&profile, Epoch::new(8));
+        let mut sample = valid_sample(&profile, feedback(6));
+        sample.owner = FeedbackOwner::EndEffector {
+            effector: EffectorId::new(1).expect("in range"),
+            role: EffectorFeedbackRole::ProbeDeflection,
+        };
+        frame.place(sample);
+        assert_eq!(
+            validate_feedback(&profile, Some(Epoch::new(7)), &frame),
+            Err(FeedbackRejection::IdentityMismatch(feedback(6)))
+        );
+        // Right ownership kind, wrong group role.
+        let mut frame = complete_frame(&profile, Epoch::new(8));
+        let mut sample = valid_sample(&profile, feedback(7));
+        sample.owner = FeedbackOwner::Group { role: GroupFeedbackRole::Environment };
+        frame.place(sample);
+        assert_eq!(
+            validate_feedback(&profile, Some(Epoch::new(7)), &frame),
+            Err(FeedbackRejection::IdentityMismatch(feedback(7)))
+        );
+    }
+
+    // --- the Hexapod sensor set shares one epoch -----------------------------
+
+    #[test]
+    fn the_full_hexapod_sensor_set_is_accepted_in_one_epoch() {
+        let profile = hexapod_profile();
+        let frame = complete_frame(&profile, Epoch::new(8));
+        let accepted = validate_feedback(&profile, Some(Epoch::new(7)), &frame)
+            .expect("axes, probe and metrology validate as one epoch");
+        assert_eq!(accepted.epoch(), Epoch::new(8));
+    }
+
+    #[test]
+    fn a_missing_probe_bit_rejects_the_epoch_like_a_missing_axis_channel() {
+        let profile = hexapod_profile();
+        let mut frame = FeedbackFrame::new(GROUP, Epoch::new(8), MotionTime::new(1_000));
+        for index in 0..6u8 {
+            frame.place(valid_sample(&profile, feedback(index)));
+        }
+        frame.place(valid_sample(&profile, feedback(7)));
+        // Everything reports except the probe: the epoch must not validate.
+        assert_eq!(
+            validate_feedback(&profile, Some(Epoch::new(7)), &frame),
+            Err(FeedbackRejection::MissingMandatoryFeedback(feedback(6)))
+        );
+    }
+
+    #[test]
+    fn a_stale_probe_sample_rejects_the_epoch() {
+        let profile = hexapod_profile();
+        let mut frame = complete_frame(&profile, Epoch::new(8));
+        let mut sample = valid_sample(&profile, feedback(6));
+        sample.quality = FeedbackQuality::Stale;
+        frame.place(sample);
+        assert_eq!(
+            validate_feedback(&profile, Some(Epoch::new(7)), &frame),
+            Err(FeedbackRejection::InvalidQuality {
+                feedback: feedback(6),
+                quality: FeedbackQuality::Stale
+            })
         );
     }
 
