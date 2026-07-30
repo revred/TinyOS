@@ -2,95 +2,994 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>TinyOS operator console — chrome</title>
+<title>Ti-OS console v3 — three layouts, one build</title>
+<link rel="stylesheet" href="console.css">
 <style>
-  :root { color-scheme: dark; }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: #0d1117; color: #c9d1d9; height: 100vh; overflow: hidden;
-    font: 13px/1.4 Consolas, "Cascadia Mono", monospace;
-    display: flex; flex-direction: column;
-  }
-  #bar { display: flex; gap: 6px; align-items: center; padding: 6px 10px 0; }
-  .tab {
-    padding: 5px 14px; border: 1px solid #30363d; border-bottom: 0;
-    border-radius: 6px 6px 0 0; background: #161b22; cursor: pointer; white-space: nowrap;
-  }
-  .tab.focused { background: #05070c; color: #58a6ff; border-color: #58a6ff; font-weight: bold; }
-  .tab .kind { color: #8b949e; font-size: 11px; margin-left: 6px; }
-  .tab.focused .kind { color: #388bfd; }
-  button.new {
-    background: #21262d; color: #c9d1d9; border: 1px dashed #30363d; border-radius: 4px;
-    padding: 4px 10px; font: inherit; cursor: pointer;
-  }
-  button.new:hover { border-color: #58a6ff; }
-  #status { margin-left: auto; display: flex; gap: 8px; align-items: center; }
-  #denbadge { color: #ffa198; }
-  #unlisted { background: #21262d; border: 1px solid #30363d; color: #d29922;
-    border-radius: 4px; padding: 4px 8px; font: inherit; cursor: pointer; }
-  #panes { border-top: 1px solid #30363d; margin-top: 6px; flex: 1; overflow-y: auto;
+  /* Fixed by preference, not by layout:
+     · the system line is the LAST line of the window, under the prompt, unlabelled;
+     · the top-left corner names the RUNNING WORKLOAD and switches it; the rail below shows
+       that workload's tools, compressed to icons or expanded with detail on click;
+     · tabs carry a flavour and are switchable three ways;
+     · the meter dock stays visible while you type.
+     The layouts below differ only in how much of the machine you see at once. */
+  body { display: flex; flex-direction: column; }
+  /* Row 1: the top-left corner selects the workbench; the tab strip owns the rest.
+     Row 2: workbench panel | grip | session. Both rows share one column ruler. */
+  #topbar { display: grid; grid-template-columns: var(--side-w, 232px) 4px 1fr; flex: none;
+    background: var(--s-2); }
+  body[data-side="0"] #topbar { grid-template-columns: 46px 0 1fr; }
+  #body { flex: 1; min-height: 0; display: grid; overflow: hidden;
+    grid-template-columns: var(--side-w, 232px) 4px 1fr;
+    grid-template-rows: minmax(0, 1fr); }
+  body[data-side="0"] #body { grid-template-columns: 46px 0 1fr; }
+  #side { grid-column: 1; } #grip { grid-column: 2; } #main { grid-column: 3; }
+
+  /* the corner — reserved for choosing the workbench; the panel below it follows */
+  #corner { display: flex; align-items: center; gap: 8px; width: 100%; height: 34px;
+    padding: 0 12px; background: var(--s-3); border: 0; border-right: 1px solid var(--line);
+    border-bottom: 1px solid var(--line); color: var(--c-bwhite); font: inherit;
+    cursor: pointer; text-align: left; }
+  /* one icon axis, both widths: every glyph in the left column is centred in a 24 px cell
+     that starts 12 px in (expanded) or centred in the 46 px stub (compressed) */
+  #corner .g { width: 24px; display: flex; justify-content: center; flex: none; }
+  body[data-side="0"] #corner { justify-content: center; padding: 0; }
+  #corner:hover, #corner[aria-expanded="true"] { background: var(--line-hot); color: #fff; }
+  #corner .g { font-size: 15px; color: var(--c-bcyan); flex: none; display: flex; }
+  #corner .kb { width: 17px; height: 17px; }
+  #corner:hover .g, #corner[aria-expanded="true"] .g { color: #fff; }
+  #corner .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 12px; letter-spacing: .08em; }
+  #corner .cv { margin-left: auto; color: var(--t-meta); font-size: 10px; }
+  #corner:hover .cv, #corner[aria-expanded="true"] .cv { color: #fff; }
+  body[data-side="0"] #corner .nm, body[data-side="0"] #corner .cv { display: none; }
+  #benchlist { position: absolute; top: 34px; left: 0; width: 274px; display: none;
+    background: var(--s-1); border: 1px solid var(--line-hot); z-index: 25;
+    box-shadow: 0 14px 40px rgba(0,0,0,.6); }
+  #benchlist[data-open="1"] { display: block; }
+  #benchlist button { display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; width: 100%;
+    padding: 8px 10px; background: none; border: 0; color: var(--c-fg); font: inherit;
+    text-align: left; cursor: pointer; }
+  #benchlist button .g { color: var(--c-bcyan); }
+  #benchlist button .kb { width: 17px; height: 17px; vertical-align: -3px; }
+  #benchlist button .n { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+  #benchlist button .sub { display: block; font-size: 11px; color: var(--t-meta); }
+  #benchlist button:hover, #benchlist button[aria-selected="true"] { background: var(--s-3); }
+
+  #side { background: var(--s-1); border-right: 1px solid var(--line); overflow: hidden;
+    display: flex; flex-direction: column; width: 100%; }
+  /* compressed rail: icons only, detail on demand — the corner already names the bench,
+     so the panel carries no title of its own */
+  body[data-side="0"] #side { background: var(--s-2); }
+  body[data-side="0"] #side .wb { grid-template-columns: 1fr; justify-items: center;
+    padding: 10px 0; border-left: 2px solid transparent; box-sizing: border-box; }
+  body[data-side="0"] #side .wb .ic { margin-left: -2px; }
+  body[data-side="0"] #side .wb:hover { background: var(--s-3); }
+  body[data-side="0"] #side .wb[aria-current="true"] { border-left-color: var(--line-hot);
+    background: var(--s-3); }
+  body[data-side="0"] #side .wb > span:not(.ic) { display: none; }
+  body[data-side="0"] #side .wb .ic { grid-row: 1; font-size: 19px; }
+  body[data-side="0"] #sidetogglet { display: none; }
+  .wb.back { background: var(--s-2); border-bottom: 1px solid var(--line); }
+  .wb.back .ic, .wb.back > span:nth-child(2) { color: var(--c-bwhite); }
+  #sideitems .detail2 { padding: 8px 12px 10px 46px; background: var(--s-0);
+    border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  #sideitems .detail2 p { margin: 0 0 8px; font-size: 12px; color: var(--t-meta); line-height: 1.5; }
+  #sideitems .detail2 .ev { font-size: 11px; margin-bottom: 8px; }
+  #sideitems .detail2 .chip { font-size: 11px; padding: 4px 8px; }
+  body[data-side="0"] #sideitems .detail2 { display: none; }
+  .wb[aria-current="true"] { background: var(--s-3); }
+  /* the rail toggle lives on the metering row, aligned to the rail's column */
+  #dockrow { display: flex; align-items: stretch; flex: none; border-top: 1px solid var(--line); }
+  #dockrow .dock { flex: 1; min-width: 0; border-top: 0; }
+  #sidetoggle { display: flex; align-items: center; justify-content: center;
+    gap: 6px; width: var(--side-w, 232px); background: var(--s-2); border: 0;
+    border-right: 1px solid var(--line); color: var(--t-meta); font: 11px/1 var(--font);
+    cursor: pointer; flex: none; }
+  body[data-side="0"] #sidetoggle { width: 46px; }
+  #sidetoggle:hover { color: var(--c-bwhite); background: var(--s-3); }
+  #sidetogglei { font-size: 14px; }
+  #sideitems { overflow-y: auto; flex: 1; min-height: 0; }
+  #grip { cursor: col-resize; background: transparent; }
+  #grip:hover, #grip:focus-visible { background: var(--line-hot); }
+  body[data-side="0"] #grip { pointer-events: none; }
+
+  /* --- the three layouts --------------------------------------------------- */
+  #main { min-width: 0; min-height: 0; display: grid; gap: 1px; background: var(--line);
+    grid-template-rows: minmax(0, 1fr); }
+  body[data-layout="focus"]   #main { grid-template-columns: 1fr; }
+  body[data-layout="cockpit"] #main { grid-template-columns: 1fr var(--ctx-w, 330px); }
+  body[data-layout="split"]   #main { grid-template-columns: 1fr 1fr; }
+  #main > .cell { background: var(--s-0); min-width: 0; min-height: 0; display: flex;
+    flex-direction: column; overflow: hidden; }
+  .cell > header { display: flex; align-items: center; gap: 8px; padding: 4px 10px;
+    background: var(--s-1); border-bottom: 1px solid var(--line); font-size: 11px;
+    letter-spacing: .08em; text-transform: uppercase; color: var(--t-meta); flex: none; }
+  .cell[data-live="1"] > header { color: var(--c-bwhite); }
+  .cell > header .badge2 { margin-left: auto; color: var(--t-meta); font-size: 10px; }
+  .cell > .scrollpane { overflow-y: auto; flex: 1; min-height: 0; }
+  .pad { padding: 10px 12px; }
+
+  /* shared body pieces */
+  .dro { display: grid; grid-template-columns: 22px 1fr 1fr auto; gap: 2px 10px; align-items: baseline; }
+  .dro .h { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--t-meta); }
+  .dro .ax { color: var(--c-bcyan); font-size: 16px; }
+  .dro .num { font-size: 20px; color: var(--c-bwhite); text-align: right; font-variant-numeric: tabular-nums; }
+  .dro .num.w { color: var(--c-bgreen); }
+  .dro .jog { display: flex; gap: 3px; }
+  .dro .jog button { width: 26px; height: 26px; background: var(--s-2); border: 1px solid var(--line);
+    color: var(--c-fg); font: inherit; cursor: pointer; }
+  .modes { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 10px; }
+  .modes button { padding: 5px 10px; background: var(--s-2); border: 1px solid var(--line);
+    color: var(--t-meta); font: inherit; cursor: pointer; }
+  .modes button[aria-pressed="true"] { background: var(--c-green); border-color: var(--c-bgreen);
+    color: #04140A; font-weight: 700; }
+  .ovr { display: grid; grid-template-columns: 76px 1fr 48px; gap: 6px 10px; align-items: center;
     font-size: 12px; }
-  #denials { color: #ffa198; padding: 3px 10px; white-space: pre-wrap; }
-  #denials:empty::before { content: "no authority denials"; color: #484f58; }
+  .ovr input[type=range] { width: 100%; accent-color: var(--c-bgreen); }
+  .kv { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 4px 10px; font-size: 12px; }
+  .kv .k { color: var(--t-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  h4 { margin: 12px 0 6px; font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--t-head); font-weight: 400; }
+  h4:first-child { margin-top: 0; }
+  .caveat { font-size: 11px; color: var(--t-absent); margin: 6px 0 0; line-height: 1.5; }
+  .estop { display: flex; align-items: center; gap: 10px; padding: 8px 10px; margin-top: 8px;
+    border: 1px solid var(--c-red); background: #20080A; }
+  .estop b { color: var(--c-bred); flex: none; }
+  .prop { border: 1px solid var(--line); background: var(--s-1); padding: 8px 10px; margin-bottom: 8px; }
+  .prop .cap { color: var(--c-bcyan); }
+  .prop .why { color: var(--t-meta); font-size: 12px; margin: 3px 0 6px; }
+  .prop .acts { display: flex; gap: 6px; align-items: center; }
+  .prop .tok { margin-left: auto; font-size: 11px; color: var(--t-meta); }
+  .prop[data-state="approved"] { border-color: var(--c-green); }
+  .prop[data-state="denied"] { border-color: var(--c-red); opacity: .75; }
+  .risk { font-size: 10px; padding: 1px 6px; border: 1px solid var(--line); color: var(--t-meta); }
+  .risk[data-r="actuates"] { color: var(--t-warn); border-color: var(--c-yellow); }
+  .risk[data-r="destructive"] { color: var(--t-deny); border-color: var(--c-red); }
+  .bar { height: 6px; background: var(--s-3); margin-top: 4px; }
+  .bar > i { display: block; height: 100%; background: var(--c-bgreen); }
+
+  .tabs { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+  .tabs .grow { flex: none; }
+  #layoutpick { display: flex; gap: 2px; margin-left: 10px; flex: none; }
+  #layoutpick button { background: rgba(0,0,0,.35); border: 1px solid #6B5300; color: var(--c-byellow);
+    font: 11px/1 var(--font); padding: 5px 8px; cursor: pointer; opacity: .75; }
+  #layoutpick button:hover { opacity: 1; }
+  #layoutpick button[aria-pressed="true"] { background: var(--c-yellow); color: #1A1400;
+    border-color: var(--c-yellow); opacity: 1; font-weight: 700; }
+  .tab .ic { font-size: 14px; color: var(--c-bcyan); }
+  .tab[aria-selected="true"] .ic { color: var(--c-bwhite); }
+  .tab .ord { font-variant-numeric: tabular-nums; }
+
+  /* GUI flavour — 1e's desktop, keeping the meter dock and the system line */
+  #gui { grid-column: 3; display: none; overflow-y: auto; min-height: 0;
+    background: radial-gradient(120% 100% at 50% 0%, #14181F 0%, #0C0C0C 70%); }
+  body[data-gui="1"] #gui { display: block; }
+  body[data-gui="1"] #main { display: none; }
+  #shellwrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  #tiles { display: grid; gap: 12px; padding: 22px;
+    grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); align-content: start; }
+  .tile { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; min-height: 104px;
+    padding: 12px 14px; background: var(--s-2); border: 1px solid var(--line); color: var(--c-fg);
+    font: inherit; text-align: left; cursor: pointer; border-radius: 4px; }
+  .tile:hover { border-color: var(--line-hot); background: var(--s-3); }
+  .tile .glyph { font-size: 19px; color: var(--c-bcyan); }
+  .tile .t { color: var(--c-bwhite); font-size: 13px; }
+  .tile .v { font-size: 11px; color: var(--t-meta); margin-top: auto; }
+  .tile[data-state="absent"] { opacity: .55; }
+  .tile[data-state="pending"] .v { color: var(--t-pending); }
+  .tile[data-state="live"] .v { color: var(--t-pass); }
+  .sheet li .k2 { color: var(--c-bgreen); width: 132px; flex: none; }
+
+  /* --- master menu (Start-button lineage) --------------------------------- */
+  #start svg { width: 15px; height: 19px; flex: none; }
+  #start { display: flex; align-items: center; justify-content: center; gap: 8px; height: 24px;
+    align-self: center; min-width: 92px; padding: 0 14px; margin: 0 6px 0 2px;
+    background: linear-gradient(180deg, #4A3A00, #2E2400);
+    border: 1px solid var(--c-yellow); border-radius: 3px;
+    box-shadow: 0 1px 0 rgba(249,241,165,.25) inset, 0 1px 3px rgba(0,0,0,.5);
+    color: var(--c-byellow); font: 600 13px/1 var(--font); cursor: pointer; flex: none; }
+  #start:hover { background: linear-gradient(180deg, #6B5300, #3D2E00); }
+  #start:active, #start[aria-expanded="true"] { background: var(--c-yellow); color: #1A1400;
+    box-shadow: 0 1px 2px rgba(0,0,0,.4) inset; }
+  #start .logo { font-size: 15px; }
+  #menu { position: absolute; left: 0; bottom: 28px; width: 620px; max-width: 96vw;
+    display: none; grid-template-columns: 34px 208px 1fr; background: var(--s-1);
+    border: 1px solid var(--c-yellow); box-shadow: 0 -14px 44px rgba(0,0,0,.72); z-index: 20; }
+  #menu[data-open="1"] { display: grid; }
+  #menu .banner { background: linear-gradient(0deg, #2E2400, #6B5300); color: var(--c-byellow);
+    writing-mode: vertical-rl; transform: rotate(180deg); text-align: right;
+    font: 700 15px/34px var(--font); letter-spacing: .18em; padding: 12px 0; }
+  #menu .cats { border-right: 1px solid var(--line); padding: 6px 0; display: flex;
+    flex-direction: column; }
+  #menu .cats button { display: grid; grid-template-columns: 24px 1fr 12px; align-items: center;
+    gap: 8px; padding: 8px 10px; background: none; border: 0; color: var(--c-fg); font: inherit;
+    text-align: left; cursor: pointer; }
+  #menu .cats button .g { font-size: 16px; color: var(--c-bcyan); }
+  #menu .cats button .arw { color: var(--t-meta); }
+  #menu .cats button[aria-selected="true"] { background: var(--line-hot); color: #fff; }
+  #menu .cats button[aria-selected="true"] .g,
+  #menu .cats button[aria-selected="true"] .arw { color: #fff; }
+  #menu .items { padding: 6px 0; max-height: 372px; overflow-y: auto; }
+  #menu .items button { display: grid; grid-template-columns: 22px 1fr; gap: 8px; width: 100%;
+    padding: 7px 12px; background: none; border: 0; color: var(--c-fg); font: inherit;
+    text-align: left; cursor: pointer; }
+  #menu .items button .g { color: var(--c-bcyan); }
+  #menu .items button .d { display: block; font-size: 11px; color: var(--t-meta); }
+  #menu .items button:hover, #menu .items button[aria-selected="true"] { background: var(--s-3); }
+  #menu .items button[data-state="absent"] { color: var(--t-absent); }
+  #menu .items button[data-state="absent"] .g { color: var(--t-absent); }
+  #menu .find { grid-column: 2 / 4; display: flex; align-items: center; gap: 8px;
+    border-top: 1px solid var(--line); padding: 6px 10px; }
+  #menu .find input { flex: 1; background: var(--s-0); border: 1px solid var(--line);
+    color: var(--c-bwhite); font: inherit; padding: 5px 8px; outline: none; }
+  #menu .find input:focus { border-color: var(--line-hot); }
+  #menu .find .hint { color: var(--t-meta); font-size: 11px; white-space: nowrap; }
 </style>
 </head>
-<body>
-<div id="bar">
-  <span id="tabs"></span>
-  <button class="new" id="newdos">+ DOS tab</button>
-  <button class="new" id="newparity">+ parity tab</button>
-  <span id="status">
-    <button id="unlisted" title="invokes a verb the signed manifest does not enumerate">try unlisted verb</button>
-    <span id="denbadge"></span>
-  </span>
+<body data-side="1" data-gui="0" data-layout="cockpit">
+
+<div id="topbar">
+  <div style="position:relative">
+    <button id="corner" aria-haspopup="menu" aria-expanded="false" aria-controls="benchlist"
+            title="Running workload — click to switch (Ctrl+Shift+W)">
+      <span class="g" id="cornerglyph"><svg viewBox="0 0 24 24" aria-hidden="true" class="kb">
+        <rect x="1.5" y="8" width="3" height="8" rx="1" fill="currentColor"/>
+        <rect x="5" y="6" width="3.4" height="12" rx="1.2" fill="currentColor"/>
+        <rect x="8.4" y="10.6" width="7.2" height="2.8" fill="currentColor"/>
+        <rect x="15.6" y="6" width="3.4" height="12" rx="1.2" fill="currentColor"/>
+        <rect x="19.5" y="8" width="3" height="8" rx="1" fill="currentColor"/>
+      </svg></span>
+      <span class="nm" id="cornername">Ti64 · Workload</span>
+      <span class="cv">▾</span>
+    </button>
+    <div id="benchlist" role="menu" aria-label="Running workloads" data-open="0"></div>
+  </div>
+  <div></div>
+  <div class="tabs" role="tablist" id="tabs" aria-label="Sessions"></div>
 </div>
-<div id="panes"><div id="denials"></div></div>
+
+<div id="shellwrap">
+  <div id="body">
+    <aside id="side" aria-label="Workload tools">
+      <div id="sideitems"></div>
+    </aside>
+    <div id="grip" tabindex="0" role="separator" aria-label="Resize sidebar (Alt+Left/Right)"></div>
+
+    <main id="main" role="tabpanel" aria-label="Session"></main>
+
+    <section id="gui" aria-label="GUI flavour desktop">
+      <div id="tiles" role="grid" aria-label="Applications"></div>
+    </section>
+  </div>
+</div>
+
+<div id="dockrow">
+  <button id="sidetoggle" title="Compress / expand the workload rail (Ctrl+B)"
+          aria-expanded="true"><span id="sidetogglei">⇤</span><span id="sidetogglet">rail</span></button>
+  <div class="dock" id="dock" aria-label="Live meters"></div>
+</div>
+
+<div class="inputrow"><span class="p">A:\&gt;</span>
+  <input id="line" spellcheck="false" autocomplete="off" aria-label="Command line"
+         placeholder="DIR · TREE · MEM · SAMPLE.TCB"></div>
+
+<div class="reserved" role="status" aria-live="polite" style="position:relative;padding-left:0">
+  <button id="start" aria-haspopup="menu" aria-expanded="false" aria-controls="menu"
+          title="Master menu — Ctrl+Esc"><svg viewBox="0 0 20 26" aria-hidden="true"><defs>
+      <linearGradient id="tiweld" x1="0" y1="0" x2="0.25" y2="1">
+        <stop offset="0" stop-color="#EDEDEA"/>
+        <stop offset=".16" stop-color="#E9C960"/>
+        <stop offset=".30" stop-color="#D2894C"/>
+        <stop offset=".44" stop-color="#B85A9E"/>
+        <stop offset=".58" stop-color="#7D4FC0"/>
+        <stop offset=".72" stop-color="#4763D2"/>
+        <stop offset=".86" stop-color="#3A96DD"/>
+        <stop offset="1" stop-color="#61D6D6"/>
+      </linearGradient>
+      <linearGradient id="tirim" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#F2F2F2" stop-opacity=".9"/>
+        <stop offset=".5" stop-color="#F2F2F2" stop-opacity=".25"/>
+        <stop offset="1" stop-color="#61D6D6" stop-opacity=".7"/>
+      </linearGradient>
+      <radialGradient id="tisheen" cx=".32" cy=".28" r=".85">
+        <stop offset="0" stop-color="#FFFFFF" stop-opacity=".8"/>
+        <stop offset=".35" stop-color="#FFFFFF" stop-opacity=".14"/>
+        <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+      <path d="M10 1S1 12.2 1 17.4a9 9 0 0 0 18 0C19 12.2 10 1 10 1Z" fill="url(#tiweld)"
+            stroke="url(#tirim)" stroke-width=".8"/>
+      <path d="M10 1S1 12.2 1 17.4a9 9 0 0 0 18 0C19 12.2 10 1 10 1Z" fill="url(#tisheen)"/>
+      <ellipse cx="6.6" cy="16.6" rx="2" ry="3.2" fill="#FFFFFF" opacity=".45"
+               transform="rotate(-14 6.6 16.6)"/>
+      <path d="M13.4 6.2c1.9 2.5 3.6 5.6 4.1 8.2" fill="none" stroke="#FFE9A8"
+            stroke-opacity=".5" stroke-width=".7" stroke-linecap="round"/>
+    </svg>Ti64</button>
+  <span class="t" id="reserved">booting…</span>
+  <span class="spacer"></span>
+  <span class="t" id="budget"></span>
+  <span id="layoutpick" role="group" aria-label="Layout"></span>
+
+  <div id="menu" role="menu" aria-label="Master menu" data-open="0">
+    <div class="banner">Ti-OS 0.2</div>
+    <div class="cats" id="cats" aria-label="Categories"></div>
+    <div class="items" id="items" aria-label="Entries"></div>
+    <div class="find">
+      <span class="hint">Find</span>
+      <input id="find" placeholder="search every program, tool and document"
+             aria-label="Search" autocomplete="off">
+      <span class="hint">↑↓ move · → enter list · Enter open · Esc close</span>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="switch" role="dialog" aria-modal="true" aria-label="Switch tab">
+  <div class="sheet"><input id="sq" readonly value="Ctrl+Space — ↑↓ choose, Enter switch, Esc cancel">
+    <ul id="slist" role="listbox"></ul></div>
+</div>
+<div class="overlay" id="help" role="dialog" aria-modal="true" aria-label="Keyboard map">
+  <div class="sheet"><input readonly value="Keyboard map — F1 closes"><ul id="hlist"></ul></div>
+</div>
+
+<script src="console-core.js"></script>
+<script src="console-v2.js"></script>
+<script src="console-bodies.js"></script>
 <script>
-  const invoke = window.__TAURI__.core.invoke;
-  const $ = (id) => document.getElementById(id);
+(function () {
+  var T = window.TinyOS, RT = window.TinyOSRT, AG = window.TinyOSAgent, B = window.TinyOSBodies;
+  var tabs = [], active = 0, secondary = 1, view = "os", sideW = 232;
+  var LAYOUTS = {
+    focus:   { t: "Focus",   d: "one session pane — the frugal edge posture" },
+    cockpit: { t: "Cockpit", d: "session plus a live column that follows the tab kind" },
+    split:   { t: "Split",   d: "two tabs at once — watch the machine while you type" }
+  };
+  var layout = (location.search.match(/layout=(\w+)/) || [])[1];
+  if (!LAYOUTS[layout]) layout = "cockpit";
+  document.body.dataset.layout = layout;
+  if (layout === "focus") document.body.dataset.side = "0";
 
-  $("newdos").onclick = () => invoke("open_tab", { kind: "dos" }).catch(() => {});
-  $("newparity").onclick = () => invoke("open_tab", { kind: "parity" }).catch(() => {});
-  $("unlisted").onclick = () =>
-    invoke("format_disk").catch(() => {}); // the denial lands in the visible log
+  var KIND = { dos: { label: "MS-DOS", flavour: "dos", ic: "⊞" },
+               posix: { label: "Linux", flavour: "posix", ic: "❯" },
+               rt: { label: "RT-OS", flavour: "rt", ic: "⏱" },
+               agent: { label: "AGENT", flavour: "dos", ic: "◈" },
+               parity: { label: "PARITY", flavour: "dos", ic: "✓" } };
 
-  async function poll() {
-    try {
-      const snapshot = await invoke("read_console");
-      const bar = $("tabs");
-      bar.innerHTML = "";
-      for (const tab of snapshot.tabs) {
-        const el = document.createElement("span");
-        el.className = "tab" + (snapshot.focused === tab.label ? " focused" : "");
-        el.textContent = tab.label + " [" + tab.session + "]";
-        const kind = document.createElement("span");
-        kind.className = "kind";
-        kind.textContent = tab.kind === "parity" ? "TARGET-PARITY" : "DOS";
-        el.append(kind);
-        el.onclick = () => invoke("focus_tab", { label: tab.label }).catch(() => {});
-        bar.append(el);
-      }
-      $("denbadge").textContent = snapshot.denials.length
-        ? snapshot.denials.length + " denial(s)" : "";
-      $("denials").textContent = snapshot.denials
-        .map((d) => "DENIED " + d.command + " (webview=" + d.webview + ", origin=" + d.origin + "): " + d.reason)
-        .join("\n");
-    } catch (e) { /* keep polling */ }
+  var ctx = {
+    repaint: function () { renderMain(); host(); },
+    jog: function (axis, d) {
+      var r = RT.jog(axis, d), s = tabs[active];
+      s.emit(r === "ok" ? "out" : "deny",
+        r === "ok" ? "JOG " + axis + " " + (d > 0 ? "+" : "") + d.toFixed(3) + " — accepted (ACI: motion.jog)"
+        : "Access denied: motion.jog requires mode JOG or HANDLE, mode is " + RT.mode + " [audited]");
+      if (r !== "ok") s.spoors.push({ cat: "motion", actor: "session", act: "verb-denied",
+        out: "failed", target: "motion.jog", cost: 0 });
+      ctx.repaint();
+    }
+  };
+
+  var tabSeq = 0;
+  function newTab(kind) {
+    var name = "tx" + (++tabSeq < 10 ? "0" : "") + tabSeq;
+    var s = new T.Session({ flavour: KIND[kind].flavour, label: name, session: name });
+    s.tkind = kind; tabs.push(s);
+    if (kind === "rt") RT.authority.holder = name + " (local)"; // the holding session's own name
+    select(tabs.length - 1); return s;
   }
-  setInterval(poll, 250);
-  poll();
+  function paintTabs() {
+    var bar = document.getElementById("tabs"); bar.textContent = "";
+    tabs.forEach(function (s, i) {
+      var b = document.createElement("button");
+      b.className = "tab"; b.setAttribute("role", "tab"); b.setAttribute("aria-selected", i === active);
+      b.title = s.session + " · " + KIND[s.tkind].label + " · Ctrl+" + (i + 1);
+      b.innerHTML = "<span class='ic'></span><span class='ord'></span><span class='flav'></span>";
+      b.children[0].textContent = KIND[s.tkind].ic;
+      b.children[1].textContent = s.session;
+      b.children[2].textContent = layout === "split" && i === secondary && i !== active ? "▹" : "";
+      b.onclick = function () { select(i); };
+      bar.appendChild(b);
+    });
+    var g = document.createElement("span"); g.className = "grow";
+    var sw = document.createElement("button");
+    sw.className = "chip"; sw.dataset.tone = "warn"; sw.textContent = "⇄";
+    sw.title = "Tab switcher — Ctrl+Space"; sw.onclick = openSwitch;
+    g.appendChild(sw);
+    bar.appendChild(g);
+    T.rove(bar, ".tab");
+    paintLayoutPick();
+  }
+  function paintLayoutPick() {
+    var pick = document.getElementById("layoutpick"); pick.textContent = "";
+    Object.keys(LAYOUTS).forEach(function (k) {
+      var b = document.createElement("button");
+      b.textContent = LAYOUTS[k].t; b.title = LAYOUTS[k].d;
+      b.setAttribute("aria-pressed", layout === k);
+      b.onclick = function () { setLayout(k); };
+      pick.appendChild(b);
+    });
+  }
+  function setLayout(k) {
+    layout = k; document.body.dataset.layout = k;
+    if (k === "split" && secondary === active) secondary = (active + 1) % Math.max(1, tabs.length);
+    paintTabs(); renderMain(); host();
+  }
 
-  // Smoke hooks — each travels the real UI path from the chrome identity.
-  window.smokeOpenTabs = async () => {
-    await invoke("open_tab", { kind: "dos" }).catch(() => {});
-    await invoke("open_tab", { kind: "dos" }).catch(() => {});
-    await invoke("open_tab", { kind: "parity" }).catch(() => {});
+  function cell(session, live, note, withHeader) {
+    var c = document.createElement("div"); c.className = "cell"; c.dataset.live = live ? "1" : "0";
+    var pane = document.createElement("div"); pane.className = "scrollpane";
+    var h = null;
+    if (withHeader) {
+      h = document.createElement("header");
+      h.innerHTML = "<span></span><span class='badge2'></span>";
+      h.children[0].textContent = session ? session.session + " · " + KIND[session.tkind].label : note;
+      h.children[1].textContent = session ? (live ? "focused" : "pinned") : "";
+      c.appendChild(h);
+    }
+    c.appendChild(pane);
+    return { root: c, pane: pane, head: h };
+  }
+
+  function renderMain() {
+    var m = document.getElementById("main"), s = tabs[active];
+    m.textContent = "";
+    if (layout === "focus") {
+      // no header: the tab strip and system line already say where you are
+      var f = cell(s, true, null, false); f.pane.appendChild(B.body(s, ctx)); m.appendChild(f.root);
+    } else if (layout === "cockpit") {
+      var a = cell(s, true, null, false); a.pane.appendChild(B.body(s, ctx)); m.appendChild(a.root);
+      var b = cell(null, false, B.contextTitle(s), true);
+      b.pane.appendChild(B.context(s)); m.appendChild(b.root);
+    } else {
+      // split needs headers: two panes must be tellable apart
+      var p = cell(s, true, null, true); p.pane.appendChild(B.body(s, ctx)); m.appendChild(p.root);
+      var other = tabs[secondary] && secondary !== active ? tabs[secondary] : null;
+      if (other) {
+        var q = cell(other, false, null, true); q.pane.appendChild(B.body(other, ctx));
+        q.head.onclick = function () { select(secondary); };
+        m.appendChild(q.root);
+      } else {
+        var e = cell(null, false, "pin a second tab — Ctrl+\\", true);
+        e.pane.appendChild(B.context(s)); m.appendChild(e.root);
+      }
+    }
+  }
+
+  function host() {
+    var s = tabs[active];
+    document.getElementById("reserved").textContent =
+      s.session + " " + KIND[s.tkind].label + " · " + LAYOUTS[layout].t +
+      " — " + tabs.length + " tab(s) — parity: " + B.state.parity +
+      " — authority denials: " + s.spoors.length +
+      (s.tkind === "rt" || layout === "split"
+        ? " — command authority: " + RT.authority.lease + ", e-stop " + RT.interlocks[0].s : "");
+  }
+
+  function select(i) {
+    active = i; var s = tabs[i];
+    if (layout === "split" && secondary === active)
+      secondary = (active + 1) % Math.max(1, tabs.length);
+    paintTabs(); renderMain();
+    document.querySelector(".inputrow .p").textContent = s.prompt();
+    document.getElementById("line").placeholder =
+      s.tkind === "rt" ? "MODE AUTO · JOG X +0.1 · OVR FEED 80 · DRO · ALARM · ESTOP"
+      : s.tkind === "agent" ? "ask the local model — it may request, TinyOS decides"
+      : s.tkind === "parity" ? "F8 runs the suite — three signals, all-or-FAIL"
+      : "DIR · TREE · MEM · TASKMGR · SPOOR · SAMPLE.TCB";
+    host();
+  }
+
+  // ---- sidebar ---------------------------------------------------------------
+  // ---- workloads --------------------------------------------------------------
+  // A workload is a service the OS runs. The first one is the OS itself and it can never
+  // be stopped; the rest are running, dormant, or simply not built. The rail under the
+  // selector carries that workload's tools, so it always shows the work you are in.
+  var WORKLOADS = [
+    { id: "os", n: "Ti64 · Workload", ic: "◍", state: "running",
+      d: "the OS itself — resident, never stopped",
+      tools: [
+        { ic: "⊞", t: "NEW MS-DOS SESSION", v: "new session", state: "live",
+          detail: "a fresh World: env, cwd, volume, policy", act: function () { newTab("dos"); } },
+        { ic: "❯", t: "NEW LINUX SESSION", v: "new session", state: "pending",
+          detail: "POSIX front-end over the same verb core — FEAT-P2-05", act: function () { newTab("posix"); } }
+      ], groups: ["RUNTIME", "SAFETY", "LINK"] },
+    { id: "dev", n: "Developer", ic: "⚒", state: "running",
+      d: "build, regression and parity tooling",
+      tools: [
+        { ic: "✓", t: "NEW PARITY TAB", v: "new tab", state: "live",
+          detail: "three-signal MS-DOS conformance suite", act: function () { newTab("parity"); } }
+      ], groups: ["BUILD"] },
+    { id: "agent", n: "Agent", ic: "◈", state: "dormant",
+      d: "local model as a supervised operator — runtime not resident (Phase 6)",
+      tools: [
+        { ic: "◈", t: "NEW AGENT TAB", v: "new tab", state: "pending",
+          detail: "proposal gate + token budget", act: function () { newTab("agent"); } },
+        { ic: "▥", t: "TOKEN BUDGET", v: "2048 granted", state: "pending",
+          detail: "per-turn cap, charged on approval" },
+        { ic: "⚿", t: "ACI GRANT TABLE", v: "3 capabilities", state: "live",
+          detail: "pre-registered, typed, rate-limited" },
+        { ic: "◈", t: "INFERENCE RUNTIME", v: "not resident", state: "absent",
+          detail: "Phase 6 — Ollama-class, admission-controlled" }
+      ], groups: [] },
+    { id: "rt", n: "RT control", ic: "⏱", state: "dormant",
+      d: "motion, process-synchronised output, interlocks — Phase 3+",
+      tools: [
+        { ic: "⏱", t: "NEW RT TAB", v: "new tab", state: "pending",
+          detail: "mode, DRO, overrides, interlocks", act: function () { newTab("rt"); } },
+        { ic: "⚙", t: "MOTION & INTERPOLATION", v: "not resident", state: "absent",
+          detail: "trunnion-table kinematics module — Phase 3+" },
+        { ic: "⇄", t: "PROCESS-SYNC OUTPUT", v: "not resident", state: "absent",
+          detail: "wire feed / UV array gating" },
+        { ic: "⏱", t: "DEADLINE MONITOR", v: "mechanism only", state: "pending",
+          detail: "no qualified platform — LE-09" }
+      ], groups: [] },
+    { id: "search", n: "System search", ic: "⌕", state: "absent",
+      d: "full-system index over volumes, journals and goals — not built",
+      tools: [
+        { ic: "⌕", t: "INDEX STATUS", v: "no index", state: "absent",
+          detail: "an indexing service is a workload like any other; none is admitted" },
+        { ic: "▤", t: "SEARCH VOLUMES", v: "not available", state: "absent",
+          detail: "would run under its own capability grant, budgeted and audited" }
+      ], groups: [] }
+  ];
+  var KETTLEBELL = "<svg viewBox='0 0 24 24' aria-hidden='true' class='kb'>" +
+    "<rect x='1.5' y='8' width='3' height='8' rx='1' fill='currentColor'/>" +
+    "<rect x='5' y='6' width='3.4' height='12' rx='1.2' fill='currentColor'/>" +
+    "<rect x='8.4' y='10.6' width='7.2' height='2.8' fill='currentColor'/>" +
+    "<rect x='15.6' y='6' width='3.4' height='12' rx='1.2' fill='currentColor'/>" +
+    "<rect x='19.5' y='8' width='3' height='8' rx='1' fill='currentColor'/></svg>";
+  function workload(id) {
+    var w = WORKLOADS[0];
+    WORKLOADS.forEach(function (x) { if (x.id === id) w = x; });
+    return w;
+  }
+  function paintBenchList() {
+    var list = document.getElementById("benchlist"); list.textContent = "";
+    WORKLOADS.forEach(function (w) {
+      var btn = document.createElement("button");
+      btn.setAttribute("role", "menuitem");
+      btn.setAttribute("aria-selected", w.id === view);
+      btn.innerHTML = "<span class='g'></span><span><b></b><span class='sub'></span></span>" +
+        "<span class='n'></span>";
+      if (w.id === "os") btn.children[0].innerHTML = KETTLEBELL;
+      else btn.children[0].textContent = w.ic;
+      btn.children[1].children[0].textContent = w.id === "os" ? "Ti64 (the OS)" : w.n;
+      btn.children[1].children[1].textContent = w.d;
+      btn.children[2].textContent = w.state;
+      btn.children[2].style.color = w.state === "running" ? "var(--t-pass)"
+        : w.state === "dormant" ? "var(--t-pending)" : "var(--t-absent)";
+      btn.onclick = function () { view = w.id; drill = null; closeBench(); sidebar(); };
+      list.appendChild(btn);
+    });
+    T.rove(list, "button");
+  }
+  function openBench() {
+    document.getElementById("benchlist").dataset.open = "1";
+    document.getElementById("corner").setAttribute("aria-expanded", "true");
+    paintBenchList();
+    document.querySelector("#benchlist button").focus();
+  }
+  function closeBench() {
+    document.getElementById("benchlist").dataset.open = "0";
+    document.getElementById("corner").setAttribute("aria-expanded", "false");
+  }
+  document.getElementById("corner").onclick = function () {
+    document.getElementById("benchlist").dataset.open === "1" ? closeBench() : openBench();
   };
-  window.smokeFocus = (label) => invoke("focus_tab", { label }).catch(() => {});
-  window.smokeDenials = async () => {
-    await invoke("format_disk").catch(() => {});      // unlisted verb
-    await invoke("run_line", { line: "DIR" }).catch(() => {}); // tab verb from chrome identity
+  document.getElementById("benchlist").addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { closeBench(); document.getElementById("corner").focus(); }
+  });
+  document.addEventListener("mousedown", function (e) {
+    var bl = document.getElementById("benchlist");
+    if (bl.dataset.open === "1" && !bl.contains(e.target) &&
+        e.target !== document.getElementById("corner")) closeBench();
+  });
+
+  // ---- sidebar: workload → tool → tree -------------------------------------
+  // Level 0 lists the loaded workload's tools (icon left, described right). Clicking a
+  // tool makes IT the top-level menu: the expanded sidebar shows that sub-workload's
+  // detail and its option tree. Commands (new session/tab) act immediately instead.
+  var SUBS = {
+    "DEVELOPER TOOLS": [
+      { ic: "❯", t: "xtask help", v: "every subcommand", line: "cargo run -p xtask -- help" },
+      { ic: "❯", t: "list fixtures", v: "QEMU fixtures + owning TEST-*", line: "cargo run -p xtask -- list-fixtures" },
+      { ic: "❯", t: "assurance spine", v: "contracts, loose ends", line: "cargo run -p xtask -- check-assurance-spine" },
+      { ic: "❯", t: "shell parity", v: "golden + spoor signals", line: "cargo run -p xtask -- check-shell-parity" }
+    ],
+    "REGRESSION TESTS": [
+      { ic: "✓", t: "shell suite", v: "22/22", note: "cargo test -p shell --lib — the exact CI surface" },
+      { ic: "✓", t: "xtask suite", v: "204/204", note: "host-side orchestration tests" },
+      { ic: "✓", t: "open parity tab", v: "three signals", act: function () { newTab("parity"); } }
+    ],
+    "TASK & PROCESS MONITORS": [
+      { ic: "☰", t: "task table", v: "TASKMGR", verb: "TASKMGR" },
+      { ic: "☡", t: "kill a task", v: "authority-checked", verb: "TASKKILL SPOOR" }
+    ],
+    "MEMORY USAGE": [{ ic: "▥", t: "pool map", v: "MEM", verb: "MEM" }],
+    "VULNERABILITIES": [
+      { ic: "⚿", t: "denial journal", v: "SPOOR", verb: "SPOOR" },
+      { ic: "⚿", t: "security charter", v: "14 invariants", note: "SECURITY_CHARTER.md — 14 PD invariants, 14 admission gates, C0–C4 matrix, CI-checked" }
+    ]
   };
+  function drillOptions(w) {
+    var opts = (SUBS[w.t] || []).slice();
+    if (w.verb) opts.unshift({ ic: w.ic, t: "run " + w.verb, v: "in the focused session", verb: w.verb });
+    opts.push({ ic: "▪", t: "note to session", v: "prints the evidence line", note: w.t + ": " + w.detail });
+    return opts;
+  }
+  var drill = null; // the tool whose tree currently owns the sidebar
+  function toolsOf(wl) {
+    return wl.tools.concat(T.WORKBENCH.filter(function (w) { return wl.groups.indexOf(w.g) >= 0; }));
+  }
+  function wbRow(el, ic, t, v, state, title) {
+    var b = document.createElement("button");
+    b.className = "wb"; b.dataset.state = state;
+    b.title = title ? t + " — " + (v || "") + "\n" + title : t;
+    b.innerHTML = "<span class='ic'></span><span></span><span class='val'></span>";
+    b.children[0].textContent = ic; b.children[1].textContent = t; b.children[2].textContent = v || "";
+    el.appendChild(b);
+    return b;
+  }
+  function sidebar() {
+    var wl = workload(view);
+    document.getElementById("cornername").textContent = wl.n;
+    document.getElementById("corner").title =
+      "Running workload: " + wl.n + " (" + wl.state + ") — click to switch";
+    var el = document.getElementById("sideitems"); el.textContent = "";
+    if (!drill) {
+      toolsOf(wl).forEach(function (w) {
+        var b = wbRow(el, w.ic || "•", w.t, w.v, w.state, w.detail);
+        b.onclick = function () {
+          if (w.act) { w.act(); return; }
+          drill = w;
+          if (document.body.dataset.side === "0") side(true); else sidebar();
+        };
+      });
+    } else {
+      var w = drill;
+      var back = wbRow(el, "←", w.t, wl.n, w.state, "back to " + wl.n);
+      back.className = "wb back";
+      back.onclick = function () { drill = null; sidebar(); };
+      var d = document.createElement("div"); d.className = "detail2";
+      d.innerHTML = "<p></p><div class='ev'></div>";
+      d.querySelector("p").textContent = w.detail;
+      var ev = d.querySelector(".ev");
+      ev.textContent = w.state === "live" ? "evidence in the repository today"
+        : w.state === "pending" ? "instrumented — landing now, not yet quotable"
+        : "no evidence yet — stated, not guessed";
+      ev.style.color = w.state === "live" ? "var(--t-pass)"
+        : w.state === "pending" ? "var(--t-pending)" : "var(--t-absent)";
+      el.appendChild(d);
+      drillOptions(w).forEach(function (o) {
+        var b = wbRow(el, o.ic || "▪", o.t, o.v, w.state, o.note || o.line || "");
+        b.onclick = function () {
+          var s = tabs[active];
+          if (o.act) return o.act();
+          if (o.verb) s.run(o.verb);
+          else if (o.line) s.emit("meta", "$ " + o.line + "  (runs on the host — xtask, not a shell verb)");
+          else if (o.note) s.emit("meta", o.note);
+          renderMain();
+        };
+      });
+    }
+    T.rove(el, ".wb");
+  }
+  function side(open) {
+    document.body.dataset.side = open ? "1" : "0";
+    var t = document.getElementById("sidetoggle");
+    t.setAttribute("aria-expanded", open);
+    document.getElementById("sidetogglei").textContent = open ? "⇤" : "⇥";
+    document.getElementById("sidetogglet").textContent = open ? "compress" : "";
+    document.getElementById("sidetoggle").style.width = open ? "var(--side-w, 232px)" : "46px";
+    sidebar();
+  }
+  document.getElementById("sidetoggle").onclick = function () {
+    side(document.body.dataset.side === "0");
+  };
+  function setW(w) {
+    sideW = Math.max(150, Math.min(420, w));
+    document.getElementById("body").style.setProperty("--side-w", sideW + "px");
+  }
+  var grip = document.getElementById("grip"), dragging = false;
+  grip.addEventListener("mousedown", function () { dragging = true; document.body.style.userSelect = "none"; });
+  window.addEventListener("mouseup", function () { dragging = false; document.body.style.userSelect = ""; });
+  window.addEventListener("mousemove", function (e) { if (dragging) setW(e.clientX); });
+  grip.addEventListener("keydown", function (e) {
+    if (e.key === "ArrowLeft") { setW(sideW - 16); e.preventDefault(); }
+    if (e.key === "ArrowRight") { setW(sideW + 16); e.preventDefault(); }
+  });
+
+  // ---- GUI flavour -----------------------------------------------------------
+  var GLYPH = { devtools: "⚒", regress: "✓", cpu: "▤", mem: "▥", pf: "◫", speed: "⏱", vuln: "⚿",
+                tasks: "☰", ipc: "⇄", net: "⌁", work: "⚙", risk: "☡", flags: "⚑" };
+  var tiles = document.getElementById("tiles");
+  T.WORKBENCH.forEach(function (w) {
+    var b = document.createElement("button");
+    b.className = "tile"; b.dataset.state = w.state; b.setAttribute("role", "gridcell"); b.title = w.detail;
+    b.innerHTML = "<span class='glyph'></span><span class='t'></span><span class='v'></span>";
+    b.children[0].textContent = w.ic || GLYPH[w.id] || "▢";
+    b.children[1].textContent = w.t; b.children[2].textContent = w.v;
+    b.onclick = function () {
+      gui(false); var s = tabs[active];
+      if (w.verb) s.run(w.verb); else s.emit("meta", w.t + ": " + w.detail);
+      renderMain();
+    };
+    tiles.appendChild(b);
+  });
+  [["◎", "RT OPERATOR PANEL", "mode · DRO · interlocks", function () { gui(false); newTab("rt"); }],
+   ["◈", "LOCAL MODEL", "proposal gate · token budget", function () { gui(false); newTab("agent"); }],
+   ["▮", "TINYCMD", "Ti-OS command session", function () { gui(false); }]].forEach(function (p) {
+    var b = document.createElement("button");
+    b.className = "tile"; b.dataset.state = "live"; b.setAttribute("role", "gridcell");
+    b.innerHTML = "<span class='glyph'></span><span class='t'></span><span class='v'></span>";
+    b.children[0].textContent = p[0]; b.children[1].textContent = p[1]; b.children[2].textContent = p[2];
+    b.onclick = p[3];
+    tiles.appendChild(b);
+  });
+  T.rove(tiles, ".tile");
+  function gui(on) {
+    document.body.dataset.gui = on ? "1" : "0";
+    (on ? tiles.querySelector(".tile") : document.getElementById("line")).focus();
+  }
+
+  // ---- tab switcher ----------------------------------------------------------
+  var swi = 0;
+  function openSwitch() {
+    var o = document.getElementById("switch"), list = document.getElementById("slist");
+    o.dataset.open = "1"; swi = (active + 1) % tabs.length; paint();
+    function paint() {
+      list.textContent = "";
+      tabs.forEach(function (s, i) {
+        var li = document.createElement("li");
+        li.setAttribute("role", "option"); li.setAttribute("aria-selected", i === swi);
+        li.innerHTML = "<span class='k2'></span><span class='d'></span>";
+        li.children[0].textContent = "Ctrl+" + (i + 1) + "  " + s.session;
+        li.children[1].textContent = KIND[s.tkind].label + " · " + s.lines.length + " lines";
+        li.onclick = function () { swi = i; commit(); };
+        list.appendChild(li);
+      });
+    }
+    function commit() { o.dataset.open = "0"; select(swi); document.getElementById("line").focus(); }
+    document.getElementById("sq").focus();
+    o.addEventListener("keydown", function h(e) {
+      if (o.dataset.open !== "1") { o.removeEventListener("keydown", h); return; }
+      if (e.key === "ArrowDown") { swi = (swi + 1) % tabs.length; paint(); e.preventDefault(); }
+      else if (e.key === "ArrowUp") { swi = (swi - 1 + tabs.length) % tabs.length; paint(); e.preventDefault(); }
+      else if (e.key === "Enter") { commit(); e.preventDefault(); }
+      else if (e.key === "Escape") { o.dataset.open = "0"; document.getElementById("line").focus(); }
+    });
+  }
+
+  // ---- prompt ----------------------------------------------------------------
+  var input = document.getElementById("line");
+  input.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter") return;
+    var s = tabs[active], line = input.value.trim();
+    if (!line) return;
+    input.value = "";
+    if (s.tkind === "rt") rtLine(s, line);
+    else if (s.tkind === "agent") agentLine(s, line);
+    else { s.run(line); document.querySelector(".inputrow .p").textContent = s.prompt(); }
+    renderMain(); host();
+  });
+  function rtLine(s, line) {
+    s.emit("echo", s.prompt() + line);
+    var p = line.split(/\s+/), v = p[0].toUpperCase();
+    if (v === "MODE" && p[1]) {
+      var mo = p[1].toUpperCase();
+      if (RT.modes.indexOf(mo) < 0) s.emit("err", "no such mode");
+      else { RT.mode = mo; s.out("mode " + mo + " (ACI: control.mode, audited)"); }
+    } else if (v === "JOG" && p[2]) ctx.jog(p[1].toUpperCase(), parseFloat(p[2]));
+    else if (v === "OVR" && p[2]) {
+      var k = p[1].toLowerCase();
+      if (RT.overrides[k] === undefined) s.emit("err", "no such override");
+      else { RT.overrides[k] = +p[2]; s.out(k + " override " + p[2] + "%"); }
+    } else if (v === "DRO") {
+      RT.axes.forEach(function (a) {
+        s.out("  " + a.n + "  machine " + a.m.toFixed(3) + "  work " + a.w.toFixed(3) + "  " + a.unit);
+      });
+      s.emit("meta", "  feedback: simulated (Tier 0) — not a validated position");
+    } else if (v === "ALARM") {
+      if (!RT.alarms.length) s.emit("meta", "no active alarms");
+      else RT.alarms.forEach(function (a) { s.emit("err", a.id + "  " + a.t); });
+    } else if (v === "ESTOP") {
+      s.emit("meta", "E-stop is out of band: wired to the watchdog/failsafe path, it cannot be " +
+        "asserted, masked or cleared from this console.");
+    } else s.emit("err", "Bad command or file name");
+  }
+  function agentLine(s, line) {
+    s.emit("echo", "» " + line);
+    AG.proposals.push({ cap: "shell.list", args: "A:\\", tokens: 28 + (line.length % 20),
+      risk: "read", state: "pending", why: "from prompt: " + line });
+    s.emit("meta", "the model proposed 1 capability call — approve or deny it in the gate; " +
+      "nothing executes until you do");
+  }
+
+  // ---- master menu -----------------------------------------------------------
+  // The non-command-prompt entry point: programs, tools, documents, settings, search.
+  // Everything it launches is the same verb or tab a keyboard user would reach — it opens
+  // no path the ACI gate does not already own.
+  var MENU = [
+    { g: "▣", t: "Programs", items: [
+      { g: "▮", t: "TINYCMD", d: "Ti-OS MS-DOS command session", act: function () { newTab("dos"); } },
+      { g: "❯", t: "TINYSH (Linux flavour)", d: "POSIX front-end over the same verbs", act: function () { newTab("posix"); } },
+      { g: "◎", t: "RT Operator Panel", d: "mode · DRO · overrides · interlocks", act: function () { newTab("rt"); } },
+      { g: "◈", t: "Local Model", d: "proposal gate · token budget", act: function () { newTab("agent"); } },
+      { g: "✓", t: "Parity Suite", d: "three-signal MS-DOS conformance", act: function () { newTab("parity"); } },
+      { g: "☰", t: "Task Monitor", d: "TASKMGR in this session", act: function () { tabs[active].run("TASKMGR"); } },
+      { g: "▦", t: "GUI Desktop", d: "tile shell — F12", act: function () { gui(true); } }
+    ] },
+    { g: "⚒", t: "Workload tools", items: T.WORKBENCH.map(function (w) {
+      return { g: "•", t: w.t, d: w.detail, state: w.state, act: function () {
+        var s = tabs[active];
+        if (w.verb) s.run(w.verb); else s.emit("meta", w.t + ": " + w.detail);
+      } };
+    }) },
+    { g: "▤", t: "Documents", items: [
+      { g: "▪", t: "README.TXT", d: "99 bytes · seeded · operator", act: function () { tabs[active].run("TYPE README.TXT"); } },
+      { g: "▪", t: "LIST.TXT", d: "25 bytes · seeded · operator", act: function () { tabs[active].run("TYPE LIST.TXT"); } },
+      { g: "▸", t: "SAMPLE.TCB", d: "batch — runs through the real .TCB runner", act: function () { tabs[active].run("SAMPLE.TCB"); } },
+      { g: "▤", t: "Directory of A:\\", d: "DIR", act: function () { tabs[active].run("DIR"); } },
+      { g: "⌸", t: "Volume labels", d: "ATTRIB — origin and trust per file", act: function () { tabs[active].run("ATTRIB"); } }
+    ] },
+    { g: "⚙", t: "Settings", items: [
+      { g: "▭", t: "Layout: Focus", d: "one pane, workbench collapsed", act: function () { setLayout("focus"); } },
+      { g: "▯", t: "Layout: Cockpit", d: "session + live column", act: function () { setLayout("cockpit"); } },
+      { g: "◫", t: "Layout: Split", d: "two tabs at once", act: function () { setLayout("split"); } },
+      { g: "⇤", t: "Compress the rail", d: "Ctrl+B", act: function () { side(document.body.dataset.side === "0"); } },
+      { g: "⚑", t: "Modes and flags", d: "VER — deployment mode, target, knobs", act: function () { tabs[active].run("VER"); } }
+    ] },
+    { g: "?", t: "Help", items: [
+      { g: "⌨", t: "Keyboard map", d: "every key this console answers to", act: function () { document.getElementById("help").dataset.open = "1"; } },
+      { g: "⚿", t: "Authority journal", d: "SPOOR — denials, journaled", act: function () { tabs[active].run("SPOOR"); } },
+      { g: "⏻", t: "Shut down…", d: "safe hold — a console cannot power the machine down", act: function () {
+        tabs[active].emit("meta", "Shutdown is not a console authority: the RT core transitions to a " +
+          "safe hold state through the watchdog path, never because a UI asked."); } }
+    ] }
+  ];
+
+  var mOpen = false, mCat = 0, mItem = -1, mFilter = "";
+  var menu = document.getElementById("menu"), startBtn = document.getElementById("start");
+  function menuItems() {
+    if (mFilter) {
+      var out = [];
+      MENU.forEach(function (c) {
+        c.items.forEach(function (it) {
+          if ((it.t + " " + it.d).toLowerCase().indexOf(mFilter) >= 0)
+            out.push({ g: it.g, t: it.t, d: c.t + " · " + it.d, state: it.state, act: it.act });
+        });
+      });
+      return out;
+    }
+    return MENU[mCat].items;
+  }
+  function paintMenu() {
+    var cats = document.getElementById("cats"), items = document.getElementById("items");
+    cats.textContent = "";
+    MENU.forEach(function (c, i) {
+      var b = document.createElement("button");
+      b.innerHTML = "<span class='g'></span><span></span><span class='arw'>▸</span>";
+      b.children[0].textContent = c.g; b.children[1].textContent = c.t;
+      b.setAttribute("aria-selected", !mFilter && i === mCat);
+      b.onclick = function () { mCat = i; mFilter = ""; document.getElementById("find").value = ""; mItem = -1; paintMenu(); };
+      cats.appendChild(b);
+    });
+    items.textContent = "";
+    menuItems().forEach(function (it, i) {
+      var b = document.createElement("button");
+      b.dataset.state = it.state || "live";
+      b.innerHTML = "<span class='g'></span><span><b></b><span class='d'></span></span>";
+      b.children[0].textContent = it.g;
+      b.children[1].children[0].textContent = it.t;
+      b.children[1].children[1].textContent = it.d;
+      b.setAttribute("aria-selected", i === mItem);
+      b.onclick = function () { closeMenu(); it.act(); ctx.repaint(); };
+      items.appendChild(b);
+    });
+  }
+  function openMenu() {
+    mOpen = true; menu.dataset.open = "1"; startBtn.setAttribute("aria-expanded", "true");
+    mItem = -1; paintMenu(); document.getElementById("find").focus();
+  }
+  function closeMenu() {
+    mOpen = false; menu.dataset.open = "0"; startBtn.setAttribute("aria-expanded", "false");
+    mFilter = ""; document.getElementById("find").value = "";
+    document.getElementById("line").focus();
+  }
+  startBtn.onclick = function () { mOpen ? closeMenu() : openMenu(); };
+  document.getElementById("find").addEventListener("input", function (e) {
+    mFilter = e.target.value.trim().toLowerCase(); mItem = mFilter ? 0 : -1; paintMenu();
+  });
+  menu.addEventListener("keydown", function (e) {
+    var list = menuItems();
+    if (e.key === "Escape") { closeMenu(); e.preventDefault(); }
+    else if (e.key === "ArrowDown") {
+      if (mItem < 0 && !mFilter) { mCat = (mCat + 1) % MENU.length; }
+      else mItem = Math.min(list.length - 1, mItem + 1);
+      paintMenu(); e.preventDefault();
+    } else if (e.key === "ArrowUp") {
+      if (mItem <= 0 && !mFilter) { mCat = (mCat - 1 + MENU.length) % MENU.length; mItem = -1; }
+      else mItem = Math.max(0, mItem - 1);
+      paintMenu(); e.preventDefault();
+    } else if (e.key === "ArrowRight") { mItem = 0; paintMenu(); e.preventDefault(); }
+    else if (e.key === "ArrowLeft") { mItem = -1; paintMenu(); e.preventDefault(); }
+    else if (e.key === "Enter" && list[mItem]) { var a = list[mItem].act; closeMenu(); a(); ctx.repaint(); e.preventDefault(); }
+  });
+  document.addEventListener("mousedown", function (e) {
+    if (mOpen && !menu.contains(e.target) && e.target !== startBtn) closeMenu();
+  });
+
+  // ---- keyboard --------------------------------------------------------------
+  var MAP = [
+    ["Ctrl+Esc", "master menu — programs, workbench, documents, settings, search"],
+    ["Top-left corner", "the running workload — its tools fill the rail below it"],
+    ["Ctrl+Shift+1/2/3", "layout: focus · cockpit · split"],
+    ["Ctrl+\\", "split view: pin the next tab as the second pane"],
+    ["Ctrl+B", "compress / expand the workload rail"],
+    ["Ctrl+Shift+W", "switch running workload — Ti64 · developer · agent · RT · search"],
+    ["Alt+← / Alt+→", "resize the rail"],
+    ["Ctrl+Space", "tab switcher"], ["Ctrl+Tab", "next tab"], ["Ctrl+1…6", "tab by ordinal"],
+    ["Ctrl+T", "new tab of the focused kind"],
+    ["F8", "run the parity suite"], ["F12", "GUI flavour, and back"],
+    ["RT tab", "MODE AUTO · JOG X +0.1 · OVR FEED 80 · DRO · ALARM · ESTOP"],
+    ["F1", "this map"]
+  ];
+  var hl = document.getElementById("hlist");
+  MAP.forEach(function (m) {
+    var li = document.createElement("li");
+    li.innerHTML = "<span class='k2'></span><span class='d'></span>";
+    li.children[0].textContent = m[0]; li.children[1].textContent = m[1];
+    hl.appendChild(li);
+  });
+  document.addEventListener("keydown", function (e) {
+    var h = document.getElementById("help");
+    if (e.ctrlKey && e.key === "Escape") { mOpen ? closeMenu() : openMenu(); e.preventDefault(); }
+    else if (e.key === "F1") { h.dataset.open = h.dataset.open === "1" ? "0" : "1"; e.preventDefault(); }
+    else if (e.key === "Escape") { h.dataset.open = "0"; if (document.body.dataset.gui === "1") gui(false); }
+    else if (e.key === "F12") { gui(document.body.dataset.gui === "0"); e.preventDefault(); }
+    else if (e.key === "F8") {
+      B.state.parity = "running…"; renderMain(); host();
+      setTimeout(function () { B.state.parity = "PASS"; renderMain(); host(); }, 900);
+      e.preventDefault();
+    }
+    else if (e.ctrlKey && e.shiftKey && /^[!@#123]$/.test(e.key)) {
+      setLayout(["focus", "cockpit", "split"][{ "!": 0, "@": 1, "#": 2, "1": 0, "2": 1, "3": 2 }[e.key]]);
+      e.preventDefault();
+    }
+    else if (e.ctrlKey && e.shiftKey && /^[wW]$/.test(e.key)) {
+      document.getElementById("benchlist").dataset.open === "1" ? closeBench() : openBench();
+      e.preventDefault();
+    }
+    else if (e.ctrlKey && e.key === "\\") {
+      secondary = (secondary + 1) % tabs.length;
+      if (secondary === active) secondary = (secondary + 1) % tabs.length;
+      if (layout !== "split") setLayout("split"); else { paintTabs(); renderMain(); }
+      e.preventDefault();
+    }
+    else if (e.ctrlKey && (e.key === "b" || e.key === "B")) { side(document.body.dataset.side === "0"); e.preventDefault(); }
+    else if (e.ctrlKey && e.key === " ") { openSwitch(); e.preventDefault(); }
+    else if (e.ctrlKey && e.key === "Tab") { select((active + 1) % tabs.length); e.preventDefault(); }
+    else if (e.ctrlKey && /^[1-6]$/.test(e.key)) { if (tabs[+e.key - 1]) select(+e.key - 1); e.preventDefault(); }
+    else if (e.ctrlKey && (e.key === "t" || e.key === "T")) { newTab(tabs[active].tkind); e.preventDefault(); }
+    else if (e.altKey && e.key === "ArrowLeft") { setW(sideW - 16); e.preventDefault(); }
+    else if (e.altKey && e.key === "ArrowRight") { setW(sideW + 16); e.preventDefault(); }
+  });
+
+  // ---- boot ------------------------------------------------------------------
+  T.mountMeters(document.getElementById("dock"), ["cpu", "mem", "tests", "parity", "deny", "pf"]);
+  side(document.body.dataset.side === "1");
+  var first = newTab("dos");
+  ["VER", "DIR", "SET", "TASKMGR", "TASKKILL RT-CTRL", "TYPE README.TXT"].forEach(function (l) {
+    first.run(l);
+  });
+  newTab("rt");
+  newTab("agent");
+  select(0);
+  T.tickers.push(function () {
+    document.getElementById("budget").textContent =
+      T.countNodes() + " nodes · " + T.stats.paint + " ms · 4 Hz · " + tabs.length + " tab(s)";
+  });
+  T.startClock();
+  input.focus();
+})();
 </script>
 </body>
 </html>
