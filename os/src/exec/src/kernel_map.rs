@@ -242,12 +242,17 @@ mod tests {
         // And the audit predicate over the whole linked tree: nothing is
         // simultaneously writable and executable.
         let mut wx = 0usize;
+        let mut user_pages = 0usize;
         paging::for_each_leaf(&pml4, &mut |_, page| {
             if page.writable && page.executable {
                 wx += 1;
             }
+            if page.user_accessible {
+                user_pages += 1;
+            }
         });
         assert_eq!(wx, 0);
+        assert_eq!(user_pages, 0, "kernel text/data/stacks and APIC must remain supervisor-only");
     }
 
     // STORY-P1-03-02 AC A4: two trees linking the directories share *one*

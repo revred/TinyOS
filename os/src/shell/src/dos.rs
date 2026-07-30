@@ -311,7 +311,9 @@ pub fn run_line(world: &mut World<'_>, raw: &str, sink: &mut dyn Write) -> fmt::
         need!(1);
         Request::TaskKill(args[0])
     } else if word.eq_ignore_ascii_case("SPOOR") {
-        need!(0);
+        if !args.is_empty() {
+            return parse_error(sink, ParseError::TooMany);
+        }
         Request::SpoorJournal
     } else {
         Request::Unknown
@@ -362,7 +364,12 @@ mod tests {
             echo: true,
             policy: &POLICY,
             session: "TEST",
-            tasks: &[TaskInfo { name: "IDLE", priority: 9, state: "ready" }],
+            tasks: &[TaskInfo {
+                name: "IDLE",
+                priority: 0,
+                state: "ready",
+                kill_authority: crate::verbs::KillAuthority::Ordinary,
+            }],
             spoors: &crate::verbs::NoSpoors,
             denials: 0,
         };

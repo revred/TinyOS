@@ -160,6 +160,9 @@ impl<const N: usize> SpoorView for DenialJournal<N> {
     fn len(&self) -> usize {
         DenialJournal::len(self)
     }
+    fn is_empty(&self) -> bool {
+        DenialJournal::is_empty(self)
+    }
     fn entry(&self, index: usize) -> Option<SpoorRow> {
         let spoor = DenialJournal::entry(self, index)?;
         Some(SpoorRow {

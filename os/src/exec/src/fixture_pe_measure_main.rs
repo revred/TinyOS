@@ -146,7 +146,7 @@ fn phase_parse_accept(
 
         let Ok(descriptor) = parsed else { return false };
         let observed = (
-            descriptor.entry_point_rva,
+            descriptor.entry_point_rva(),
             descriptor.sections().count(),
             descriptor.imports().count(),
         );

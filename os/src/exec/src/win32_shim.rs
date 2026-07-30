@@ -34,7 +34,7 @@
 use hal_x86_64::paging::PAGE_SIZE;
 
 use crate::address_space::AddressSpace;
-use crate::pe::ImportEntry;
+use crate::pe::{ImportEntry, ImportSymbol};
 
 /// The closed, explicitly-enumerated set of Win32 API calls this shim
 /// supports (`STORY-P0-05-03` acceptance criterion 1) — sized to
@@ -122,7 +122,11 @@ pub fn resolve(dll_name: &[u8], symbol_name: &[u8]) -> Option<Api> {
 /// entire import table is satisfiable by this shim.
 pub fn check_imports<'a>(imports: impl Iterator<Item = &'a ImportEntry>) -> Result<(), ShimError> {
     for import in imports {
-        if resolve(import.dll_name.as_bytes(), import.symbol_name.as_bytes()).is_none() {
+        let resolved = match import.symbol {
+            ImportSymbol::Name(name) => resolve(import.dll_name.as_bytes(), name.as_bytes()),
+            ImportSymbol::Ordinal(_) => None,
+        };
+        if resolved.is_none() {
             return Err(ShimError::NotAllowlisted);
         }
     }
@@ -247,7 +251,7 @@ pub fn heap_alloc(policy: &impl CapabilityPolicy, size: u64) -> Result<u64, Shim
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pe::{FixedBytes, Permissions, SectionDescriptor};
+    use crate::pe::{FixedBytes, ImportSymbol, Permissions, SectionDescriptor};
     use hal_x86_64::paging::PageTable;
     use kernel::mem::Pool;
 
@@ -258,7 +262,7 @@ mod tests {
         symbol_bytes[..symbol.len()].copy_from_slice(symbol);
         ImportEntry {
             dll_name: FixedBytes::for_test(dll_bytes, dll.len()),
-            symbol_name: FixedBytes::for_test(symbol_bytes, symbol.len()),
+            symbol: ImportSymbol::Name(FixedBytes::for_test(symbol_bytes, symbol.len())),
             // `check_imports` reads only the names; IAT slot resolution is
             // `crate::iat`'s concern and has its own tests.
             iat_slot_rva: 0,
@@ -288,6 +292,13 @@ mod tests {
         let imports =
             [import(b"KERNEL32.dll", b"HeapAlloc"), import(b"KERNEL32.dll", b"CreateRemoteThread")];
         assert_eq!(check_imports(imports.iter()), Err(ShimError::NotAllowlisted));
+    }
+
+    #[test]
+    fn check_imports_rejects_an_explicit_ordinal_dependency() {
+        let mut ordinal = import(b"KERNEL32.dll", b"ignored");
+        ordinal.symbol = ImportSymbol::Ordinal(7);
+        assert_eq!(check_imports([ordinal].iter()), Err(ShimError::NotAllowlisted));
     }
 
     #[test]

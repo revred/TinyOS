@@ -168,7 +168,7 @@ extern "C" fn low_task() -> ! {
 
     // SAFETY: as above — one bounded, interrupt-free critical section.
     unsafe {
-        let released = interrupts::without_interrupts(|| {
+        let _ = interrupts::without_interrupts(|| {
             let scheduler = &mut *(&raw mut SCHEDULER);
             let journal = &mut *(&raw mut JOURNAL_STORE);
             let lock = &mut *(&raw mut LOCK);
@@ -181,10 +181,15 @@ extern "C" fn low_task() -> ! {
             if let Some(high) = TASK_IDS[HIGH_SLOT] {
                 scheduler.set_state(high, TaskState::Ready);
             }
+            // Publish the evidence while interrupts are still disabled and
+            // before this task becomes Finished. Publishing after
+            // `without_interrupts` returned left a timer-preemption window:
+            // the scheduler could observe Finished, run high to completion,
+            // and never resume low to execute the old assignment.
+            LOW_RELEASED = true;
             scheduler.set_state(low, TaskState::Finished);
             true
         });
-        LOW_RELEASED = released;
         context::switch(&raw mut TASK_CTX[LOW_SLOT], &raw mut DISPATCHER_CTX);
     }
     unreachable!("a Finished task is never selected again")

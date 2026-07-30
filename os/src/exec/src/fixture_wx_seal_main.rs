@@ -486,7 +486,9 @@ fn run() -> bool {
         }
         let had_residue = STAGING.0.iter().any(|&b| b != 0);
         ok &= had_residue; // the dead task's bytes were really there...
-        space.teardown(&mut *(&raw mut STAGING.0), &mut generation);
+        if space.teardown(&mut *(&raw mut STAGING.0), &mut generation).is_err() {
+            return false;
+        }
         ok &= STAGING.0.iter().all(|&b| b == 0); // ...and now they are not.
         ok &= generation.value() == 1;
     }

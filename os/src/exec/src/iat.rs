@@ -115,8 +115,12 @@ pub unsafe fn patch_imports<'a, const FRAMES: usize>(
 ) -> Result<PatchSummary, IatError> {
     let mut summary = PatchSummary::default();
     for import in imports {
-        let resolved =
-            win32_shim::resolve(import.dll_name.as_bytes(), import.symbol_name.as_bytes());
+        let resolved = match import.symbol {
+            crate::pe::ImportSymbol::Name(name) => {
+                win32_shim::resolve(import.dll_name.as_bytes(), name.as_bytes())
+            }
+            crate::pe::ImportSymbol::Ordinal(_) => None,
+        };
         let value = match resolved {
             Some(api) if policy.is_granted(api) => {
                 summary.granted += 1;
@@ -304,7 +308,7 @@ pub mod trampolines {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pe::{FixedBytes, Permissions, SectionDescriptor};
+    use crate::pe::{FixedBytes, ImportSymbol, Permissions, SectionDescriptor};
     use hal_x86_64::paging::{PageTable, PAGE_SIZE};
     use kernel::mem::Pool;
 
@@ -315,7 +319,7 @@ mod tests {
         symbol_bytes[..symbol.len()].copy_from_slice(symbol);
         ImportEntry {
             dll_name: FixedBytes::for_test(dll_bytes, dll.len()),
-            symbol_name: FixedBytes::for_test(symbol_bytes, symbol.len()),
+            symbol: ImportSymbol::Name(FixedBytes::for_test(symbol_bytes, symbol.len())),
             iat_slot_rva,
         }
     }
@@ -372,10 +376,13 @@ mod tests {
         )
         .expect("valid sections should map");
 
+        let mut ordinal = import(b"KERNEL32.dll", b"ignored", 0x118);
+        ordinal.symbol = ImportSymbol::Ordinal(7);
         let imports = [
             import(b"KERNEL32.dll", b"GetCurrentProcess", 0x100),
             import(b"KERNEL32.dll", b"CreateRemoteThread", 0x108),
             import(b"KERNEL32.dll", b"WriteFile", 0x110),
+            ordinal,
         ];
         // SAFETY: nothing sealed this space's identity view; the staged
         // frames are live and unaliased for this call.
@@ -385,9 +392,9 @@ mod tests {
         .expect("in-bounds slots should patch");
 
         assert_eq!(summary.granted, 1);
-        assert_eq!(summary.not_allowlisted, 1);
+        assert_eq!(summary.not_allowlisted, 2);
         assert_eq!(summary.denied, 1);
-        assert_eq!(summary.total(), 3, "every import's slot is accounted for");
+        assert_eq!(summary.total(), 4, "every named and ordinal slot is accounted for");
 
         assert_eq!(
             slot_value(&space, 0x100),
@@ -403,6 +410,11 @@ mod tests {
             slot_value(&space, 0x110),
             CAPABILITY_TRAP_VIRT,
             "an allowlisted but policy-denied import must point at the trap too"
+        );
+        assert_eq!(
+            slot_value(&space, 0x118),
+            CAPABILITY_TRAP_VIRT,
+            "an unsupported ordinal import must also be overwritten with the trap"
         );
     }
 

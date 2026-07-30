@@ -22,6 +22,13 @@
 //! past the boot GDT's limit. That selector is this table's TSS. The fixture no
 //! longer picks a selector by counting descriptors — see
 //! `kernel::fixture_fault`'s own constant.
+//!
+//! **Boundary status.** The CPL-3 descriptors and TSS.RSP0 stack are the
+//! hardware foundation for a future user transition; they do not themselves
+//! move a task out of CPL 0. The shipping scheduler still enters tasks through
+//! `kernel::context`'s ordinary `ret`. An `iretq` entry frame, complete
+//! user-origin trap frames, and a syscall ABI remain required before TinyOS
+//! may claim a protected process boundary.
 
 use crate::tss::TaskStateSegment;
 
@@ -33,6 +40,10 @@ pub const DATA_SELECTOR: u16 = 0x10;
 /// Selector for the TSS — index 3, RPL 0. The 64-bit TSS descriptor occupies
 /// **two** GDT slots (3 and 4), so no other descriptor may claim index 4.
 pub const TSS_SELECTOR: u16 = 0x18;
+/// CPL-3 code selector — index 5 plus RPL 3.
+pub const USER_CODE_SELECTOR: u16 = 0x2b;
+/// CPL-3 data/stack selector — index 6 plus RPL 3.
+pub const USER_DATA_SELECTOR: u16 = 0x33;
 
 /// The three descriptors `boot.rs` builds in assembly, repeated here verbatim.
 ///
@@ -48,6 +59,10 @@ pub const TSS_SELECTOR: u16 = 0x18;
 /// - `0x0000920000000000` — data, read/write, present, DPL 0.
 const BOOT_DESCRIPTORS: [u64; 3] =
     [0x0000_0000_0000_0000, 0x0020_9A00_0000_0000, 0x0000_9200_0000_0000];
+
+/// Flat long-mode user code/data descriptors. Their DPL is 3; the selectors'
+/// RPL is also 3, so they cannot be used to manufacture supervisor privilege.
+const USER_DESCRIPTORS: [u64; 2] = [0x0020_FA00_0000_0000, 0x0000_F200_0000_0000];
 
 /// Access byte for an **available** 64-bit TSS: present, DPL 0, system
 /// descriptor (`S` clear), type `0x9`.
@@ -130,27 +145,31 @@ impl TssDescriptor {
     }
 }
 
-/// This kernel's GDT: `boot.rs`'s three descriptors, then the TSS descriptor
-/// occupying the next two slots.
+/// This kernel's GDT: `boot.rs`'s three descriptors, the TSS descriptor
+/// occupying the next two slots, then CPL-3 code and data descriptors.
 ///
 /// `#[repr(C, align(8))]` — the table's own descriptor stride, and
 /// deliberately **not** 16 the way [`crate::idt::Idt`] aligns: this structure
-/// is 40 bytes, so a 16-byte alignment would round `size_of` up to 48 and the
-/// limit derived from it would advertise eight bytes of tail padding as a
-/// sixth descriptor slot. A GDT limit that covers memory holding no descriptor
+/// is 56 bytes, so its natural 8-byte alignment needs no tail padding. A GDT
+/// limit that covers memory holding no descriptor
 /// turns an out-of-range selector into a zeroed one, which is a different
 /// (and quieter) failure than the `#GP` the hardware should raise.
 #[repr(C, align(8))]
 pub struct Gdt {
     descriptors: [u64; 3],
     tss: TssDescriptor,
+    user_descriptors: [u64; 2],
 }
 
 impl Gdt {
     /// Builds the table for `tss`.
     pub fn new(tss: &TaskStateSegment) -> Self {
         let (base, limit) = tss.base_and_limit();
-        Gdt { descriptors: BOOT_DESCRIPTORS, tss: TssDescriptor::new(base, limit) }
+        Gdt {
+            descriptors: BOOT_DESCRIPTORS,
+            tss: TssDescriptor::new(base, limit),
+            user_descriptors: USER_DESCRIPTORS,
+        }
     }
 
     /// The three descriptors inherited from `boot.rs`, for the drift test.
@@ -161,6 +180,11 @@ impl Gdt {
     /// The TSS descriptor.
     pub fn tss_descriptor(&self) -> TssDescriptor {
         self.tss
+    }
+
+    /// The CPL-3 code/data descriptors, for architectural read-back tests.
+    pub fn user_descriptors(&self) -> [u64; 2] {
+        self.user_descriptors
     }
 
     /// Raw base address and byte length `lgdt` needs, in the same
@@ -209,6 +233,8 @@ pub unsafe fn install() {
         let tss = &mut *(&raw mut TSS);
         let (_, stack_top) = crate::tss::double_fault_stack_range();
         tss.set_interrupt_stack(crate::tss::IstIndex::DOUBLE_FAULT, stack_top);
+        let (_, ring0_stack_top) = crate::tss::ring0_entry_stack_range();
+        tss.set_ring0_stack(ring0_stack_top);
 
         let gdt_slot = &mut *(&raw mut GDT);
         *gdt_slot = Some(Gdt::new(tss));
@@ -244,6 +270,16 @@ pub unsafe fn installed_double_fault_stack_top() -> u64 {
     unsafe { (*(&raw const TSS)).interrupt_stack(crate::tss::IstIndex::DOUBLE_FAULT) }
 }
 
+/// The installed TSS's CPL-0 transition stack top.
+///
+/// # Safety
+/// Only meaningful after [`install`], on the single CPU.
+#[cfg(not(target_os = "windows"))]
+pub unsafe fn installed_ring0_stack_top() -> u64 {
+    // SAFETY: see this function's own doc comment.
+    unsafe { (*(&raw const TSS)).ring0_stack() }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,13 +307,24 @@ mod tests {
         // The 64-bit TSS descriptor is 16 bytes — two GDT slots — so index 4
         // is claimed too and nothing else may use it.
         assert_eq!(core::mem::size_of::<TssDescriptor>(), 16);
-        assert_eq!(core::mem::size_of::<Gdt>(), 3 * 8 + 16);
+        assert_eq!(core::mem::size_of::<Gdt>(), 3 * 8 + 16 + 2 * 8);
     }
 
     #[test]
     fn code_and_data_selectors_are_the_ones_boot_rs_loads() {
         assert_eq!(CODE_SELECTOR, 0x08);
         assert_eq!(DATA_SELECTOR, 0x10);
+    }
+
+    #[test]
+    fn user_descriptors_and_selectors_encode_dpl_and_rpl_three() {
+        let tss = TaskStateSegment::new();
+        let gdt = Gdt::new(&tss);
+        assert_eq!(gdt.user_descriptors(), [0x0020_FA00_0000_0000, 0x0000_F200_0000_0000]);
+        assert_eq!(USER_CODE_SELECTOR, (5 << 3) | 3);
+        assert_eq!(USER_DATA_SELECTOR, (6 << 3) | 3);
+        assert_eq!(USER_CODE_SELECTOR & 3, 3);
+        assert_eq!(USER_DATA_SELECTOR & 3, 3);
     }
 
     // Clause 2: the base is split across four fields at fixed offsets, which

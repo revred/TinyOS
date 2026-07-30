@@ -43,6 +43,8 @@ pub enum PeError {
     SectionTableOutOfBounds,
     /// A section's declared file offset and size run past the file's end.
     SectionDataOutOfBounds,
+    /// A section's declared virtual range overflows the 32-bit RVA space.
+    SectionVirtualRangeOverflow,
     /// A section requests both write and execute permission (`G-PC-1`'s W^X
     /// requirement, enforced at parse time).
     WriteExecuteSection,
@@ -52,6 +54,15 @@ pub enum PeError {
     /// An RVA (import directory, DLL name, or imported symbol name) does
     /// not fall inside any parsed section.
     RvaOutOfBounds,
+    /// A PE64 import thunk sets bits that are reserved for its selected
+    /// name/ordinal representation.
+    MalformedImportThunk,
+    /// The image entry point is not contained by any mapped section.
+    EntryPointOutOfBounds,
+    /// The image entry point is not in an executable, non-writable section.
+    EntryPointNotExecutable,
+    /// Adding the entry-point RVA to the preferred image base overflows.
+    EntryPointAddressOverflow,
     /// A DLL or symbol name has no NUL terminator within the file.
     NameOutOfBounds,
     /// A DLL or symbol name exceeds this module's fixed buffer capacity.
@@ -59,6 +70,9 @@ pub enum PeError {
     /// More imported (DLL, symbol) pairs were found than the caller's
     /// `IMPORTS` capacity allows.
     TooManyImports,
+    /// The import directory's declared byte range ended before its required
+    /// all-zero terminator descriptor.
+    ImportDirectoryUnterminated,
 }
 
 /// Section read/write/execute permissions, as declared by a PE section's
@@ -138,15 +152,25 @@ impl<const N: usize> core::fmt::Debug for FixedBytes<N> {
     }
 }
 
-/// One imported (DLL name, imported symbol name) pair, per `STORY-P0-05-01`
+/// What one import thunk identifies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportSymbol {
+    /// A symbol named by an `IMAGE_IMPORT_BY_NAME` record.
+    Name(FixedBytes<MAX_SYMBOL_NAME_LEN>),
+    /// A PE import-by-ordinal. It remains explicit so policy can deny or
+    /// resolve it; omitting it would leave an unmediated IAT cell.
+    Ordinal(u16),
+}
+
+/// One imported (DLL, symbol-or-ordinal) dependency, per `STORY-P0-05-01`
 /// acceptance criterion 3 — resolution against an allowlist is
 /// `STORY-P0-05-03`'s job, not this module's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImportEntry {
     /// The importing DLL's name, e.g. `b"KERNEL32.dll"`.
     pub dll_name: FixedBytes<MAX_DLL_NAME_LEN>,
-    /// The imported symbol's name, e.g. `b"HeapAlloc"`.
-    pub symbol_name: FixedBytes<MAX_SYMBOL_NAME_LEN>,
+    /// The imported name or ordinal.
+    pub symbol: ImportSymbol,
     /// Relative virtual address of *this import's own slot in the Import
     /// Address Table* — the 8-byte cell the image's own code indirects
     /// through at every call site for this symbol (`STORY-P1-03-03`).
@@ -159,16 +183,12 @@ pub struct ImportEntry {
     /// ILT would leave every call site still indirecting through an
     /// unpatched IAT.
     ///
-    /// Slot index counts **every** thunk in the descriptor's array,
-    /// including ordinal-only imports this parser does not record as
-    /// [`ImportEntry`]s (`pe::parse`'s own doc comment) — an ordinal import
-    /// still occupies its IAT cell, so skipping it would shift every later
-    /// slot address by eight bytes and patch the wrong cells.
+    /// Slot index counts every thunk, named or ordinal.
     pub iat_slot_rva: u32,
 }
 
 /// A parsed, validated PE64 image: its entry point, image base, sections,
-/// and named imports.
+/// and complete import dependency surface.
 ///
 /// `SECTIONS` and `IMPORTS` are caller-chosen capacity bounds (analogous to
 /// `Pool<T, N>` in `kernel::mem` and `hal::topology::Topology<N>`) — a file
@@ -177,10 +197,9 @@ pub struct ImportEntry {
 /// growing unbounded storage.
 #[derive(Debug, Clone, Copy)]
 pub struct LoadDescriptor<const SECTIONS: usize, const IMPORTS: usize> {
-    /// Relative virtual address of the image's entry point.
-    pub entry_point_rva: u32,
-    /// The image's preferred base virtual address.
-    pub image_base: u64,
+    entry_point_rva: u32,
+    image_base: u64,
+    entry_virtual_address: u64,
     sections: [Option<SectionDescriptor>; SECTIONS],
     section_count: usize,
     imports: [Option<ImportEntry>; IMPORTS],
@@ -188,6 +207,25 @@ pub struct LoadDescriptor<const SECTIONS: usize, const IMPORTS: usize> {
 }
 
 impl<const SECTIONS: usize, const IMPORTS: usize> LoadDescriptor<SECTIONS, IMPORTS> {
+    /// Relative virtual address of the entry point, proven by [`parse`] to
+    /// lie in an executable, non-writable section.
+    pub const fn entry_point_rva(&self) -> u32 {
+        self.entry_point_rva
+    }
+
+    /// The image's preferred base virtual address.
+    pub const fn image_base(&self) -> u64 {
+        self.image_base
+    }
+
+    /// Checked sum of [`Self::image_base`] and [`Self::entry_point_rva`].
+    ///
+    /// Keeping this value inside the descriptor prevents activation paths
+    /// from accidentally reintroducing unchecked entry-address arithmetic.
+    pub const fn entry_virtual_address(&self) -> u64 {
+        self.entry_virtual_address
+    }
+
     /// Iterates over this image's sections in file order.
     pub fn sections(&self) -> impl Iterator<Item = &SectionDescriptor> {
         self.sections[..self.section_count].iter().filter_map(Option::as_ref)
@@ -216,10 +254,8 @@ const IMAGE_SCN_MEM_EXECUTE: u32 = 0x2000_0000;
 const IMAGE_SCN_MEM_WRITE: u32 = 0x8000_0000;
 const IMAGE_SCN_MEM_READ: u32 = 0x4000_0000;
 /// Set on a 64-bit thunk when it names an ordinal rather than a symbol
-/// name; such imports are not recorded ([`LoadDescriptor::imports`] only
-/// carries named imports — `blue-sharc.exe`'s expected import table is
-/// name-based, and an allowlist match against `STORY-P0-05-03` is only
-/// meaningful for named imports).
+/// name. These remain explicit [`ImportSymbol::Ordinal`] dependencies so
+/// policy and IAT patching cannot accidentally omit them.
 const IMAGE_ORDINAL_FLAG64: u64 = 0x8000_0000_0000_0000;
 /// Byte offset of the Import Directory entry within the optional header's
 /// Data Directory array (index 1 of 16, each entry 8 bytes, array starts at
@@ -247,11 +283,18 @@ fn read_u64(bytes: &[u8], offset: usize) -> Result<u64, PeError> {
 /// Reads a NUL-terminated byte string starting at `offset`, failing closed
 /// if the terminator isn't found within the file or the name exceeds `N`
 /// bytes.
-fn read_c_string<const N: usize>(bytes: &[u8], offset: usize) -> Result<FixedBytes<N>, PeError> {
+fn read_c_string_bounded<const N: usize>(
+    bytes: &[u8],
+    offset: usize,
+    limit: usize,
+) -> Result<FixedBytes<N>, PeError> {
     let mut buf = [0u8; N];
     let mut len = 0usize;
     let mut i = offset;
     loop {
+        if i >= limit {
+            return Err(PeError::NameOutOfBounds);
+        }
         let b = *bytes.get(i).ok_or(PeError::NameOutOfBounds)?;
         if b == 0 {
             break;
@@ -266,17 +309,24 @@ fn read_c_string<const N: usize>(bytes: &[u8], offset: usize) -> Result<FixedByt
     Ok(FixedBytes { bytes: buf, len })
 }
 
+#[cfg(test)]
+fn read_c_string<const N: usize>(bytes: &[u8], offset: usize) -> Result<FixedBytes<N>, PeError> {
+    read_c_string_bounded(bytes, offset, bytes.len())
+}
+
 /// Translates a relative virtual address into a file byte offset by
-/// finding the section whose mapped range contains it. Uses
-/// `max(virtual_size, file_size)` as the range's extent, matching real PE
-/// loaders' tolerance of headers where the two disagree.
-fn rva_to_file_offset(sections: &[Option<SectionDescriptor>], rva: u32) -> Option<usize> {
+/// finding the section whose *file-backed* range contains it. Virtual
+/// zero-fill beyond `file_size` must never be treated as parser input.
+/// Returns both the translated offset and the end of that section's raw
+/// bytes so strings and tables cannot bleed into the next file region.
+fn rva_to_file_window(sections: &[Option<SectionDescriptor>], rva: u32) -> Option<(usize, usize)> {
     for section in sections.iter().filter_map(Option::as_ref) {
-        let extent = section.virtual_size.max(section.file_size);
-        let end = section.virtual_address.checked_add(extent)?;
+        let end = section.virtual_address.checked_add(section.file_size)?;
         if rva >= section.virtual_address && rva < end {
             let delta = rva - section.virtual_address;
-            return Some(section.file_offset as usize + delta as usize);
+            let offset = (section.file_offset as usize).checked_add(delta as usize)?;
+            let raw_end = (section.file_offset as usize).checked_add(section.file_size as usize)?;
+            return Some((offset, raw_end));
         }
     }
     None
@@ -363,6 +413,9 @@ pub fn parse<const SECTIONS: usize, const IMPORTS: usize>(
         let size_of_raw_data = read_u32(bytes, off + 16)?;
         let pointer_to_raw_data = read_u32(bytes, off + 20)?;
         let characteristics = read_u32(bytes, off + 36)?;
+        virtual_address
+            .checked_add(virtual_size.max(size_of_raw_data))
+            .ok_or(PeError::SectionVirtualRangeOverflow)?;
 
         if size_of_raw_data > 0 {
             let data_end = (pointer_to_raw_data as usize)
@@ -395,16 +448,43 @@ pub fn parse<const SECTIONS: usize, const IMPORTS: usize>(
         section_count += 1;
     }
 
+    let parsed_sections = &sections[..section_count];
+    let entry_section = parsed_sections
+        .iter()
+        .filter_map(Option::as_ref)
+        .find(|section| {
+            let extent = section.virtual_size.max(section.file_size);
+            section.virtual_address.checked_add(extent).is_some_and(|end| {
+                entry_point_rva >= section.virtual_address && entry_point_rva < end
+            })
+        })
+        .ok_or(PeError::EntryPointOutOfBounds)?;
+    if !entry_section.permissions.execute || entry_section.permissions.write {
+        return Err(PeError::EntryPointNotExecutable);
+    }
+    let entry_virtual_address = image_base
+        .checked_add(u64::from(entry_point_rva))
+        .ok_or(PeError::EntryPointAddressOverflow)?;
+
     let mut imports: [Option<ImportEntry>; IMPORTS] = [None; IMPORTS];
     let mut import_count = 0usize;
     if import_dir_rva != 0 && import_dir_size != 0 {
-        let parsed_sections = &sections[..section_count];
-        let mut desc_offset =
-            rva_to_file_offset(parsed_sections, import_dir_rva).ok_or(PeError::RvaOutOfBounds)?;
+        import_dir_rva.checked_add(import_dir_size).ok_or(PeError::RvaOutOfBounds)?;
+        let mut descriptor_bytes = 0u32;
         loop {
+            let next_descriptor_bytes = descriptor_bytes
+                .checked_add(IMPORT_DESCRIPTOR_LEN as u32)
+                .ok_or(PeError::RvaOutOfBounds)?;
+            if next_descriptor_bytes > import_dir_size {
+                return Err(PeError::ImportDirectoryUnterminated);
+            }
+            let desc_rva =
+                import_dir_rva.checked_add(descriptor_bytes).ok_or(PeError::RvaOutOfBounds)?;
+            let (desc_offset, desc_raw_end) =
+                rva_to_file_window(parsed_sections, desc_rva).ok_or(PeError::RvaOutOfBounds)?;
             let entry_end =
                 desc_offset.checked_add(IMPORT_DESCRIPTOR_LEN).ok_or(PeError::Truncated)?;
-            if entry_end > bytes.len() {
+            if entry_end > desc_raw_end || entry_end > bytes.len() {
                 return Err(PeError::Truncated);
             }
             let original_first_thunk = read_u32(bytes, desc_offset)?;
@@ -414,9 +494,10 @@ pub fn parse<const SECTIONS: usize, const IMPORTS: usize>(
                 break;
             }
 
-            let dll_name_offset =
-                rva_to_file_offset(parsed_sections, name_rva).ok_or(PeError::RvaOutOfBounds)?;
-            let dll_name: FixedBytes<MAX_DLL_NAME_LEN> = read_c_string(bytes, dll_name_offset)?;
+            let (dll_name_offset, dll_name_limit) =
+                rva_to_file_window(parsed_sections, name_rva).ok_or(PeError::RvaOutOfBounds)?;
+            let dll_name: FixedBytes<MAX_DLL_NAME_LEN> =
+                read_c_string_bounded(bytes, dll_name_offset, dll_name_limit)?;
 
             // Names are read from the ILT when the image has one (it is the
             // immutable copy); IAT slot addresses always come from
@@ -426,51 +507,65 @@ pub fn parse<const SECTIONS: usize, const IMPORTS: usize>(
                 if original_first_thunk != 0 { original_first_thunk } else { first_thunk };
             let iat_base_rva = if first_thunk != 0 { first_thunk } else { thunk_rva };
             if thunk_rva != 0 {
-                let mut thunk_offset = rva_to_file_offset(parsed_sections, thunk_rva)
-                    .ok_or(PeError::RvaOutOfBounds)?;
                 let mut thunk_index = 0u32;
                 loop {
+                    let thunk_delta =
+                        thunk_index.checked_mul(THUNK_LEN as u32).ok_or(PeError::RvaOutOfBounds)?;
+                    let current_thunk_rva =
+                        thunk_rva.checked_add(thunk_delta).ok_or(PeError::RvaOutOfBounds)?;
+                    let (thunk_offset, thunk_raw_end) =
+                        rva_to_file_window(parsed_sections, current_thunk_rva)
+                            .ok_or(PeError::RvaOutOfBounds)?;
                     let thunk_end =
                         thunk_offset.checked_add(THUNK_LEN).ok_or(PeError::Truncated)?;
-                    if thunk_end > bytes.len() {
+                    if thunk_end > thunk_raw_end || thunk_end > bytes.len() {
                         return Err(PeError::Truncated);
                     }
                     let thunk = read_u64(bytes, thunk_offset)?;
                     if thunk == 0 {
                         break;
                     }
-                    if thunk & IMAGE_ORDINAL_FLAG64 == 0 {
-                        let hint_name_rva = (thunk & 0xFFFF_FFFF) as u32;
-                        let hint_name_offset = rva_to_file_offset(parsed_sections, hint_name_rva)
-                            .ok_or(PeError::RvaOutOfBounds)?;
-                        // Skip the 2-byte `Hint` field preceding the name.
-                        let symbol_name: FixedBytes<MAX_SYMBOL_NAME_LEN> =
-                            read_c_string(bytes, hint_name_offset + 2)?;
-                        if import_count >= IMPORTS {
-                            return Err(PeError::TooManyImports);
+                    let symbol = if thunk & IMAGE_ORDINAL_FLAG64 != 0 {
+                        if thunk & !(IMAGE_ORDINAL_FLAG64 | 0xFFFF) != 0 {
+                            return Err(PeError::MalformedImportThunk);
                         }
-                        let iat_slot_rva = iat_base_rva
-                            .checked_add(
-                                thunk_index
-                                    .checked_mul(THUNK_LEN as u32)
-                                    .ok_or(PeError::RvaOutOfBounds)?,
-                            )
-                            .ok_or(PeError::RvaOutOfBounds)?;
-                        imports[import_count] =
-                            Some(ImportEntry { dll_name, symbol_name, iat_slot_rva });
-                        import_count += 1;
+                        ImportSymbol::Ordinal((thunk & 0xFFFF) as u16)
+                    } else {
+                        if thunk > u64::from(u32::MAX) {
+                            return Err(PeError::MalformedImportThunk);
+                        }
+                        let hint_name_rva = thunk as u32;
+                        let (hint_name_offset, hint_name_limit) =
+                            rva_to_file_window(parsed_sections, hint_name_rva)
+                                .ok_or(PeError::RvaOutOfBounds)?;
+                        // Skip the 2-byte `Hint` field preceding the name.
+                        let symbol_offset =
+                            hint_name_offset.checked_add(2).ok_or(PeError::RvaOutOfBounds)?;
+                        if symbol_offset > hint_name_limit {
+                            return Err(PeError::RvaOutOfBounds);
+                        }
+                        let name: FixedBytes<MAX_SYMBOL_NAME_LEN> =
+                            read_c_string_bounded(bytes, symbol_offset, hint_name_limit)?;
+                        ImportSymbol::Name(name)
+                    };
+                    if import_count >= IMPORTS {
+                        return Err(PeError::TooManyImports);
                     }
-                    thunk_offset += THUNK_LEN;
-                    thunk_index += 1;
+                    let iat_slot_rva =
+                        iat_base_rva.checked_add(thunk_delta).ok_or(PeError::RvaOutOfBounds)?;
+                    imports[import_count] = Some(ImportEntry { dll_name, symbol, iat_slot_rva });
+                    import_count += 1;
+                    thunk_index = thunk_index.checked_add(1).ok_or(PeError::RvaOutOfBounds)?;
                 }
             }
-            desc_offset += IMPORT_DESCRIPTOR_LEN;
+            descriptor_bytes = next_descriptor_bytes;
         }
     }
 
     Ok(LoadDescriptor {
         entry_point_rva,
         image_base,
+        entry_virtual_address,
         sections,
         section_count,
         imports,
@@ -566,8 +661,12 @@ mod tests {
     fn parses_a_well_formed_image() {
         let bytes = well_formed_image();
         let descriptor: LoadDescriptor<4, 4> = parse(&bytes).unwrap();
-        assert_eq!(descriptor.entry_point_rva, IMAGE_BASE_RVA + 4);
-        assert_eq!(descriptor.image_base, 0x1_4000_0000);
+        assert_eq!(descriptor.entry_point_rva(), IMAGE_BASE_RVA + 4);
+        assert_eq!(descriptor.image_base(), 0x1_4000_0000);
+        assert_eq!(
+            descriptor.entry_virtual_address(),
+            0x1_4000_0000 + u64::from(IMAGE_BASE_RVA + 4)
+        );
 
         let sections: std::vec::Vec<_> = descriptor.sections().collect();
         assert_eq!(sections.len(), 1);
@@ -580,22 +679,23 @@ mod tests {
         let imports: std::vec::Vec<_> = descriptor.imports().collect();
         assert_eq!(imports.len(), 1);
         assert_eq!(imports[0].dll_name.as_bytes(), b"MYDLL.DLL");
-        assert_eq!(imports[0].symbol_name.as_bytes(), b"MySymbol");
+        assert!(matches!(
+            imports[0].symbol,
+            ImportSymbol::Name(name) if name.as_bytes() == b"MySymbol"
+        ));
         // STORY-P1-03-03: the IAT cell this import's call sites indirect
         // through — `FirstThunk` plus this import's slot index (0 here).
         assert_eq!(imports[0].iat_slot_rva, IMAGE_BASE_RVA + 40);
     }
 
     /// The same shape as [`well_formed_image`], but with a *separate* ILT
-    /// and IAT (the layout every real linker emits) and an ordinal-only
-    /// import occupying the first thunk slot — so a parser that recorded
-    /// the ILT address, or that counted only named imports, would compute
-    /// the wrong cell for `MySymbol`.
+    /// and IAT (the layout every real linker emits), so a parser that
+    /// recorded the ILT address would compute the wrong cell for `MySymbol`.
     fn image_with_split_ilt_and_iat() -> std::vec::Vec<u8> {
         let ilt_rva = IMAGE_BASE_RVA + 40;
-        let iat_rva = IMAGE_BASE_RVA + 64;
-        let iibn_rva = IMAGE_BASE_RVA + 88;
-        let name_rva = IMAGE_BASE_RVA + 99;
+        let iat_rva = IMAGE_BASE_RVA + 56;
+        let iibn_rva = IMAGE_BASE_RVA + 72;
+        let name_rva = IMAGE_BASE_RVA + 83;
 
         let mut import_block = std::vec::Vec::new();
         import_block.extend_from_slice(&ilt_rva.to_le_bytes()); // OriginalFirstThunk
@@ -606,42 +706,71 @@ mod tests {
         import_block.extend_from_slice(&[0u8; 20]); // null descriptor
         assert_eq!(import_block.len(), 40);
 
-        // ILT: [0] ordinal-only import, [1] named import, [2] terminator.
-        import_block.extend_from_slice(&(IMAGE_ORDINAL_FLAG64 | 7).to_le_bytes());
+        // ILT: one named import, then terminator.
         import_block.extend_from_slice(&(iibn_rva as u64).to_le_bytes());
         import_block.extend_from_slice(&0u64.to_le_bytes());
-        assert_eq!(import_block.len(), 64);
-        // IAT: same three cells, holding the unpatched thunk values.
-        import_block.extend_from_slice(&(IMAGE_ORDINAL_FLAG64 | 7).to_le_bytes());
+        assert_eq!(import_block.len(), 56);
+        // IAT: same two cells, holding the unpatched thunk values.
         import_block.extend_from_slice(&(iibn_rva as u64).to_le_bytes());
         import_block.extend_from_slice(&0u64.to_le_bytes());
-        assert_eq!(import_block.len(), 88);
+        assert_eq!(import_block.len(), 72);
         import_block.extend_from_slice(&0u16.to_le_bytes()); // Hint
         import_block.extend_from_slice(b"MySymbol\0");
-        assert_eq!(import_block.len(), 99);
+        assert_eq!(import_block.len(), 83);
         import_block.extend_from_slice(b"MYDLL.DLL\0");
 
         image_around(import_block)
     }
 
-    // STORY-P1-03-03: the slot address comes from `FirstThunk`, not the
-    // ILT, and its index counts ordinal-only imports that occupy a cell
-    // without being recorded as an `ImportEntry`. Both mistakes are silent
-    // — they patch a real, wrong cell — so both are pinned here.
+    // STORY-P1-03-03: the slot address comes from `FirstThunk`, not the ILT.
+    // The mistake is silent — it patches a real, wrong cell — so it is
+    // pinned here.
     #[test]
-    fn the_iat_slot_comes_from_first_thunk_and_counts_ordinal_only_slots() {
+    fn the_iat_slot_comes_from_first_thunk() {
         let bytes = image_with_split_ilt_and_iat();
         let descriptor: LoadDescriptor<4, 4> = parse(&bytes).unwrap();
         let imports: std::vec::Vec<_> = descriptor.imports().collect();
-        assert_eq!(imports.len(), 1, "the ordinal-only import is not recorded by name");
-        assert_eq!(imports[0].symbol_name.as_bytes(), b"MySymbol");
-        // IAT base (IMAGE_BASE_RVA + 64) + one slot for the ordinal import.
-        assert_eq!(imports[0].iat_slot_rva, IMAGE_BASE_RVA + 64 + 8);
+        assert_eq!(imports.len(), 1);
+        assert!(matches!(
+            imports[0].symbol,
+            ImportSymbol::Name(name) if name.as_bytes() == b"MySymbol"
+        ));
+        assert_eq!(imports[0].iat_slot_rva, IMAGE_BASE_RVA + 56);
         assert_ne!(
             imports[0].iat_slot_rva,
-            IMAGE_BASE_RVA + 40 + 8,
+            IMAGE_BASE_RVA + 40,
             "the ILT address must never be recorded as the patch target"
         );
+    }
+
+    #[test]
+    fn models_ordinal_imports_instead_of_omitting_them_from_policy() {
+        let mut bytes = well_formed_image();
+        let raw_data_offset = DOS_HEADER_LEN + 4 + COFF_HEADER_LEN + 128 + SECTION_HEADER_LEN;
+        bytes[raw_data_offset + 40..raw_data_offset + 48]
+            .copy_from_slice(&(IMAGE_ORDINAL_FLAG64 | 7).to_le_bytes());
+        let descriptor: LoadDescriptor<4, 4> = parse(&bytes).unwrap();
+        let imports: std::vec::Vec<_> = descriptor.imports().collect();
+        assert_eq!(imports.len(), 1);
+        assert_eq!(imports[0].symbol, ImportSymbol::Ordinal(7));
+        assert_eq!(imports[0].iat_slot_rva, IMAGE_BASE_RVA + 40);
+    }
+
+    #[test]
+    fn rejects_reserved_bits_in_named_and_ordinal_thunks() {
+        let raw_data_offset = DOS_HEADER_LEN + 4 + COFF_HEADER_LEN + 128 + SECTION_HEADER_LEN;
+
+        let mut named = well_formed_image();
+        named[raw_data_offset + 40..raw_data_offset + 48]
+            .copy_from_slice(&0x0000_0001_0000_1000u64.to_le_bytes());
+        let named_result: Result<LoadDescriptor<4, 4>, PeError> = parse(&named);
+        assert_eq!(named_result.unwrap_err(), PeError::MalformedImportThunk);
+
+        let mut ordinal = well_formed_image();
+        ordinal[raw_data_offset + 40..raw_data_offset + 48]
+            .copy_from_slice(&(IMAGE_ORDINAL_FLAG64 | (1 << 16) | 7).to_le_bytes());
+        let ordinal_result: Result<LoadDescriptor<4, 4>, PeError> = parse(&ordinal);
+        assert_eq!(ordinal_result.unwrap_err(), PeError::MalformedImportThunk);
     }
 
     #[test]
@@ -649,8 +778,9 @@ mod tests {
         let bytes = well_formed_image();
         let first: LoadDescriptor<4, 4> = parse(&bytes).unwrap();
         let second: LoadDescriptor<4, 4> = parse(&bytes).unwrap();
-        assert_eq!(first.entry_point_rva, second.entry_point_rva);
-        assert_eq!(first.image_base, second.image_base);
+        assert_eq!(first.entry_point_rva(), second.entry_point_rva());
+        assert_eq!(first.image_base(), second.image_base());
+        assert_eq!(first.entry_virtual_address(), second.entry_virtual_address());
         assert_eq!(
             first.sections().collect::<std::vec::Vec<_>>(),
             second.sections().collect::<std::vec::Vec<_>>()
@@ -725,6 +855,57 @@ mod tests {
         bytes[characteristics_off..characteristics_off + 4].copy_from_slice(&wx.to_le_bytes());
         let result: Result<LoadDescriptor<4, 4>, PeError> = parse(&bytes);
         assert!(matches!(result, Err(PeError::WriteExecuteSection)));
+    }
+
+    #[test]
+    fn rejects_entry_point_outside_every_section() {
+        let mut bytes = well_formed_image();
+        let opt_off = DOS_HEADER_LEN + 4 + COFF_HEADER_LEN;
+        bytes[opt_off + 16..opt_off + 20].copy_from_slice(&0x2000u32.to_le_bytes());
+        let result: Result<LoadDescriptor<4, 4>, PeError> = parse(&bytes);
+        assert_eq!(result.unwrap_err(), PeError::EntryPointOutOfBounds);
+    }
+
+    #[test]
+    fn rejects_entry_point_in_non_executable_section() {
+        let mut bytes = well_formed_image();
+        let section_table_offset = DOS_HEADER_LEN + 4 + COFF_HEADER_LEN + 128;
+        let characteristics_off = section_table_offset + 36;
+        bytes[characteristics_off..characteristics_off + 4]
+            .copy_from_slice(&(IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE).to_le_bytes());
+        let result: Result<LoadDescriptor<4, 4>, PeError> = parse(&bytes);
+        assert_eq!(result.unwrap_err(), PeError::EntryPointNotExecutable);
+    }
+
+    #[test]
+    fn rejects_entry_point_address_addition_overflow() {
+        let mut bytes = well_formed_image();
+        let opt_off = DOS_HEADER_LEN + 4 + COFF_HEADER_LEN;
+        let overflowing_base = u64::MAX - u64::from(IMAGE_BASE_RVA);
+        bytes[opt_off + 24..opt_off + 32].copy_from_slice(&overflowing_base.to_le_bytes());
+        let result: Result<LoadDescriptor<4, 4>, PeError> = parse(&bytes);
+        assert_eq!(result.unwrap_err(), PeError::EntryPointAddressOverflow);
+    }
+
+    #[test]
+    fn rejects_import_directory_without_terminator_inside_declared_size() {
+        let mut bytes = well_formed_image();
+        let opt_off = DOS_HEADER_LEN + 4 + COFF_HEADER_LEN;
+        let dd1_off = opt_off + IMPORT_DIRECTORY_ENTRY_OFFSET;
+        bytes[dd1_off + 4..dd1_off + 8]
+            .copy_from_slice(&(IMPORT_DESCRIPTOR_LEN as u32).to_le_bytes());
+        let result: Result<LoadDescriptor<4, 4>, PeError> = parse(&bytes);
+        assert_eq!(result.unwrap_err(), PeError::ImportDirectoryUnterminated);
+    }
+
+    #[test]
+    fn rejects_import_rva_in_virtual_zero_fill() {
+        let mut bytes = well_formed_image();
+        let section_table_offset = DOS_HEADER_LEN + 4 + COFF_HEADER_LEN + 128;
+        bytes[section_table_offset + 16..section_table_offset + 20]
+            .copy_from_slice(&40u32.to_le_bytes());
+        let result: Result<LoadDescriptor<4, 4>, PeError> = parse(&bytes);
+        assert_eq!(result.unwrap_err(), PeError::RvaOutOfBounds);
     }
 
     #[test]

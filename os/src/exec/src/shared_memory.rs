@@ -124,7 +124,8 @@ struct GrantRecord {
 /// one entry here before returning a [`SharedGrant`]; [`revoke`] consults it
 /// to confirm the token presented still names the registry's current
 /// occupant of that `sharee_virt` (see [`SharedGrant`]'s own doc comment)
-/// before removing the entry and unmapping.
+/// before unmapping; the entry is removed only after the entire teardown
+/// succeeds, so a failed preflight never destroys retry authority.
 pub struct GrantRegistry<const CAPACITY: usize> {
     next_generation: u64,
     entries: [Option<GrantRecord>; CAPACITY],
@@ -146,20 +147,33 @@ impl<const CAPACITY: usize> GrantRegistry<CAPACITY> {
         Err(SharedMemoryError::RegistryExhausted)
     }
 
-    /// Removes the live record matching `grant`'s `sharee_virt`, failing
+    /// Validates the live record matching `grant`'s `sharee_virt`, failing
     /// closed with [`SharedMemoryError::NotGranted`] if none exists or
     /// [`SharedMemoryError::StaleGrant`] if a *different* generation now
     /// occupies that address.
-    fn remove_matching(&mut self, grant: &SharedGrant) -> Result<(), SharedMemoryError> {
-        for slot in &mut self.entries {
-            if let Some(record) = slot {
-                if record.sharee_virt == grant.sharee_virt {
-                    if record.generation != grant.generation {
-                        return Err(SharedMemoryError::StaleGrant);
-                    }
-                    *slot = None;
-                    return Ok(());
+    fn validate_matching(&self, grant: &SharedGrant) -> Result<(), SharedMemoryError> {
+        for record in self.entries.iter().flatten() {
+            if record.sharee_virt == grant.sharee_virt {
+                if record.generation != grant.generation {
+                    return Err(SharedMemoryError::StaleGrant);
                 }
+                return Ok(());
+            }
+        }
+        Err(SharedMemoryError::NotGranted)
+    }
+
+    /// Retires a record already proven current by [`Self::validate_matching`].
+    /// Kept separate so revocation can retain the record until every PTE has
+    /// been removed.
+    fn remove_matching(&mut self, grant: &SharedGrant) -> Result<(), SharedMemoryError> {
+        self.validate_matching(grant)?;
+        for slot in &mut self.entries {
+            if slot.is_some_and(|record| {
+                record.sharee_virt == grant.sharee_virt && record.generation == grant.generation
+            }) {
+                *slot = None;
+                return Ok(());
             }
         }
         Err(SharedMemoryError::NotGranted)
@@ -389,6 +403,15 @@ fn unmap_prefix<const SHAREE_FRAMES: usize>(
 /// isn't this grant's own owner, or [`SharedMemoryError::StaleGrant`] if
 /// `registry` shows a *different* grant now occupies this token's
 /// `sharee_virt` (see [`SharedGrant`]'s own doc comment).
+///
+/// Teardown is validation-first and transactional at the API boundary:
+/// token identity and the presence of every page are checked before a
+/// single PTE changes. The full unmap then runs while this function owns the
+/// only mutable borrow of `sharee_space`; on TinyOS's single core there is
+/// no intervening page-table writer, so every preflighted unmap is
+/// guaranteed to find the same present page. The registry record is retired
+/// last. A failed preflight therefore leaves the mapping and token live for
+/// repair/retry instead of stranding an irrevocable partial grant.
 pub fn revoke<const SHAREE_FRAMES: usize, const REGISTRY_CAPACITY: usize>(
     caller: TaskId,
     grant: &SharedGrant,
@@ -398,11 +421,16 @@ pub fn revoke<const SHAREE_FRAMES: usize, const REGISTRY_CAPACITY: usize>(
     if caller != grant.owner {
         return Err(SharedMemoryError::NotOwner);
     }
-    registry.remove_matching(grant)?;
+    registry.validate_matching(grant)?;
+    for i in 0..grant.pages {
+        if sharee_space.translate(grant.sharee_virt + i as u64 * PAGE_SIZE).is_none() {
+            return Err(SharedMemoryError::NotGranted);
+        }
+    }
     for i in 0..grant.pages {
         sharee_space.unmap_page(grant.sharee_virt + i as u64 * PAGE_SIZE)?;
     }
-    Ok(())
+    registry.remove_matching(grant)
 }
 
 #[cfg(test)]
@@ -729,6 +757,76 @@ mod tests {
 
         assert_eq!(revoke(owner, &live_grant, &mut sharee_space, &mut registry), Ok(()));
         assert_eq!(sharee_space.translate(SHAREE_VIRT), None);
+    }
+
+    #[test]
+    fn failed_revoke_preflight_preserves_mapping_and_retry_authority() {
+        let (owner, _sharee) = two_tasks();
+        let bytes = AlignedPages([0; 8192]);
+        let mut owner_staging = AlignedPages([0; 8192]);
+        let mut owner_pml4 = PageTable::new();
+        let mut owner_frames: Pool<PageTable, 8> = Pool::new();
+        let sections = [SectionDescriptor {
+            virtual_address: 0,
+            virtual_size: 2 * PAGE_SIZE as u32,
+            file_offset: 0,
+            file_size: 2 * PAGE_SIZE as u32,
+            permissions: RW,
+        }];
+        let owner_space = AddressSpace::create(
+            &mut owner_pml4,
+            &mut owner_frames,
+            &sections,
+            IMAGE_BASE,
+            &bytes.0,
+            &mut owner_staging.0,
+        )
+        .unwrap();
+
+        let sharee_bytes = AlignedPages([0; 8192]);
+        let mut sharee_staging = AlignedPages([0; 8192]);
+        let mut sharee_pml4 = PageTable::new();
+        let mut sharee_frames: Pool<PageTable, 8> = Pool::new();
+        let mut sharee_space =
+            empty_space(&sharee_bytes, &mut sharee_staging, &mut sharee_pml4, &mut sharee_frames);
+        let mut registry: GrantRegistry<4> = GrantRegistry::new();
+        let live_grant = grant(
+            owner,
+            &owner_space,
+            &mut sharee_space,
+            GrantRequest {
+                owner_virt: IMAGE_BASE,
+                sharee_virt: SHAREE_VIRT,
+                pages: 2,
+                sharee_permissions: RO,
+            },
+            &mut registry,
+        )
+        .unwrap();
+
+        let second_virt = SHAREE_VIRT + PAGE_SIZE;
+        let second_page = sharee_space.translate(second_virt).unwrap();
+        sharee_space.unmap_page(second_virt).unwrap();
+
+        assert_eq!(
+            revoke(owner, &live_grant, &mut sharee_space, &mut registry),
+            Err(SharedMemoryError::NotGranted)
+        );
+        assert!(
+            sharee_space.translate(SHAREE_VIRT).is_some(),
+            "preflight failure must not partially unmap the still-present prefix"
+        );
+        assert_eq!(
+            registry.validate_matching(&live_grant),
+            Ok(()),
+            "the owner must retain authority to repair and retry revocation"
+        );
+
+        sharee_space.map_page(second_virt, second_page.phys, RO).unwrap();
+        assert_eq!(revoke(owner, &live_grant, &mut sharee_space, &mut registry), Ok(()));
+        assert_eq!(sharee_space.translate(SHAREE_VIRT), None);
+        assert_eq!(sharee_space.translate(second_virt), None);
+        assert_eq!(registry.validate_matching(&live_grant), Err(SharedMemoryError::NotGranted));
     }
 
     // STORY-P0-07-02 AC3: revocation by a non-owner is rejected, and the

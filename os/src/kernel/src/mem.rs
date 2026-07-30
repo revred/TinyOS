@@ -12,14 +12,15 @@ use core::mem::MaybeUninit;
 
 /// Identifies a live value previously returned by [`Pool::alloc`].
 ///
-/// Opaque by design (a newtype over the slot index, per the newtype style
-/// note in `agent/CODING_STANDARDS.md`) so callers can't construct a valid
-/// handle out of thin air — only [`Pool::alloc`] hands one out, and
-/// [`Pool::free`] rejects anything else that reaches it via
-/// [`PoolError::InvalidHandle`].
+/// Opaque by design and generational: both the slot index and the allocation
+/// incarnation must match. A handle retained after [`Pool::free`] therefore
+/// cannot alias a later value that happens to reuse the same slot (the ABA
+/// problem). Only [`Pool::alloc`] hands handles out, and [`Pool::free`]
+/// rejects anything stale or fabricated via [`PoolError::InvalidHandle`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PoolHandle {
     index: usize,
+    generation: u64,
 }
 
 impl PoolHandle {
@@ -38,7 +39,8 @@ impl PoolHandle {
 /// `agent/CODING_STANDARDS.md`'s "no stringly-typed errors" rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PoolError {
-    /// Every slot is occupied; no side effects occurred.
+    /// Every slot is occupied or permanently retired after generation
+    /// exhaustion; no side effects occurred.
     Exhausted,
     /// The handle does not identify a currently-occupied slot (already
     /// freed, or never issued by this pool).
@@ -48,6 +50,7 @@ pub enum PoolError {
 struct Slot<T> {
     value: MaybeUninit<T>,
     occupied: bool,
+    generation: u64,
 }
 
 /// Fixed-capacity storage for up to `N` live values of `T`.
@@ -66,7 +69,7 @@ impl<T, const N: usize> Pool<T, N> {
         // `MaybeUninit::uninit()` never actually reads the value, so an
         // array of unoccupied slots needs no `T: Default`/`Copy` bound.
         const fn new_slot<T>() -> Slot<T> {
-            Slot { value: MaybeUninit::uninit(), occupied: false }
+            Slot { value: MaybeUninit::uninit(), occupied: false, generation: 0 }
         }
         Pool { slots: [const { new_slot() }; N] }
     }
@@ -74,13 +77,20 @@ impl<T, const N: usize> Pool<T, N> {
     /// Claims the first free slot and moves `value` into it.
     ///
     /// Fails closed with [`PoolError::Exhausted`] and no side effects if
-    /// every slot is occupied — never panics, never blocks.
+    /// every slot is occupied or generation-retired — never panics, never
+    /// blocks.
     pub fn alloc(&mut self, value: T) -> Result<PoolHandle, PoolError> {
         for (index, slot) in self.slots.iter_mut().enumerate() {
             if !slot.occupied {
+                // A wrapped generation would make the first handle for this
+                // slot valid again. Retire that slot permanently instead.
+                let Some(generation) = slot.generation.checked_add(1) else {
+                    continue;
+                };
                 slot.value.write(value);
                 slot.occupied = true;
-                return Ok(PoolHandle { index });
+                slot.generation = generation;
+                return Ok(PoolHandle { index, generation });
             }
         }
         Err(PoolError::Exhausted)
@@ -97,7 +107,7 @@ impl<T, const N: usize> Pool<T, N> {
     /// ownership of it.
     pub fn get_mut(&mut self, handle: PoolHandle) -> Option<&mut T> {
         let slot = self.slots.get_mut(handle.index)?;
-        if !slot.occupied {
+        if !slot.occupied || slot.generation != handle.generation {
             return None;
         }
         // SAFETY: `slot.occupied` is only `true` for a slot `alloc` fully
@@ -117,7 +127,9 @@ impl<T, const N: usize> Pool<T, N> {
             // SAFETY: `occupied` is only `true` for a slot `alloc` fully
             // initialized via `slot.value.write(_)`, mirroring `get_mut`'s
             // identical proof for the same invariant.
-            (PoolHandle { index }, unsafe { slot.value.assume_init_ref() })
+            (PoolHandle { index, generation: slot.generation }, unsafe {
+                slot.value.assume_init_ref()
+            })
         })
     }
 
@@ -127,7 +139,7 @@ impl<T, const N: usize> Pool<T, N> {
     /// stale/aliased read) if `handle` is out of range or already free.
     pub fn free(&mut self, handle: PoolHandle) -> Result<T, PoolError> {
         let slot = self.slots.get_mut(handle.index).ok_or(PoolError::InvalidHandle)?;
-        if !slot.occupied {
+        if !slot.occupied || slot.generation != handle.generation {
             return Err(PoolError::InvalidHandle);
         }
         slot.occupied = false;
@@ -176,7 +188,31 @@ mod tests {
         let handle = pool.alloc(1).unwrap();
         pool.free(handle).unwrap();
         let handle2 = pool.alloc(2).expect("freed slot should be reusable");
+        assert_ne!(handle, handle2, "slot reuse must advance its generation");
         assert_eq!(pool.free(handle2), Ok(2));
+    }
+
+    #[test]
+    fn stale_handle_cannot_alias_a_reused_slot() {
+        let mut pool: Pool<u32, 1> = Pool::new();
+        let stale = pool.alloc(1).unwrap();
+        assert_eq!(pool.free(stale), Ok(1));
+        let current = pool.alloc(2).unwrap();
+
+        assert_eq!(stale.index(), current.index(), "the same physical slot was reused");
+        assert_ne!(stale, current, "the allocation incarnation is part of identity");
+        assert_eq!(pool.get_mut(stale), None);
+        assert_eq!(pool.free(stale), Err(PoolError::InvalidHandle));
+        assert_eq!(pool.free(current), Ok(2));
+    }
+
+    #[test]
+    fn generation_wrap_retires_a_slot_instead_of_revalidating_an_old_handle() {
+        let mut pool: Pool<u32, 1> = Pool::new();
+        pool.slots[0].generation = u64::MAX;
+        assert_eq!(pool.alloc(1), Err(PoolError::Exhausted));
+        assert!(!pool.slots[0].occupied);
+        assert_eq!(pool.slots[0].generation, u64::MAX);
     }
 
     #[test]
@@ -190,7 +226,7 @@ mod tests {
     #[test]
     fn out_of_range_handle_is_rejected_not_panicking() {
         let mut pool: Pool<u32, 4> = Pool::new();
-        let bogus = PoolHandle { index: 99 };
+        let bogus = PoolHandle { index: 99, generation: 1 };
         assert_eq!(pool.free(bogus), Err(PoolError::InvalidHandle));
     }
 
@@ -208,7 +244,7 @@ mod tests {
         let handle = pool.alloc(1).unwrap();
         pool.free(handle).unwrap();
         assert_eq!(pool.get_mut(handle), None);
-        assert_eq!(pool.get_mut(PoolHandle { index: 99 }), None);
+        assert_eq!(pool.get_mut(PoolHandle { index: 99, generation: 1 }), None);
     }
 
     // TEST-P0-03-03-A: exhaustion fails closed, then recovers after a free.

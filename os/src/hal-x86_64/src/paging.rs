@@ -21,6 +21,11 @@
 //! `agent/CODING_STANDARDS.md`) so this module has no dependency on any
 //! specific allocator — `exec::address_space` supplies a concrete allocator
 //! backed by `kernel::mem::Pool`.
+//!
+//! [`map_user_4k`] and [`MappedPage::user_accessible`] make U/S an explicit,
+//! auditable permission. This is necessary but not sufficient for isolation:
+//! the current workload context still begins at CPL 0, so hardware does not
+//! enforce U/S against it until the ring-3 transition path is completed.
 
 /// A frame address: this kernel's current no-higher-half-split memory model
 /// (see `boot.rs`) means every such address is directly dereferenceable —
@@ -56,6 +61,7 @@ pub enum PagingError {
 const ENTRY_COUNT: usize = 512;
 const PRESENT: u64 = 1 << 0;
 const WRITABLE: u64 = 1 << 1;
+const USER_ACCESSIBLE: u64 = 1 << 2;
 const NO_EXECUTE: u64 = 1 << 63;
 const ADDR_MASK: u64 = 0x000f_ffff_ffff_f000;
 /// PML4 (39), PDPT (30), PD (21) index shifts, in walk order. The PT (leaf)
@@ -100,16 +106,28 @@ fn walk_create<'a>(
     pml4: &'a mut PageTable,
     allocator: &mut dyn FrameAllocator,
     virt: u64,
+    user_accessible: bool,
 ) -> Result<&'a mut PageTable, PagingError> {
     let mut table = pml4;
     for shift in DIRECTORY_SHIFTS {
         let index = table_index(shift, virt);
         let entry = table.entries[index];
         let child_addr = if entry & PRESENT != 0 {
+            // U/S is an AND across all four levels. When adding the first
+            // user leaf under an existing supervisor-only parent, open only
+            // the parent path; sibling subtrees and leaves remain protected
+            // by their own clear U/S bits.
+            if user_accessible {
+                table.entries[index] |= USER_ACCESSIBLE;
+            }
             entry & ADDR_MASK
         } else {
             let frame = allocator.allocate_frame().ok_or(PagingError::FrameExhausted)?;
-            table.entries[index] = (frame & ADDR_MASK) | PRESENT | WRITABLE;
+            let mut flags = PRESENT | WRITABLE;
+            if user_accessible {
+                flags |= USER_ACCESSIBLE;
+            }
+            table.entries[index] = (frame & ADDR_MASK) | flags;
             frame
         };
         // SAFETY: `child_addr` is either a frame `allocator` just handed out
@@ -142,10 +160,38 @@ pub fn map_4k(
     writable: bool,
     executable: bool,
 ) -> Result<(), PagingError> {
+    map_4k_with_privilege(pml4, allocator, virt, phys, writable, executable, false)
+}
+
+/// Maps one user-accessible 4KiB page.
+///
+/// Identical to [`map_4k`] except that U/S is set on the leaf and every
+/// intermediate entry on its walk. Sibling kernel directories remain
+/// supervisor-only because x86 requires U/S at every level.
+pub fn map_user_4k(
+    pml4: &mut PageTable,
+    allocator: &mut dyn FrameAllocator,
+    virt: u64,
+    phys: u64,
+    writable: bool,
+    executable: bool,
+) -> Result<(), PagingError> {
+    map_4k_with_privilege(pml4, allocator, virt, phys, writable, executable, true)
+}
+
+fn map_4k_with_privilege(
+    pml4: &mut PageTable,
+    allocator: &mut dyn FrameAllocator,
+    virt: u64,
+    phys: u64,
+    writable: bool,
+    executable: bool,
+    user_accessible: bool,
+) -> Result<(), PagingError> {
     if !virt.is_multiple_of(PAGE_SIZE) || !phys.is_multiple_of(PAGE_SIZE) {
         return Err(PagingError::Misaligned);
     }
-    let pt = walk_create(pml4, allocator, virt)?;
+    let pt = walk_create(pml4, allocator, virt, user_accessible)?;
     let index = table_index(LEAF_SHIFT, virt);
     if pt.entries[index] & PRESENT != 0 {
         return Err(PagingError::AlreadyMapped);
@@ -153,6 +199,9 @@ pub fn map_4k(
     let mut flags = PRESENT;
     if writable {
         flags |= WRITABLE;
+    }
+    if user_accessible {
+        flags |= USER_ACCESSIBLE;
     }
     if !executable {
         flags |= NO_EXECUTE;
@@ -232,6 +281,9 @@ pub fn protect_4k(
         return Err(PagingError::NotMapped);
     }
     let mut flags = PRESENT;
+    if entry & USER_ACCESSIBLE != 0 {
+        flags |= USER_ACCESSIBLE;
+    }
     if writable {
         flags |= WRITABLE;
     }
@@ -333,7 +385,7 @@ pub fn for_each_leaf(pml4: &PageTable, visit: &mut dyn FnMut(u64, MappedPage)) {
             }
             let base_1g = ((i as u64) << DIRECTORY_SHIFTS[0]) | ((j as u64) << DIRECTORY_SHIFTS[1]);
             if pdpt_entry & PAGE_SIZE_BIT != 0 {
-                visit(base_1g, entry_to_page(pdpt_entry));
+                visit(base_1g, entry_to_page(pdpt_entry, pml4_entry & USER_ACCESSIBLE != 0));
                 continue;
             }
             // SAFETY: as above.
@@ -344,7 +396,13 @@ pub fn for_each_leaf(pml4: &PageTable, visit: &mut dyn FnMut(u64, MappedPage)) {
                 }
                 let base_2m = base_1g | ((k as u64) << DIRECTORY_SHIFTS[2]);
                 if pd_entry & PAGE_SIZE_BIT != 0 {
-                    visit(base_2m, entry_to_page(pd_entry));
+                    visit(
+                        base_2m,
+                        entry_to_page(
+                            pd_entry,
+                            pml4_entry & USER_ACCESSIBLE != 0 && pdpt_entry & USER_ACCESSIBLE != 0,
+                        ),
+                    );
                     continue;
                 }
                 // SAFETY: as above.
@@ -353,18 +411,27 @@ pub fn for_each_leaf(pml4: &PageTable, visit: &mut dyn FnMut(u64, MappedPage)) {
                     if pt_entry & PRESENT == 0 {
                         continue;
                     }
-                    visit(base_2m | ((l as u64) << LEAF_SHIFT), entry_to_page(pt_entry));
+                    visit(
+                        base_2m | ((l as u64) << LEAF_SHIFT),
+                        entry_to_page(
+                            pt_entry,
+                            pml4_entry & USER_ACCESSIBLE != 0
+                                && pdpt_entry & USER_ACCESSIBLE != 0
+                                && pd_entry & USER_ACCESSIBLE != 0,
+                        ),
+                    );
                 }
             }
         }
     }
 }
 
-const fn entry_to_page(entry: u64) -> MappedPage {
+const fn entry_to_page(entry: u64, ancestors_user_accessible: bool) -> MappedPage {
     MappedPage {
         phys: entry & ADDR_MASK,
         writable: entry & WRITABLE != 0,
         executable: entry & NO_EXECUTE == 0,
+        user_accessible: ancestors_user_accessible && entry & USER_ACCESSIBLE != 0,
     }
 }
 
@@ -378,17 +445,22 @@ pub struct MappedPage {
     pub writable: bool,
     /// `true` if the page's no-execute bit is *not* set (i.e. executable).
     pub executable: bool,
+    /// `true` only if U/S is set on the leaf and every ancestor entry, so a
+    /// CPL-3 access can reach this mapping.
+    pub user_accessible: bool,
 }
 
 /// Looks up `virt`'s current mapping without creating anything — `None` if
 /// any level from the PML4 down to the leaf PTE is not present.
 pub fn translate(pml4: &PageTable, virt: u64) -> Option<MappedPage> {
     let mut table = pml4;
+    let mut user_accessible = true;
     for shift in DIRECTORY_SHIFTS {
         let entry = table.entries[table_index(shift, virt)];
         if entry & PRESENT == 0 {
             return None;
         }
+        user_accessible &= entry & USER_ACCESSIBLE != 0;
         let child_addr = entry & ADDR_MASK;
         // SAFETY: mirrors `walk_create` — a present entry in a table this
         // function was handed only ever points to another live `PageTable`
@@ -403,6 +475,7 @@ pub fn translate(pml4: &PageTable, virt: u64) -> Option<MappedPage> {
         phys: entry & ADDR_MASK,
         writable: entry & WRITABLE != 0,
         executable: entry & NO_EXECUTE == 0,
+        user_accessible: user_accessible && entry & USER_ACCESSIBLE != 0,
     })
 }
 
@@ -449,6 +522,26 @@ pub unsafe fn write_cr3(phys: u64) {
     // SAFETY: per this function's own contract.
     unsafe {
         core::arch::asm!("mov cr3, {}", in(reg) phys, options(nomem, nostack, preserves_flags));
+    }
+}
+
+/// Invalidates the current CPU's cached translation for `virt`.
+///
+/// Safe as a Rust operation: it changes translation-cache state but does not
+/// dereference `virt`. Callers updating an active page table use this after
+/// changing a leaf PTE; callers updating an inactive table may also call it
+/// harmlessly, with the later `CR3` reload providing that table's full
+/// non-global flush.
+#[cfg(not(target_os = "windows"))]
+pub fn invalidate_page(virt: u64) {
+    // SAFETY: `invlpg` accepts any virtual address, touches no Rust memory,
+    // and preserves registers/flags. This HAL only runs at CPL0.
+    unsafe {
+        core::arch::asm!(
+            "invlpg [{}]",
+            in(reg) virt,
+            options(nostack, preserves_flags)
+        );
     }
 }
 
@@ -542,6 +635,24 @@ mod tests {
         assert_eq!(mapped.phys, 0x9000);
         assert!(mapped.writable);
         assert!(!mapped.executable);
+        assert!(!mapped.user_accessible, "map_4k is supervisor-only");
+    }
+
+    #[test]
+    fn a_user_mapping_does_not_expose_a_supervisor_sibling() {
+        let mut pml4 = PageTable::new();
+        let mut allocator: ArrayAllocator<8> = ArrayAllocator::new();
+        let kernel_virt = 0x1000;
+        let user_virt = 0x1_4000_0000;
+
+        map_4k(&mut pml4, &mut allocator, kernel_virt, 0x9000, true, false).unwrap();
+        map_user_4k(&mut pml4, &mut allocator, user_virt, 0xa000, true, false).unwrap();
+
+        assert!(translate(&pml4, user_virt).unwrap().user_accessible);
+        assert!(
+            !translate(&pml4, kernel_virt).unwrap().user_accessible,
+            "opening the shared PML4 path must not open a supervisor PDPT/leaf"
+        );
     }
 
     // A read-only, executable mapping (typical `.text`) never sets the
@@ -667,6 +778,19 @@ mod tests {
         // And back again — teardown unseals before wiping (review D8).
         assert_eq!(protect_4k(&mut pml4, 0x1000, true, false), Ok(()));
         assert!(translate(&pml4, 0x1000).unwrap().writable);
+    }
+
+    #[test]
+    fn protect_preserves_user_supervisor_classification() {
+        let mut pml4 = PageTable::new();
+        let mut allocator: ArrayAllocator<8> = ArrayAllocator::new();
+        map_user_4k(&mut pml4, &mut allocator, 0x1000, 0x9000, true, false).unwrap();
+
+        protect_4k(&mut pml4, 0x1000, false, true).unwrap();
+        let protected = translate(&pml4, 0x1000).unwrap();
+        assert!(protected.user_accessible);
+        assert!(!protected.writable);
+        assert!(protected.executable);
     }
 
     // Re-protecting an unmapped or unaligned address fails closed rather

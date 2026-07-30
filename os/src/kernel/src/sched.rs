@@ -13,10 +13,10 @@ use crate::mem::{Pool, PoolError, PoolHandle};
 
 /// Identifies a task previously created by [`Scheduler::create_task`].
 ///
-/// A newtype over [`PoolHandle`] (per the newtype style note in
+/// A newtype over generational [`PoolHandle`] (per the newtype style note in
 /// `agent/CODING_STANDARDS.md`) rather than a bare integer, so a `TaskId`
-/// can't be confused with an arbitrary index or forged by a caller — only
-/// [`Scheduler::create_task`] hands one out.
+/// cannot be forged and a stale ID cannot alias a later task that reuses the
+/// same TCB slot — only [`Scheduler::create_task`] hands one out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TaskId(PoolHandle);
 
@@ -644,6 +644,25 @@ mod tests {
         let c =
             sched.create_task(low_priority(), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry);
         assert!(c.is_ok(), "a freed slot should be allocatable again");
+    }
+
+    #[test]
+    fn stale_task_id_cannot_control_a_replacement_in_the_same_slot() {
+        let mut sched: Scheduler<1> = Scheduler::new();
+        let stale = sched
+            .create_task(low_priority(), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
+        sched.free_task_for_test(stale);
+        let current = sched
+            .create_task(low_priority(), BUDGET, OverrunPolicy::TripToSafeState, dummy_entry)
+            .unwrap();
+
+        assert_eq!(stale.index(), current.index(), "the TCB slot was reused");
+        assert_ne!(stale, current, "task identity includes its allocation generation");
+        assert_eq!(sched.state_of(stale), None);
+        assert_eq!(sched.set_state(stale, TaskState::Finished), None);
+        assert_eq!(sched.state_of(current), Some(TaskState::Ready));
+        assert_eq!(sched.highest_priority_ready(), Some(current));
     }
 
     // Priority construction rejects out-of-range values without panicking

@@ -4,7 +4,7 @@
 
 use crate::labels::Labels;
 use crate::policy::{GrantSet, VerbPolicy};
-use crate::verbs::{Env, NoSpoors, SpoorView, TaskInfo, VerbKind, World};
+use crate::verbs::{Env, KillAuthority, NoSpoors, SpoorView, TaskInfo, VerbKind, World};
 use crate::volume::RamVolume;
 
 /// Every verb the parity session is granted — the MVP set minus [`WITHHELD`].
@@ -42,9 +42,19 @@ pub static POLICY: GrantSet =
 
 /// The injected task table (three deterministic rows).
 pub static TASKS: &[TaskInfo] = &[
-    TaskInfo { name: "RT-CTRL", priority: 0, state: "ready" },
-    TaskInfo { name: "SPOOR", priority: 3, state: "waiting" },
-    TaskInfo { name: "IDLE", priority: 9, state: "ready" },
+    TaskInfo {
+        name: "RT-CTRL",
+        priority: 31,
+        state: "ready",
+        kill_authority: KillAuthority::SupervisorOnly,
+    },
+    TaskInfo {
+        name: "SPOOR",
+        priority: 3,
+        state: "waiting",
+        kill_authority: KillAuthority::Unkillable,
+    },
+    TaskInfo { name: "IDLE", priority: 0, state: "ready", kill_authority: KillAuthority::Ordinary },
 ];
 
 /// The parity `.TCB` — the owner's "MS-DOS test as a batch file". Exercises the

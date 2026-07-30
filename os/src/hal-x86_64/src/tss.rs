@@ -82,11 +82,9 @@ pub struct TaskStateSegment {
     reserved_0: u32,
     /// Stack pointer for a transition to CPL 0, 1 and 2 respectively.
     ///
-    /// All three stay **zero**, and that is a statement rather than an
-    /// omission: they are only consulted on a privilege-level change, and this
-    /// kernel has none — everything runs at CPL 0 in one identity-mapped
-    /// address space (`STORY-P1-02-01`'s own clause 8). Putting a plausible
-    /// address here would advertise a privilege boundary that does not exist.
+    /// `RSP0` is populated by [`crate::gdt::install`] with the per-CPU kernel
+    /// entry stack. `RSP1` and `RSP2` stay zero because TinyOS uses only CPL 0
+    /// and CPL 3.
     privilege_stacks: [u64; 3],
     reserved_1: u64,
     interrupt_stacks: [u64; 7],
@@ -118,6 +116,19 @@ impl TaskStateSegment {
             // Past the limit: no bitmap. See the field's own doc comment.
             iomap_base: Self::LIMIT + 1,
         }
+    }
+
+    /// Sets the stack the CPU loads on a CPL-3 → CPL-0 transition.
+    pub fn set_ring0_stack(&mut self, stack_top: u64) {
+        let mut stacks = self.privilege_stacks;
+        stacks[0] = stack_top;
+        self.privilege_stacks = stacks;
+    }
+
+    /// The currently configured CPL-0 transition stack top.
+    pub fn ring0_stack(&self) -> u64 {
+        let stacks = self.privilege_stacks;
+        stacks[0]
     }
 
     /// Points `index`'s IST slot at `stack_top`.
@@ -182,6 +193,9 @@ pub const IST_STACK_BYTES: usize = 16 * 1024;
 /// this module's own doc comment for why `#MC` does not get a second.
 pub const IST_STACK_COUNT: usize = 1;
 
+/// Bytes reserved for the single CPU's CPL-3 → CPL-0 entry stack.
+pub const RING0_ENTRY_STACK_BYTES: usize = 16 * 1024;
+
 /// The `#DF` stack itself.
 ///
 /// `static mut` for the same reason [`crate::idt`]'s table is: the CPU keeps
@@ -201,6 +215,17 @@ pub const IST_STACK_COUNT: usize = 1;
 struct IstStack(#[allow(dead_code)] [u8; IST_STACK_BYTES]);
 
 static mut DOUBLE_FAULT_STACK: IstStack = IstStack([0; IST_STACK_BYTES]);
+
+#[repr(align(16))]
+struct Ring0EntryStack(#[allow(dead_code)] [u8; RING0_ENTRY_STACK_BYTES]);
+
+static mut RING0_ENTRY_STACK: Ring0EntryStack = Ring0EntryStack([0; RING0_ENTRY_STACK_BYTES]);
+
+/// The single CPU's `(bottom, top)` kernel-entry stack range.
+pub fn ring0_entry_stack_range() -> (u64, u64) {
+    let bottom = (&raw const RING0_ENTRY_STACK).cast::<u8>() as u64;
+    (bottom, bottom + RING0_ENTRY_STACK_BYTES as u64)
+}
 
 /// The `#DF` IST stack's `(bottom, top)` addresses — `top` is what the TSS
 /// records and the CPU loads into `RSP`.
@@ -261,6 +286,16 @@ mod tests {
         // something Rust will hand out, and `assert_eq!` would take one.
         let privilege_stacks = tss.privilege_stacks;
         assert_eq!(privilege_stacks, [0; 3]);
+    }
+
+    #[test]
+    fn ring0_transition_stack_is_explicit_and_leaves_other_levels_zero() {
+        let mut tss = TaskStateSegment::new();
+        let (_, top) = ring0_entry_stack_range();
+        tss.set_ring0_stack(top);
+        assert_eq!(tss.ring0_stack(), top);
+        let privilege_stacks = tss.privilege_stacks;
+        assert_eq!(privilege_stacks, [top, 0, 0]);
     }
 
     // Clause 3: the descriptor field is three bits wide, so an out-of-range

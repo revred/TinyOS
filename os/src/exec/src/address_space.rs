@@ -64,6 +64,13 @@ use crate::pe::SectionDescriptor;
 /// (`STORY-P0-05-02` acceptance criterion 2).
 pub const KERNEL_RESERVED_REGION_END: u64 = 0x4000_0000;
 
+/// Exclusive end of x86-64's lower canonical virtual-address half.
+///
+/// Executable images live below this boundary. Accepting a non-canonical
+/// address would let page-table indexing appear to succeed while the CPU
+/// later raises `#GP` on the first instruction fetch.
+pub const LOWER_CANONICAL_END: u64 = 0x0000_8000_0000_0000;
+
 /// Errors [`validate_sections`] and [`AddressSpace::create`] fail closed
 /// with, per `agent/CODING_STANDARDS.md`'s "no stringly-typed errors" rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,6 +88,8 @@ pub enum AddressSpaceError {
     /// A section's virtual address or size overflows a 64-bit address
     /// range once added to `image_base`.
     InvalidRange,
+    /// A section falls outside x86-64's lower canonical address half.
+    NonCanonical,
     /// The frame pool had no slot left for a new page-table level.
     FrameExhausted,
     /// Internal inconsistency: a virtual page within a just-validated,
@@ -131,6 +140,9 @@ fn section_range(
     }
     let size = u64::from(section.virtual_size.max(section.file_size));
     let end = start.checked_add(size).ok_or(AddressSpaceError::InvalidRange)?;
+    if start >= LOWER_CANONICAL_END || end > LOWER_CANONICAL_END {
+        return Err(AddressSpaceError::NonCanonical);
+    }
     Ok((start, end))
 }
 
@@ -291,7 +303,7 @@ impl<'a, const FRAMES: usize> AddressSpace<'a, FRAMES> {
             }
 
             let phys = page.as_ptr() as u64;
-            paging::map_4k(
+            paging::map_user_4k(
                 self.pml4,
                 &mut allocator,
                 virt_start + offset,
@@ -329,12 +341,10 @@ impl<'a, const FRAMES: usize> AddressSpace<'a, FRAMES> {
         paging::translate(self.pml4, virt)
     }
 
-    /// Maps a single page at `virt` to physical frame `phys` with
-    /// `permissions` — the primitive `STORY-P0-07-02`'s cross-address-space
-    /// shared-memory grant builds on, exposed publicly since granting a
-    /// region into a *different* task's `AddressSpace` needs to add a
-    /// mapping that space's own section set never described at `create`
-    /// time.
+    /// Maps a single user-accessible page at `virt` to physical frame `phys`
+    /// with `permissions` — the primitive `STORY-P0-07-02`'s
+    /// cross-address-space shared-memory grant builds on. Kernel directories
+    /// attached to this tree remain supervisor-only at their lower entries.
     ///
     /// Fails closed the same way `create`'s own section mapping does:
     /// [`AddressSpaceError::Misaligned`] if `virt`/`phys` aren't
@@ -348,7 +358,7 @@ impl<'a, const FRAMES: usize> AddressSpace<'a, FRAMES> {
         permissions: crate::pe::Permissions,
     ) -> Result<(), AddressSpaceError> {
         let mut allocator = PoolFrameAllocator { pool: self.frame_pool };
-        paging::map_4k(
+        paging::map_user_4k(
             self.pml4,
             &mut allocator,
             virt,
@@ -370,7 +380,14 @@ impl<'a, const FRAMES: usize> AddressSpace<'a, FRAMES> {
     ///
     /// [`map_page`]: AddressSpace::map_page
     pub fn unmap_page(&mut self, virt: u64) -> Result<(), AddressSpaceError> {
-        paging::unmap_4k(self.pml4, virt).map_err(AddressSpaceError::from)
+        paging::unmap_4k(self.pml4, virt).map_err(AddressSpaceError::from)?;
+        // If this is the active address space, invalidate its cached leaf
+        // immediately. If it is inactive, this is harmless and the CR3 load
+        // required to resume that task flushes all non-global entries. TinyOS
+        // is single-core; SMP will require an inter-processor shootdown here.
+        #[cfg(not(target_os = "windows"))]
+        paging::invalidate_page(virt);
+        Ok(())
     }
 
     /// Links a shared kernel page directory (built once by
@@ -423,6 +440,8 @@ impl<'a, const FRAMES: usize> AddressSpace<'a, FRAMES> {
                 if !mapped.writable {
                     paging::protect_4k(kernel_pml4, mapped.phys, writable, false)
                         .map_err(AddressSpaceError::from)?;
+                    #[cfg(not(target_os = "windows"))]
+                    paging::invalidate_page(mapped.phys);
                 }
             }
             virt += PAGE_SIZE;
@@ -450,7 +469,11 @@ impl<'a, const FRAMES: usize> AddressSpace<'a, FRAMES> {
     /// own mappings are being revoked out from under it in a way the
     /// currently executing code depends on — in practice: tear down from
     /// the supervisor, never from the task being torn down.
-    pub fn teardown(self, staging: &mut [u8], generation: &mut TeardownGeneration) {
+    pub fn teardown(
+        self,
+        staging: &mut [u8],
+        generation: &mut TeardownGeneration,
+    ) -> Result<(), TeardownError> {
         let mut this = core::mem::ManuallyDrop::new(self);
         if let Some((start, end)) = this.image_range {
             let mut virt = start;
@@ -462,8 +485,16 @@ impl<'a, const FRAMES: usize> AddressSpace<'a, FRAMES> {
             }
         }
         staging.fill(0);
-        generation.advance();
+        generation.advance()
     }
+}
+
+/// A teardown completed its revoke/wipe phase but the arena cannot be issued
+/// another distinct generation and therefore must be retired.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TeardownError {
+    /// Advancing would wrap and revalidate an ancient generation.
+    GenerationExhausted,
 }
 
 /// A monotonic teardown generation (`PD-13`): advanced after mappings are
@@ -481,10 +512,13 @@ impl TeardownGeneration {
         TeardownGeneration(0)
     }
 
-    /// Advances the generation by one (saturating — a wrapped generation
-    /// could alias an ancient one).
-    pub fn advance(&mut self) {
-        self.0 = self.0.saturating_add(1);
+    /// Advances the generation by one. Exhaustion is explicit: saturation
+    /// would assign the same identity to repeated lifetimes, while wrapping
+    /// would revalidate an ancient one.
+    pub fn advance(&mut self) -> Result<(), TeardownError> {
+        let next = self.0.checked_add(1).ok_or(TeardownError::GenerationExhausted)?;
+        self.0 = next;
+        Ok(())
     }
 
     /// The current generation number.
@@ -571,6 +605,23 @@ mod tests {
         assert_eq!(validate_sections(&sections, IMAGE_BASE), Err(AddressSpaceError::Misaligned));
     }
 
+    #[test]
+    fn validate_rejects_non_canonical_section_range() {
+        let sections = [section(0, PAGE_SIZE as u32, RX)];
+        assert_eq!(
+            validate_sections(&sections, LOWER_CANONICAL_END),
+            Err(AddressSpaceError::NonCanonical)
+        );
+        assert_eq!(
+            validate_sections(
+                &[section(0, 2 * PAGE_SIZE as u32, RX)],
+                LOWER_CANONICAL_END - PAGE_SIZE
+            ),
+            Err(AddressSpaceError::NonCanonical)
+        );
+        assert_eq!(validate_sections(&sections, LOWER_CANONICAL_END - PAGE_SIZE), Ok(()));
+    }
+
     /// A page-aligned scratch buffer usable as `AddressSpace::create`'s
     /// `image_bytes`/`staging` arguments.
     #[repr(C, align(4096))]
@@ -615,11 +666,13 @@ mod tests {
         let code_page = space.translate(IMAGE_BASE).expect("code page should be mapped");
         assert!(!code_page.writable);
         assert!(code_page.executable);
+        assert!(code_page.user_accessible);
 
         let data_page =
             space.translate(IMAGE_BASE + PAGE_SIZE).expect("data page should be mapped");
         assert!(data_page.writable);
         assert!(!data_page.executable);
+        assert!(data_page.user_accessible);
     }
 
     // STORY-P1-03-01: `cr3()` reports the same address the caller's own
@@ -1007,7 +1060,7 @@ mod tests {
 
         let mut generation = TeardownGeneration::new();
         assert_eq!(generation.value(), 0);
-        space.teardown(&mut staging.0, &mut generation);
+        space.teardown(&mut staging.0, &mut generation).unwrap();
 
         assert_eq!(generation.value(), 1, "the generation advances exactly once per teardown");
         assert!(staging.0.iter().all(|&b| b == 0), "no residue of the dead task's frames");
@@ -1022,5 +1075,12 @@ mod tests {
             Some(0x7000),
             "the shared kernel directory survives teardown — the torn tree stays loadable"
         );
+    }
+
+    #[test]
+    fn teardown_generation_exhaustion_retires_the_arena_instead_of_reusing_identity() {
+        let mut generation = TeardownGeneration(u64::MAX);
+        assert_eq!(generation.advance(), Err(TeardownError::GenerationExhausted));
+        assert_eq!(generation.value(), u64::MAX);
     }
 }

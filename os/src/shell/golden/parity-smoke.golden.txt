@@ -44,9 +44,9 @@ A:\
      12288 bytes total memory
      10752 bytes available
   TASK          PRI  STATE
-  RT-CTRL         0  ready
+  RT-CTRL        31  ready
   SPOOR           3  waiting
-  IDLE            9  ready
+  IDLE            0  ready
 Access denied: verb ClearScreen is not granted to session PARITY [audited]
 
  Volume in drive A is TINYOS

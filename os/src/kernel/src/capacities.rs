@@ -70,6 +70,11 @@ pub const SPOOR_JOURNAL_CAPACITY: usize = 64;
 pub const IST_STACK_BYTES: usize =
     hal_x86_64::tss::IST_STACK_COUNT * hal_x86_64::tss::IST_STACK_BYTES;
 
+/// Static bytes reserved for the single CPU's CPL-3 → CPL-0 transition
+/// stack. This is separate from IST: ordinary user-originated interrupts and
+/// syscalls use TSS.RSP0, while double fault uses its dedicated IST slot.
+pub const RING0_ENTRY_STACK_BYTES: usize = hal_x86_64::tss::RING0_ENTRY_STACK_BYTES;
+
 /// The documented static-memory budget every capacity above must fit
 /// within, combined — chosen conservatively for this Roadmap Phase's
 /// QEMU/Tier 0 target (matching `G-DX-8`'s 8MB total-image ceiling as the
@@ -95,6 +100,7 @@ pub const fn committed_bytes() -> usize {
         + EXEC_FRAME_POOL_CAPACITY * core::mem::size_of::<PageTable>()
         + SPOOR_JOURNAL_CAPACITY * core::mem::size_of::<u64>()
         + IST_STACK_BYTES
+        + RING0_ENTRY_STACK_BYTES
 }
 
 const _: () = assert!(
@@ -127,5 +133,15 @@ mod tests {
         assert_eq!(hal_x86_64::tss::IST_STACK_COUNT, 1, "`#MC` deliberately gets no IST");
         let without_ist = committed_bytes() - IST_STACK_BYTES;
         assert!(committed_bytes() > without_ist, "the IST stack must be inside the count");
+    }
+
+    #[test]
+    fn the_ring0_entry_stack_is_counted_against_the_budget() {
+        assert_eq!(RING0_ENTRY_STACK_BYTES, 16 * 1024);
+        let without_entry_stack = committed_bytes() - RING0_ENTRY_STACK_BYTES;
+        assert!(
+            committed_bytes() > without_entry_stack,
+            "the privilege-transition stack must be inside the count"
+        );
     }
 }

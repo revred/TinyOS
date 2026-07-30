@@ -729,7 +729,7 @@ fn boot(start_info_paddr: u64) -> bool {
             return false;
         }
     };
-    let entry_virt = descriptor.image_base + u64::from(descriptor.entry_point_rva);
+    let entry_virt = descriptor.entry_virtual_address();
     let mut sections = [SectionDescriptor {
         virtual_address: 0,
         virtual_size: 0,
@@ -748,7 +748,9 @@ fn boot(start_info_paddr: u64) -> bool {
     let Some(result_virt) = sections[..section_count]
         .iter()
         .find(|section| section.permissions.write && !section.permissions.execute)
-        .map(|section| descriptor.image_base + u64::from(section.virtual_address))
+        .and_then(|section| {
+            descriptor.image_base().checked_add(u64::from(section.virtual_address))
+        })
     else {
         let _ = writeln!(serial, "tinyos: image declares no writable data section");
         return false;
@@ -758,7 +760,6 @@ fn boot(start_info_paddr: u64) -> bool {
     // unlike `blue-sharc.exe`, whose 205-import surface the same gate
     // refuses (see `exec`'s `first-task` fixture).
     let admitted = exec::win32_shim::check_imports(descriptor.imports()).is_ok();
-    ok &= admitted;
     journal(Spoor::stamp(
         Category::Exec,
         Actor::Exec,
@@ -767,6 +768,10 @@ fn boot(start_info_paddr: u64) -> bool {
         0,
         descriptor.imports().count() as u32,
     ));
+    if !admitted {
+        let _ = writeln!(serial, "tinyos: image denied by import capability policy");
+        return false;
+    }
 
     let patch: PatchSummary;
     // SAFETY: each static is borrowed once; the space (and the borrows it
@@ -777,7 +782,7 @@ fn boot(start_info_paddr: u64) -> bool {
             &mut *(&raw mut IMAGE_PML4),
             &mut *(&raw mut IMAGE_FRAME_POOL),
             &sections[..section_count],
-            descriptor.image_base,
+            descriptor.image_base(),
             &PROBE_IMAGE.0,
             &mut *(&raw mut STAGING.0),
         ) {
@@ -795,7 +800,7 @@ fn boot(start_info_paddr: u64) -> bool {
         }
         patch = match iat::patch_imports(
             &space,
-            descriptor.image_base,
+            descriptor.image_base(),
             descriptor.imports(),
             &ProbePolicy,
         ) {
@@ -812,13 +817,20 @@ fn boot(start_info_paddr: u64) -> bool {
             let _ = writeln!(serial, "tinyos: sealing failed");
             return false;
         }
-        ok &=
-            matches!(space.translate(entry_virt), Some(page) if page.executable && !page.writable);
+        if !matches!(
+            space.translate(entry_virt),
+            Some(page) if page.executable && !page.writable
+        ) {
+            let _ = writeln!(serial, "tinyos: entry point lost its RX mapping proof");
+            return false;
+        }
         core::mem::forget(space);
         (&raw const IMAGE_PML4) as u64
     };
-    ok &= patch.total() == descriptor.imports().count();
-    ok &= patch.granted == 2 && patch.trapped() == 0;
+    if patch.total() != descriptor.imports().count() || patch.granted != 2 || patch.trapped() != 0 {
+        let _ = writeln!(serial, "tinyos: incomplete IAT capability resolution");
+        return false;
+    }
     let _ = writeln!(
         serial,
         "tinyos: loaded image — {} import(s), {} granted, {} trapped, cr3={cr3_image:#x}",
@@ -847,7 +859,13 @@ fn boot(start_info_paddr: u64) -> bool {
         });
         violations
     };
-    ok &= violations == 0;
+    if violations != 0 {
+        let _ = writeln!(
+            serial,
+            "tinyos: live page-table audit found {violations} W^X/alias violation(s)"
+        );
+        return false;
+    }
 
     // ---- Stage 4: schedule it.
     // SAFETY: slot 0's stack and context serve exactly this task. The

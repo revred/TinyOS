@@ -7,8 +7,8 @@
 //! proves the real Phase 0 loader pipeline against it: `pe::parse` parses
 //! its real header/section/import tables, `AddressSpace::create` maps its
 //! real six sections with their real permissions, and
-//! `win32_shim::check_imports` correctly rejects its real 205-import
-//! surface (only 9 of which this Phase 0 shim allowlists) — proving the
+//! `win32_shim::check_imports` correctly rejects its complete 220-import
+//! surface (205 named plus 15 ordinal; only 9 APIs are allowlisted) — proving the
 //! load-time security gate works, not merely compiles. `win32_shim`'s
 //! `HeapAlloc` resolves and is directly callable, satisfying this Story's
 //! own redefined checkpoint. See `STORY-P0-05-04.md`'s rewritten
@@ -20,7 +20,7 @@
 #![no_main]
 
 use exec::address_space::AddressSpace;
-use exec::pe::{self, SectionDescriptor};
+use exec::pe::{self, ImportSymbol, SectionDescriptor};
 use exec::win32_shim::{self, Api, CapabilityPolicy};
 #[allow(unused_imports)]
 // linked for its `global_asm!` side effect only, per its own doc comment
@@ -31,8 +31,7 @@ use kernel::mem::Pool;
 
 /// Comfortably above `blue-sharc.txe`'s real 6 sections.
 const SECTIONS: usize = 8;
-/// Comfortably above `blue-sharc.exe`'s real 205 named imports (ordinal-only
-/// WS2_32 thunks aren't recorded by `pe::parse`, per its own doc comment).
+/// Comfortably above `blue-sharc.exe`'s 205 named plus 15 ordinal imports.
 const IMPORTS: usize = 256;
 /// Page-table frame pool: this image's real sections span under 8.3MiB of
 /// virtual address space, needing at most a handful of PT/PD/PDPT levels —
@@ -77,11 +76,20 @@ fn run() -> bool {
         Ok(d) => d,
         Err(_) => return false,
     };
-    if descriptor.image_base != 0x1_4000_0000 {
+    if descriptor.image_base() != 0x1_4000_0000 {
         return false;
     }
     // The real entry point RVA `objdump`-equivalent inspection found.
-    if descriptor.entry_point_rva != 0x71fe00 {
+    if descriptor.entry_point_rva() != 0x71fe00 {
+        return false;
+    }
+    let named =
+        descriptor.imports().filter(|entry| matches!(entry.symbol, ImportSymbol::Name(_))).count();
+    let ordinal = descriptor
+        .imports()
+        .filter(|entry| matches!(entry.symbol, ImportSymbol::Ordinal(_)))
+        .count();
+    if named != 205 || ordinal != 15 {
         return false;
     }
 
@@ -111,23 +119,22 @@ fn run() -> bool {
             &mut *&raw mut PML4,
             &mut *&raw mut FRAME_POOL,
             &sections[..section_count],
-            descriptor.image_base,
+            descriptor.image_base(),
             &IMAGE_BYTES.0,
             &mut *&raw mut STAGING.0,
         ) {
             Ok(space) => space,
             Err(_) => return false,
         };
-        let entry_page =
-            space.translate(descriptor.image_base + u64::from(descriptor.entry_point_rva));
+        let entry_page = space.translate(descriptor.entry_virtual_address());
         matches!(entry_page, Some(p) if !p.writable && p.executable)
     };
     if !mapped_correctly {
         return false;
     }
 
-    // The real import table — 205 real named imports, only 9 of which this
-    // Phase 0 shim allowlists — is correctly rejected at load time. This is
+    // The real import table — 205 named plus 15 ordinal imports, only 9 APIs
+    // of which this Phase 0 shim allowlists — is correctly rejected at load time. This is
     // the security gate working as designed (`G-PC-2`/`G-PC-3`), not a
     // fixture failure: an image needing capabilities beyond what's granted
     // must never be silently allowed to run.

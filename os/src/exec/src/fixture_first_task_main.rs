@@ -35,30 +35,21 @@
 //! instead:
 //!
 //! 1. **Load time.** `win32_shim::check_imports` refuses `blue-sharc.exe`'s
-//!    real 205-import surface, and the refusal is *journaled as a spoor* —
+//!    complete 220-import surface (205 named plus 15 ordinal), and the refusal
+//!    is *journaled as a spoor* —
 //!    the gate as production behavior, not only a fixture assertion.
 //! 2. **Runtime, defense in depth.** The image is then scheduled anyway,
 //!    under the explicit [`OverrideEverythingPolicy`] below, entering at its
 //!    own real entry point. Its real startup code reaches for authority it
-//!    was never granted — through an import address table nothing patched,
-//!    precisely because nothing was granted — and the resulting transfer
-//!    lands on memory that is not executable. That raises a real `#PF`,
+//!    was never granted; every unresolved or denied IAT cell was overwritten
+//!    with `CAPABILITY_TRAP_VIRT`, so the transfer lands on deliberately
+//!    unmapped memory. That raises a real `#PF`,
 //!    contained by the unmodified `kernel::fault` policy. Nothing about the
 //!    fault is staged: it is what an ungoverned real workload does.
 //!
-//! **What the run actually observed**, recorded here because it is more
-//! specific than the prediction above and was confirmed against the image's
-//! own bytes: `blue-sharc.exe`'s real MSVC CRT startup called
-//! **`GetSystemTimeAsFileTime`** — not in this shim's nine-call allowlist —
-//! through its unpatched IAT. An unpatched thunk still holds the *RVA* of
-//! its `IMAGE_IMPORT_BY_NAME` record, so the indirect call took that RVA as
-//! an absolute address and fetched at `0x7b_9d9e`, where the image's own
-//! bytes read `00 00 "GetSystemTimeAsFileTime"` — a hint word and an ASCII
-//! name, not code. Under this Story's kernel mappings that address is
-//! present but **NX**, so the fetch raised `#PF` (`rip == cr2 ==
-//! 0x7b_9d9e`) and the task was terminated with the system intact. Worth
-//! stating plainly: without `EFER.NXE` and a W^X kernel map, that fetch
-//! would have *succeeded* and begun executing an API name string as code.
+//! **What the run observes now:** the first unsupported CRT import transfers
+//! to `CAPABILITY_TRAP_VIRT` (`0xdead0000`), producing a contained `#PF` with
+//! `rip == cr2 == 0xdead0000`. No original RVA survives in any IAT cell.
 
 #![no_std]
 #![no_main]
@@ -98,8 +89,8 @@ unsafe extern "C" {
 const BOOT_TIMER_INITIAL_COUNT: u32 = 1_000_000;
 const APIC_PAGE: u64 = 0xFEE0_0000;
 
-/// Comfortably above `blue-sharc.txe`'s real 6 sections / 205 named
-/// imports — the same bounds `blue-sharc-fixture` uses.
+/// Comfortably above `blue-sharc.txe`'s real 6 sections / 220 imports —
+/// 205 named plus 15 ordinal, the same bounds `blue-sharc-fixture` uses.
 const SECTIONS: usize = 8;
 const IMPORTS: usize = 256;
 /// Page-table frames for the image's own tree: ~8.3MiB of virtual span
@@ -384,7 +375,7 @@ fn run(start_info_paddr: u64) -> bool {
             return false;
         }
     };
-    let entry_virt = descriptor.image_base + u64::from(descriptor.entry_point_rva);
+    let entry_virt = descriptor.entry_virtual_address();
     let mut sections = [SectionDescriptor {
         virtual_address: 0,
         virtual_size: 0,
@@ -427,7 +418,7 @@ fn run(start_info_paddr: u64) -> bool {
             &mut *(&raw mut IMAGE_PML4),
             &mut *(&raw mut IMAGE_FRAME_POOL),
             &sections[..section_count],
-            descriptor.image_base,
+            descriptor.image_base(),
             &IMAGE_BYTES.0,
             &mut *(&raw mut STAGING.0),
         ) {
@@ -452,7 +443,7 @@ fn run(start_info_paddr: u64) -> bool {
         // are live and unaliased at this point in the load.
         let summary = match iat::patch_imports(
             &space,
-            descriptor.image_base,
+            descriptor.image_base(),
             descriptor.imports(),
             &OverrideEverythingPolicy,
         ) {

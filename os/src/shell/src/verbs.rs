@@ -160,6 +160,10 @@ pub trait SpoorView {
     fn source(&self) -> &'static str;
     /// Number of visible entries.
     fn len(&self) -> usize;
+    /// Whether no entries are visible.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
     /// The `index`-th entry, oldest first.
     fn entry(&self, index: usize) -> Option<SpoorRow>;
 }
@@ -179,15 +183,33 @@ impl SpoorView for NoSpoors {
     }
 }
 
+/// Task-control authority, deliberately independent of scheduling priority.
+///
+/// Criticality, containment, authority, and urgency are separate policy
+/// dimensions. Inferring this value from a priority number would couple two
+/// concepts the kernel is free to evolve independently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KillAuthority {
+    /// An ordinary task-control grant may signal the task.
+    Ordinary,
+    /// The invoking session must additionally hold supervisor scope.
+    SupervisorOnly,
+    /// No interactive shell session may signal the task.
+    Unkillable,
+}
+
 /// One task-table row, injected by the host (fixture or, later, the scheduler).
 #[derive(Debug, Clone, Copy)]
 pub struct TaskInfo {
     /// Task name.
     pub name: &'static str,
-    /// Priority (0 = RT-critical).
+    /// Scheduler priority, following the kernel convention: larger is more
+    /// urgent. It is never interpreted as task-control authority.
     pub priority: u8,
     /// Scheduler state, rendered verbatim.
     pub state: &'static str,
+    /// Explicit task-control policy.
+    pub kill_authority: KillAuthority,
 }
 
 /// A typed request — what both front-ends compile to.
@@ -787,13 +809,25 @@ pub fn execute(world: &mut World<'_>, request: &Request<'_>, sink: &mut dyn Writ
             let Some(task) = world.tasks.iter().find(|t| t.name.eq_ignore_ascii_case(name)) else {
                 return writeln!(sink, "File not found");
             };
-            if task.priority == 0 && !world.policy.supervisor(world.session) {
-                world.denials += 1;
-                return writeln!(
-                    sink,
-                    "Access denied: task {} is RT-critical and session {} lacks supervisor scope [audited]",
-                    task.name, world.session
-                );
+            match task.kill_authority {
+                KillAuthority::Ordinary => {}
+                KillAuthority::SupervisorOnly if world.policy.supervisor(world.session) => {}
+                KillAuthority::SupervisorOnly => {
+                    world.denials += 1;
+                    return writeln!(
+                        sink,
+                        "Access denied: task {} requires supervisor scope and session {} lacks it [audited]",
+                        task.name, world.session
+                    );
+                }
+                KillAuthority::Unkillable => {
+                    world.denials += 1;
+                    return writeln!(
+                        sink,
+                        "Access denied: task {} is not shell-controllable [audited]",
+                        task.name
+                    );
+                }
             }
             writeln!(sink, "Task {} signalled", task.name)
         }
@@ -805,7 +839,7 @@ pub fn execute(world: &mut World<'_>, request: &Request<'_>, sink: &mut dyn Writ
             write!(sink, "Spoor journal (")?;
             write_inert(sink, world.spoors.source())?;
             writeln!(sink, "):")?;
-            if world.spoors.len() == 0 {
+            if world.spoors.is_empty() {
                 return writeln!(sink, "No spoors journaled");
             }
             // Column widths: fixed, padded left-aligned except # and COST.
@@ -876,8 +910,18 @@ mod tests {
             policy,
             session: "TEST",
             tasks: &[
-                TaskInfo { name: "RT-CTRL", priority: 0, state: "ready" },
-                TaskInfo { name: "IDLE", priority: 9, state: "ready" },
+                TaskInfo {
+                    name: "RT-CTRL",
+                    priority: 31,
+                    state: "ready",
+                    kill_authority: KillAuthority::SupervisorOnly,
+                },
+                TaskInfo {
+                    name: "IDLE",
+                    priority: 0,
+                    state: "ready",
+                    kill_authority: KillAuthority::Ordinary,
+                },
             ],
             spoors: &NoSpoors,
             denials: 0,
@@ -921,14 +965,15 @@ mod tests {
         assert_eq!(out, "Bad command or file name\n");
     }
 
-    /// C3 — RT-critical task-kill needs supervisor scope, and the refusal is audited.
+    /// C3 — explicit task-kill authority needs supervisor scope, independent
+    /// of scheduler priority, and the refusal is audited.
     #[test]
     fn c3_rt_critical_kill_needs_supervisor() {
         let operator = GrantSet { granted: ALL, withheld: None, supervisor: false };
         let mut w = world(&operator);
         let mut out = String::new();
         execute(&mut w, &Request::TaskKill("RT-CTRL"), &mut out).unwrap();
-        assert!(out.contains("RT-critical"));
+        assert!(out.contains("requires supervisor scope"));
         assert_eq!(w.denials, 1);
 
         let supervisor = GrantSet { granted: ALL, withheld: None, supervisor: true };
@@ -936,6 +981,19 @@ mod tests {
         let mut out = String::new();
         execute(&mut w, &Request::TaskKill("rt-ctrl"), &mut out).unwrap();
         assert_eq!(out, "Task RT-CTRL signalled\n");
+    }
+
+    #[test]
+    fn c3_kill_authority_is_not_inferred_from_scheduler_priority() {
+        let operator = GrantSet { granted: ALL, withheld: None, supervisor: false };
+        let mut w = world(&operator);
+        let mut out = String::new();
+
+        execute(&mut w, &Request::TaskKill("IDLE"), &mut out).unwrap();
+        assert_eq!(
+            out, "Task IDLE signalled\n",
+            "priority zero is least urgent in the kernel and carries no implicit authority"
+        );
     }
 
     /// A canned journal view for the SPOOR rendering tests: two rows, the
