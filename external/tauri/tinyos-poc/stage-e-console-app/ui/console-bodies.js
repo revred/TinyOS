@@ -62,8 +62,9 @@
       dro.append(ax, mv, wv, j);
     });
     wrap.append(dro, el("p", "caveat",
-      "Feedback source: <b>simulated</b> PositionFeedback (Tier 0). Real encoders bolt on " +
-      "against the same trait — positional accuracy is not validated here and is not claimed."));
+      "Feedback source: <b>mock UI data</b>. The PositionFeedback trait and its Tier 0 " +
+      "simulated source are design, not yet implemented (FEAT-P1-08 has the group-frame " +
+      "contracts only) — positional accuracy is not validated here and is not claimed."));
 
     wrap.append(el("h4", null, "Overrides"));
     var ovr = el("div", "ovr");

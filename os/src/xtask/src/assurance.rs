@@ -49,7 +49,8 @@ const OPEN_DEBT_FIELD_COUNT: usize = 5;
 /// `xtask` is deliberately absent: it is a host tool, it links `std`, and it
 /// allocates freely. Conflating it with the shipped crates would either make the
 /// no-heap gate unpassable or make it meaningless.
-const SHIPPED_CRATES: [&str; 6] = ["hal", "hal-arm64", "hal-x86_64", "exec", "kernel", "os"];
+const SHIPPED_CRATES: [&str; 7] =
+    ["hal", "hal-arm64", "hal-x86_64", "exec", "kernel", "motion", "os"];
 /// Placeholder for a field that has no value yet.
 ///
 /// The TSV convention in this directory is that every field is non-empty, so an

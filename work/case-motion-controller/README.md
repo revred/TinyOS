@@ -13,6 +13,7 @@ This is a working folder, not a formal spec — it exists to populate the [5-axi
 - [`test-cases.md`](test-cases.md) — concrete test scenarios, cross-referenced to [`goals/`](../../goals/) Stories/Tests where a corresponding entry exists.
 - [`user-stories.md`](user-stories.md) — user stories for real-time G-code motion control, the flagship demo case: an application on TinyOS that streams/executes G-code and controls the motion platform live, immediately legible to a non-technical observer in a way the other deployment modes aren't.
 - [`atomic-features.md`](atomic-features.md) — 86 atomic OS-level features (APIs, driver classes, ACI capabilities, data models) a third-party application developer would need from TinyOS to build a modern conversational G-code programming application, including a dedicated "modern UX-enabling capabilities" category (GPU-composited touch UI, live 3D toolpath preview, voice/natural-language command intake) grounded in TinyOS's existing driver, ACI, and inference architecture.
+- [`foundational-motion-synchronisation-delivery.md`](foundational-motion-synchronisation-delivery.md) — the implementation-ready delivery contract for coherent 32-channel feedback epochs, coupled 16-axis calculation, atomic time-tagged command commit, the periodic scheduler work this requires, the deterministic simulator, and EtherCAT/CiA-402 as the first physical transport.
 
 ## A note on the reference manual
 
