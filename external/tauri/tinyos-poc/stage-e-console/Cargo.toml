@@ -6,6 +6,10 @@ publish = false
 description = "08C Stage E / 13F Deliverable A, core: signed console manifest, deny-by-default AuthorityResolver, and the QEMU fixture harness driving `cargo run -p xtask -- qemu-x86_64` — headless-testable, no wry"
 
 [dependencies]
+# The TINYCMD crate itself — the same `shell` the QEMU fixture boots, compiled for the
+# host so a tab is a real in-process session (17G §1). Allowed direction only: the PoC
+# side depends on os/, never the reverse (check-external-isolation gates the reverse).
+shell = { path = "../../../../os/src/shell" }
 tauri = { path = "../../crates/tauri", default-features = false, features = ["unstable", "tinyos"] }
 tauri-utils = { path = "../../crates/tauri-utils" }
 serde = { version = "1", features = ["derive"] }

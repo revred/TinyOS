@@ -5,8 +5,24 @@
       "launch_fixture",
       "send_line",
       "read_stream",
-      "terminate"
+      "terminate",
+      "open_tab",
+      "focus_tab",
+      "read_console"
+    ],
+    "tab_labels": [
+      "tab-1",
+      "tab-2",
+      "tab-3",
+      "tab-4",
+      "tab-5",
+      "tab-6"
+    ],
+    "tab_verbs": [
+      "run_line",
+      "read_tab",
+      "run_parity"
     ]
   },
-  "signature_hex": "69a5dd32c7f54af1d50b2276962f164640a86ffa8fbfd2f78e9d38ef9107e4ec3226032496950bb9de169ee8c3c7f650ce59ecdc4846db47376eb4733fff8b09"
+  "signature_hex": "82816c5d4cd43d9157ae499b1b06f76ee7a50348c62c343abea2c53460cb44a5b325578ed55acf8b0265b30dd969ae3f28e2fbc5958643754540cd40da128a0c"
 }

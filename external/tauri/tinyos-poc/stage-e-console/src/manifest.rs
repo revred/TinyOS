@@ -20,6 +20,14 @@ pub struct ManifestPayload {
     pub console: String,
     /// The verbs — invoke commands — the console may use. Exactly these, nothing else.
     pub verbs: Vec<String>,
+    /// The enumerated tab webview labels (17G): a fixed list, not a namespace. A label
+    /// not listed here — the reserved region included — holds no verbs at all.
+    #[serde(default)]
+    pub tab_labels: Vec<String>,
+    /// The verbs any enumerated tab identity may use. Disjoint by intent from the
+    /// console's chrome verbs: a tab cannot open tabs, the chrome cannot run lines.
+    #[serde(default)]
+    pub tab_verbs: Vec<String>,
 }
 
 /// The manifest as it exists at rest: payload plus detached signature.
@@ -63,6 +71,8 @@ impl std::fmt::Display for ManifestError {
 pub struct VerifiedManifest {
     console: String,
     verbs: BTreeSet<String>,
+    tab_labels: BTreeSet<String>,
+    tab_verbs: BTreeSet<String>,
 }
 
 impl VerifiedManifest {
@@ -71,14 +81,29 @@ impl VerifiedManifest {
         &self.console
     }
 
-    /// Whether `verb` is enumerated.
+    /// Whether `verb` is enumerated for the console chrome identity.
     pub fn allows(&self, verb: &str) -> bool {
         self.verbs.contains(verb)
     }
 
-    /// The enumerated verbs, for display.
+    /// Whether `label` is an enumerated tab identity.
+    pub fn is_tab(&self, label: &str) -> bool {
+        self.tab_labels.contains(label)
+    }
+
+    /// Whether `verb` is enumerated for tab identities.
+    pub fn tab_allows(&self, verb: &str) -> bool {
+        self.tab_verbs.contains(verb)
+    }
+
+    /// The enumerated chrome verbs, for display.
     pub fn verbs(&self) -> impl Iterator<Item = &str> {
         self.verbs.iter().map(String::as_str)
+    }
+
+    /// The enumerated tab verbs, for display.
+    pub fn tab_verbs(&self) -> impl Iterator<Item = &str> {
+        self.tab_verbs.iter().map(String::as_str)
     }
 }
 
@@ -119,6 +144,8 @@ impl SignedManifest {
         Ok(VerifiedManifest {
             console: self.payload.console.clone(),
             verbs: self.payload.verbs.iter().cloned().collect(),
+            tab_labels: self.payload.tab_labels.iter().cloned().collect(),
+            tab_verbs: self.payload.tab_verbs.iter().cloned().collect(),
         })
     }
 }
@@ -153,6 +180,8 @@ mod tests {
                 "read_stream".into(),
                 "terminate".into(),
             ],
+            tab_labels: vec!["tab-1".into(), "tab-2".into()],
+            tab_verbs: vec!["run_line".into(), "read_tab".into()],
         }
     }
 
@@ -185,6 +214,27 @@ mod tests {
         let signed = SignedManifest::sign(test_payload(), other_secret).unwrap();
         let public = public_key_hex(TEST_SECRET).unwrap();
         assert_eq!(signed.verify(&public), Err(ManifestError::SignatureMismatch));
+    }
+
+    /// M5 — the tab enumeration is part of the signed payload: it round-trips through
+    /// verification, and a tab label or tab verb added after signing fails closed —
+    /// exactly the property that makes "authority stays manifest-shaped" (17G §1.4) true
+    /// for tabs and not just for the chrome.
+    #[test]
+    fn m5_tab_grants_are_signed() {
+        let signed = SignedManifest::sign(test_payload(), TEST_SECRET).unwrap();
+        let public = public_key_hex(TEST_SECRET).unwrap();
+        let verified = signed.verify(&public).unwrap();
+        assert!(verified.is_tab("tab-1") && verified.is_tab("tab-2"));
+        assert!(!verified.is_tab("reserved"), "the reserved region is never a tab identity");
+        assert!(verified.tab_allows("run_line") && !verified.tab_allows("open_tab"));
+
+        let mut grown_label = signed.clone();
+        grown_label.payload.tab_labels.push("tab-666".into());
+        assert_eq!(grown_label.verify(&public), Err(ManifestError::SignatureMismatch));
+        let mut grown_verb = signed;
+        grown_verb.payload.tab_verbs.push("format_disk".into());
+        assert_eq!(grown_verb.verify(&public), Err(ManifestError::SignatureMismatch));
     }
 
     /// M4 — malformed inputs fail closed with the *encoding* error, never a panic and never

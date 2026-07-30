@@ -24,7 +24,10 @@ pub struct BatchStats {
     pub truncated: bool,
 }
 
-fn write_prompt(world: &World<'_>, sink: &mut dyn Write) -> fmt::Result {
+/// Render the session prompt (`A:<cwd>>`) — the same prompt the echo discipline
+/// prints before each batch line. Public so an interactive front-end (the 17G tab
+/// host) echoes lines exactly as a `.TCB` run would render them.
+pub fn prompt(world: &World<'_>, sink: &mut dyn Write) -> fmt::Result {
     let mut buffer = [0u8; MAX_PATH];
     let len = world.volume.dir_path(world.cwd, &mut buffer);
     write!(sink, "A:{}>", core::str::from_utf8(&buffer[..len]).unwrap_or("\\"))
@@ -55,7 +58,7 @@ pub fn run(
         }
         if world.echo && !suppressed {
             writeln!(sink)?;
-            write_prompt(world, sink)?;
+            prompt(world, sink)?;
             writeln!(sink, "{line}")?;
         }
         if line.trim_start().len() >= 4
@@ -134,5 +137,16 @@ mod tests {
         assert!(stats.truncated);
         assert!(out.contains("budget exceeded"));
         assert_eq!(stats.executed, MAX_BATCH_LINES as u32);
+    }
+
+    /// B4 — the public prompt renderer answers the same `A:<cwd>>` shape the echo
+    /// discipline prints, so an interactive tab host echoes identically to a batch.
+    #[test]
+    fn b4_prompt_is_public_and_batch_shaped() {
+        static POLICY: GrantSet = GrantSet { granted: GRANTS, withheld: None, supervisor: false };
+        let w = world(&POLICY);
+        let mut out = String::new();
+        prompt(&w, &mut out).unwrap();
+        assert_eq!(out, "A:\\>");
     }
 }

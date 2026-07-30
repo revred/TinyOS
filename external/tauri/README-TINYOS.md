@@ -71,3 +71,27 @@ the console lane). `tinyos-poc/stage-e-console` (core, headless-testable) +
   `stage-e-console-app/rc_shim.rs` replaces the absent Microsoft Resource Compiler with an
   empty-`.res` emitter (so the exe carries no icon/version resources, and
   `common-controls-v6` stays off — no manifest-activated comctl32 v6).
+
+## 17G — the single-window multi-tab OS UX, visually confirmed (2026-07-30)
+
+The Stage E console grown into the `EPIC-P2` §6 *interaction model*, host-side (the `a3`
+sibling-webview shape made visible). Evidence: TinyOS `goals/reports/REPORT-2026-07-30-01.md`
+plus 7 committed screenshots and `smoke.json` under
+`goals/reports/assets/2026-07-30-multitab/`.
+
+- **One window, sibling webviews**: `reserved` (host-owned strip — its label is enumerated
+  nowhere in the manifest, so it holds no verbs, and only the Rust-side reconciler repaints
+  it), `console` (tab-bar chrome), `tab-1`…`tab-6` (content).
+- **A tab is a host-run TINYCMD session in-process** (`shell::verbs::World` +
+  `shell::dos::run_line`, path-dependency `tinyos-poc → os/src/shell`, the legal direction):
+  per-tab env/cwd/volume/policy, isolation visible (`SET` in one tab, `not defined` in the
+  next), `SAMPLE.TCB` run by name through the real `.TCB` runner.
+- **The signed manifest carries two disjoint grant tables** (chrome verbs vs tab verbs); a
+  tab verb's session identity is the invoking webview's runtime-derived label.
+- **The parity suite runs from the parity tab** via the CI command surfaces
+  (`cargo test -p shell --lib`, `cargo run -p xtask -- check-shell-parity`), with the
+  two-signal rule rendered and aggregated affirmative-both-or-FAIL.
+- Patch metric **unchanged** (nothing under `crates/` touched); upstream suite green both
+  knob positions (57/57 off, 58/58 on; `tauri-utils` 33/33 both — run headless:
+  `--no-default-features --features test[,tinyos]`, since default features include
+  `common-controls-v6`, which cannot load on this machine).

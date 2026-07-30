@@ -74,12 +74,21 @@ impl AuthorityResolver for ConsoleAuthority {
             self.deny(command, window, webview, origin, "remote origins are refused unconditionally");
             return None;
         }
-        if webview != self.manifest.console() {
-            self.deny(command, window, webview, origin, "identity is not the manifest's console webview");
-            return None;
-        }
-        if !self.manifest.allows(command) {
-            self.deny(command, window, webview, origin, "verb is not enumerated in the signed manifest");
+        // Identity decides the grant table: the chrome identity holds the chrome verbs,
+        // an enumerated tab identity holds the tab verbs, and any other label — the
+        // host-owned reserved region included — holds nothing.
+        if webview == self.manifest.console() {
+            if !self.manifest.allows(command) {
+                self.deny(command, window, webview, origin, "verb is not enumerated for the console identity in the signed manifest");
+                return None;
+            }
+        } else if self.manifest.is_tab(webview) {
+            if !self.manifest.tab_allows(command) {
+                self.deny(command, window, webview, origin, "verb is not enumerated for tab identities in the signed manifest");
+                return None;
+            }
+        } else {
+            self.deny(command, window, webview, origin, "identity is not enumerated in the signed manifest");
             return None;
         }
         Some(vec![ResolvedCommand::default()])
@@ -96,7 +105,9 @@ mod tests {
     fn authority() -> ConsoleAuthority {
         let payload = ManifestPayload {
             console: "console".into(),
-            verbs: vec!["launch_fixture".into(), "read_stream".into()],
+            verbs: vec!["launch_fixture".into(), "read_stream".into(), "open_tab".into()],
+            tab_labels: vec!["tab-1".into(), "tab-2".into()],
+            tab_verbs: vec!["run_line".into(), "read_tab".into()],
         };
         let signed = SignedManifest::sign(payload, TEST_SECRET).unwrap();
         let public = crate::manifest::public_key_hex(TEST_SECRET).unwrap();
@@ -141,8 +152,8 @@ mod tests {
         assert!(log[0].origin.contains("evil.example.com"));
     }
 
-    /// R4 — a different webview label is denied the same listed verb: the grant follows the
-    /// runtime-derived identity, not the command (Stage C's C5, preserved).
+    /// R4 — a webview label enumerated nowhere is denied every verb: the grant follows
+    /// the runtime-derived identity, not the command (Stage C's C5, preserved).
     #[test]
     fn r4_other_webview_identity_denied() {
         let auth = authority();
@@ -150,6 +161,39 @@ mod tests {
         assert!(verdict.is_none());
         let log = auth.denial_log();
         let log = log.lock().unwrap();
-        assert_eq!(log[0].reason, "identity is not the manifest's console webview");
+        assert_eq!(log[0].reason, "identity is not enumerated in the signed manifest");
+    }
+
+    /// R5 — the per-identity grant tables are disjoint: a tab identity resolves tab
+    /// verbs but not chrome verbs, and the chrome identity cannot use tab verbs. Each
+    /// refusal is recorded for the UI.
+    #[test]
+    fn r5_tab_and_chrome_grants_are_disjoint() {
+        let auth = authority();
+        assert!(auth.resolve_access("run_line", "host", "tab-1", &Origin::Local).is_some());
+        assert!(auth.resolve_access("read_tab", "host", "tab-2", &Origin::Local).is_some());
+        assert!(auth.resolve_access("open_tab", "host", "tab-1", &Origin::Local).is_none());
+        assert!(auth.resolve_access("run_line", "host", "console", &Origin::Local).is_none());
+        let log = auth.denial_log();
+        let log = log.lock().unwrap();
+        assert_eq!(log.len(), 2);
+        assert!(log[0].reason.contains("not enumerated for tab identities"));
+        assert!(log[1].reason.contains("not enumerated for the console identity"));
+    }
+
+    /// R6 — the reserved region's label is enumerated nowhere: it can invoke nothing,
+    /// which is what "no tab content can paint it, and it holds no verbs" means at the
+    /// authority seam.
+    #[test]
+    fn r6_reserved_region_holds_no_verbs() {
+        let auth = authority();
+        for verb in ["run_line", "read_tab", "open_tab", "launch_fixture", "read_stream"] {
+            assert!(
+                auth.resolve_access(verb, "host", "reserved", &Origin::Local).is_none(),
+                "reserved must not resolve {verb}"
+            );
+        }
+        let log = auth.denial_log();
+        assert_eq!(log.lock().unwrap().len(), 5);
     }
 }

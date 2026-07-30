@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>reserved region</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; height: 44px; overflow: hidden; user-select: none;
+    background: linear-gradient(180deg, #3d2e00, #241b00);
+    border-bottom: 2px solid #d2a800;
+    color: #ffd75e; font: bold 13px/44px Consolas, "Cascadia Mono", monospace;
+    display: flex; align-items: center; gap: 12px; padding: 0 12px;
+  }
+  #badge {
+    background: #d2a800; color: #241b00; padding: 2px 8px; border-radius: 3px;
+    line-height: normal; font-size: 11px; flex: none;
+  }
+  #t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+</head>
+<body>
+<!-- Host-owned. This page holds no invoke verbs (its label is enumerated nowhere in
+     the signed manifest — e8/R6 prove the denial) and is repainted exclusively by the
+     Rust side via eval; no tab content can reach or paint it. -->
+<span id="badge">HOST-OWNED RESERVED REGION</span>
+<span id="t">booting&hellip;</span>
+</body>
+</html>

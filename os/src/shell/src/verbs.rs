@@ -275,8 +275,9 @@ pub struct World<'a> {
     pub cwd: u8,
     /// Batch echo state (4.0 default: ON).
     pub echo: bool,
-    /// The ACI seam.
-    pub policy: &'a dyn VerbPolicy,
+    /// The ACI seam. `Sync` so a host-side tab owner can hold a `World<'static>`
+    /// behind shared state (C5); every policy is plain data.
+    pub policy: &'a (dyn VerbPolicy + Sync),
     /// Session identity (kernel-derived in destination; fixture-set at Tier 0).
     pub session: &'a str,
     /// Injected task table.
@@ -686,7 +687,7 @@ mod tests {
     const ALL: &[VerbKind] =
         &[VerbKind::List, VerbKind::PrintCwd, VerbKind::Echo, VerbKind::TaskKill];
 
-    fn world<'a>(policy: &'a dyn VerbPolicy) -> World<'a> {
+    fn world<'a>(policy: &'a (dyn VerbPolicy + Sync)) -> World<'a> {
         World {
             volume: RamVolume::new(Some("TINYOS"), (0x1234, 0xABCD)),
             env: Env::new(),
@@ -700,6 +701,14 @@ mod tests {
             ],
             denials: 0,
         }
+    }
+
+    /// C5 — the multi-tab host (17G) holds one `World<'static>` per tab behind shared
+    /// state on the host side; that only holds if a static world is `Send`.
+    #[test]
+    fn c5_world_static_is_send() {
+        fn assert_send<T: Send>() {}
+        assert_send::<World<'static>>();
     }
 
     /// C1 — deny-by-default: with no policy nothing runs, and the denial is audited

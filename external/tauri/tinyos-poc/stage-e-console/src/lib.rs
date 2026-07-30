@@ -22,3 +22,5 @@ pub mod authority;
 pub mod commands;
 pub mod harness;
 pub mod manifest;
+pub mod parity_suite;
+pub mod tabs;
