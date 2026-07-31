@@ -23,13 +23,57 @@ look identical.
 
 ## 1. Loopback-test the adapter first (`TEST-P1-07-01-A` clause 1)
 
-Before believing anything the adapter says, prove it can carry a byte:
+**Why this exists.** Between the keyboard and the Pi's silicon there are five
+independent links — adapter silicon/driver, COM-port settings, the adapter's TX/RX
+circuitry, the cable/connector wiring, and the board itself — and any of them
+produces *identical silence*. The loopback cuts the chain in half before the board
+is involved: jumper the adapter's **TX pin to its RX pin**, so every transmitted
+byte comes straight back. Echo proves links 1–3; from then on, "silence" from a
+board run means the problem is on the board side. This is the repo's standing
+positive-control principle applied to the instrument itself: a detector that has
+never been shown to detect a byte cannot be believed when it reports nothing.
 
-1. Plug the adapter into the laptop **with a jumper joining its TX and RX pins**.
+1. Plug the adapter into the laptop **with a jumper joining its TX and RX pins**
+   (on the official Debug Probe, jumper the TX/RX contacts of the supplied cable's
+   free end).
 2. Open the enumerated COM port at 115200 8N1 with any serial terminal (or ask the
    session agent to run the echo check) and type — every character must echo back.
 3. Remove the jumper. If nothing echoed, stop: fix the adapter before touching the
    board, or every later "silence" result is uninterpretable.
+
+**Honest limit:** loopback proves the adapter, not the pigtail/crossover to the Pi —
+those are proven only by the first byte that actually arrives from the board. That
+residual is exactly why §4's silence triage re-checks the connector *second*, after
+re-loopback and before suspecting the card.
+
+## 1b. Wiring the Pi side
+
+The debug socket is the 3-pin **JST-SH 1.0 mm** connector between the two
+micro-HDMI ports; its pinout per the Raspberry Pi debug-connector spec is
+**TX (out of the Pi) · GND · RX (into the Pi)**.
+
+- **Official Debug Probe (recommended):** JST-SH cable from the Pi's debug socket
+  into the probe's **"U" (UART) port**, probe into USB. Crossover and voltage are
+  handled for you.
+- **Generic adapter + JST-SH pigtail — three rules:**
+  1. **Crossover:** Pi TX → adapter RX, Pi RX → adapter TX. TX-to-TX is the most
+     common wiring mistake; at 3.3 V it is harmless but perfectly silent.
+  2. **Common ground:** GND → GND, always — UART is single-ended and TX means
+     nothing without the shared reference. Missing ground reads as garbage or
+     silence.
+  3. **Connect nothing else.** Never wire the adapter's VCC/5V/3V3 to the Pi — the
+     board powers itself, and back-feeding the debug port is the one mistake that
+     damages rather than mutes. The adapter must be **3.3 V logic**; many cheap
+     ones are 5 V or carry a voltage-select jumper — check it.
+- **Settings:** 115200 8N1, **no flow control** (the 3-pin connector has no
+  RTS/CTS lines; the capture tool already opens the port that way).
+
+**Order of operations, and why:** serial wired and *capturing* before power, PSU
+last. The board's first bytes are the most valuable ones — `CurrentEL` printed
+first is acceptance-criterion evidence and the start of `Q1` under `ADR 0005`, and
+serial has no replay: a port opened after power-on has lost them forever. The
+capture tool holds the port open and then tells you when to switch on, so the
+transcript is guaranteed to span t=0.
 
 ## 2. Build and place the image
 
