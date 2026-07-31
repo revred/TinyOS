@@ -20,7 +20,7 @@ The one thing that looks like scope creep and is not: **`STORY-P1-07-03`'s MMU**
 
 ## Depends on
 
-- `FEAT-P1-01` — the measurement harness, the `hal::time` seam and the `TINYOS-MEAS/2` envelope this Feature carries onto silicon (the envelope was `/1` when this Feature was written; `STORY-P0-01-07` raised the live kernel and parser to `/2`, and the board carries what the kernel actually emits). `STORY-P1-01-03` already supplied the AArch64 `CycleSource`/`Timebase`; it has never executed on a register (`LE-27`).
+- `FEAT-P1-01` — the measurement harness, the `hal::time` seam and the `TOS64-MEAS/2` envelope this Feature carries onto silicon (the envelope was `/1` when this Feature was written; `STORY-P0-01-07` raised the live kernel and parser to `/2`, and the board carries what the kernel actually emits). `STORY-P1-01-03` already supplied the AArch64 `CycleSource`/`Timebase`; it has never executed on a register (`LE-27`).
 - `FEAT-P1-02` — the recorded gate. [Handover 03 of 27 July](../../session/hand-2026-07-27/03-le-09-arm64-pi5-slice-proposal.md) deferred every board-dependent piece until fault handling existed, because a fault on a board with no exception handling is a silent hang with no output at all. `FEAT-P1-02` is complete, so pieces 1, 2 and 5 are unblocked.
 
 ## Stories
@@ -52,7 +52,7 @@ Three things in this Feature are hostile input, and each is named because a brin
 
 ## Exit criteria
 
-**`fixture_measure` runs on a Raspberry Pi 5 and produces a `TINYOS-MEAS/2` envelope that `xtask` parses**, with the resulting numbers recorded in a Report stating board revision, firmware version, clock policy and thermal state per the measurement protocol.
+**`fixture_measure` runs on a Raspberry Pi 5 and produces a `TOS64-MEAS/2` envelope that `xtask` parses**, with the resulting numbers recorded in a Report stating board revision, firmware version, clock policy and thermal state per the measurement protocol.
 
 - Six Stories `Verified`, each with a Test document written first and a quoted serial capture as evidence.
 - One Report carrying the first hardware measurement in this project's history.

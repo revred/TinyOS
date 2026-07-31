@@ -70,7 +70,7 @@ is what makes this a demonstration rather than a re-assertion.
 - **Inheritance is still not transitive.** `high` blocks on nothing further. Untouched.
 - **No performance guardrail closes.** `D03`/`D05`/`D06` are selected because the composition governs
   dispatch and lock latency, not because this Story measures either. No `guardrail-evidence.tsv` row
-  is filed and no `TINYOS-MEAS/2` envelope is emitted.
+  is filed and no `TOS64-MEAS/2` envelope is emitted.
 - **`LE-45` is not explained by this Story either.** It adds Tier 0 coverage next door to the fixture
   that logged the anomaly; it does not recover a diagnostic that was never captured (`LE-46`). Both
   rows stay open on their own terms.

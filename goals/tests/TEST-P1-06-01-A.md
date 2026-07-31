@@ -79,7 +79,7 @@ with a real identity rather than a fabricated one.
 - with the cycle count from **the start of the decision to immediately after the line write returns**
   recorded through `kernel::measure`.
 
-**And** the fixture emits a `TINYOS-MEAS/2` envelope carrying `p50`/`p99`/`p99.9`/`max` for that path,
+**And** the fixture emits a `TOS64-MEAS/2` envelope carrying `p50`/`p99`/`p99.9`/`max` for that path,
 with `tier=T0`, `platform=qemu-tcg-x86_64`, `qualification=none`. The provenance travels with the
 number from the moment it exists; nothing downstream has to be trusted to add it.
 
@@ -187,14 +187,14 @@ independent claims:
 
 **And** each failure must name its clause on the serial line rather than reporting a bare non-zero exit.
 For `actuation-overrun`, whose pass condition is *already* a failure exit code, that is not a nicety:
-the exit code cannot distinguish a correct trip from a broken one, so the `TINYOS-RESULT/1` line is the
+the exit code cannot distinguish a correct trip from a broken one, so the `TOS64-RESULT/1` line is the
 only thing that can, and it must be wrong when the kernel is wrong.
 
 ### 8. The run is bounded, and a failure is a failure rather than a hang
 
 **Given** any defect in the above,
 **then** the run ends by its own dispatcher-round bound or its own loop ceilings and reports a failing
-`TINYOS-RESULT/1` line, rather than spinning until the harness kills it and leaves an empty capture —
+`TOS64-RESULT/1` line, rather than spinning until the harness kills it and leaves an empty capture —
 the `LE-46` shape, refused here as `TEST-P1-04-05-A` clause 7 refused it.
 
 ## What this test explicitly does not establish

@@ -160,7 +160,7 @@ claimed.** It does not qualify by having a campaign that found nothing: see the 
   It keeps its argument, its date, and its status header gains a forward pointer here.
 - **`LE-33`'s enforcement lint gains a second condition.** Its first condition refuses a `G04`-class
   bound sourced from x86_64 or Tier 0. Its second refuses a `G04`-class bound sourced from an ARM64
-  platform with no qualification record — which means the `TINYOS-MEAS/1` envelope must carry a
+  platform with no qualification record — which means the `TOS64-MEAS/1` envelope must carry a
   platform identity and a qualification-record reference, not only an architecture and a tier. That
   is an addition to `LE-33`'s scope, recorded on its row, not a new loose end.
 - **`FEAT-P1-07` gains an obligation and loses none.** Its six Stories are unchanged. What changes is

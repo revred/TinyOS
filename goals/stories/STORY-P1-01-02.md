@@ -22,7 +22,7 @@ Turn `STORY-P1-01-01`'s measurements into a blocking gate: committed per-metric 
 ## Beyond the original scope
 
 - **`LE-13` closed — measurement is release-profile.** `--profile=release` was added to the build path and the gate always uses it. A dev-profile baseline would have gated a binary nobody ships; the release numbers are materially different (D04 p50 226 vs the dev profile's 246, with far tighter tails).
-- **`LE-09` piece 4 closed — the pass/fail bit travels over the UART.** A `TINYOS-RESULT/1 fixture=<name> ok=<true|false>` sentinel line, emitted by both measurement fixtures and parsed strictly host-side. On Tier 0 it is **cross-checked against the QEMU `isa-debug-exit` code and must agree**, so the mechanism the Raspberry Pi 5 will depend on entirely is already validated against an independent signal rather than trusted for the first time on the day it becomes load-bearing.
+- **`LE-09` piece 4 closed — the pass/fail bit travels over the UART.** A `TOS64-RESULT/1 fixture=<name> ok=<true|false>` sentinel line, emitted by both measurement fixtures and parsed strictly host-side. On Tier 0 it is **cross-checked against the QEMU `isa-debug-exit` code and must agree**, so the mechanism the Raspberry Pi 5 will depend on entirely is already validated against an independent signal rather than trusted for the first time on the day it becomes load-bearing.
 
 ## The finding this Story produced
 

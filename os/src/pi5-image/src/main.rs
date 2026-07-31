@@ -2,7 +2,7 @@
 //!
 //! Packaging only, and deliberately so: the whole boot flow — entry report,
 //! conditional `EL2 → EL1` drop, the READY sequence, the vector install and
-//! the `TINYOS-RESULT/1` verdict — lives in `hal-arm64`, host-tested behind
+//! the `TOS64-RESULT/1` verdict — lives in `hal-arm64`, host-tested behind
 //! its MMIO seam. This crate contributes an AArch64 binary for `xtask pi5` to
 //! flatten into `kernel8.img`, a panic handler, and nothing else; board logic
 //! accumulating here would be board logic escaping its tests.

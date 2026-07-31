@@ -59,7 +59,7 @@ The boundary that matters is `q == p`: **equal priority does not preempt.** A ti
 fixture-preempt: preemptions=1 high_ready_tick=3 high_first_ran_tick=3 ticks_to_preempt=0 (bound 2)
 fixture-preempt: low_iterations=1723324 resumed_at=1301806 exhausted=false retired_by_tick=true
 fixture-preempt: xmm0 pattern=0x123456789abcdef clobber=0xfedcba9876543210 corrupted=false first_foreign_value=0x0 at_iteration=0
-TINYOS-RESULT/1 fixture=preempt ok=true
+TOS64-RESULT/1 fixture=preempt ok=true
 ```
 
 `resumed_at=1301806` against `low_iterations=1723324` is the part worth reading twice: the victim was suspended after ~1.3M iterations, the preemptor ran, and the victim then **continued from where it was** for another ~420,000 iterations. "Preempted" is thereby distinguished from "killed and restarted", which the counter alone would not have separated. `retired_by_tick=true` records that it left the CPU the same way it was suspended — by an interrupt, never by yielding.
@@ -81,7 +81,7 @@ fixture-preempt: xmm0 pattern=0x123456789abcdef clobber=0xfedcba9876543210 corru
 
 ```text
 fixture-preempt: xmm0 pattern=0x123456789abcdef clobber=0xfedcba9876543210 corrupted=true first_foreign_value=0x124c18 at_iteration=495535
-TINYOS-RESULT/1 fixture=preempt ok=false
+TOS64-RESULT/1 fixture=preempt ok=false
 ```
 
 Corruption at iteration 495,535 — mid-run, at a tick, not at iteration 1 — which is what distinguishes "an interrupt destroyed the register" from "the task's own compiled code did". A save/restore that has never been observed failing is a save/restore nobody has evidence for; this one has been.
@@ -107,7 +107,7 @@ Corruption at iteration 495,535 — mid-run, at a tick, not at iteration 1 — w
 fixture-inversion: acquired=true contended=true boost=Some(25) released=true priority_after_release=Some(5) high_completed=true
 fixture-inversion: dispatch order=[0, 2, 0, 2, 1] (0=low 1=medium 2=high), preemptions=1, low_preempted=true
 fixture-inversion: medium ready_in_window=true counter_at_block=0 counter_at_resume=0 counter_final=1000 (min 1000)
-TINYOS-RESULT/1 fixture=priority-inversion ok=true
+TOS64-RESULT/1 fixture=priority-inversion ok=true
 ```
 
 `low → high → low → high → medium` is the sequence inheritance is supposed to produce, and `0 → 0 → 1000` is the counter that says it did. Without the boost, low at priority 5 loses every selection to medium at 15: medium's counter would climb through the window and high would never run at all. `low_preempted=true` records that low reached its second turn because a *tick* took it off the CPU, not because it cooperated. This closes `STORY-P0-02-03`'s explicit host-only caveat, three Features after it was raised.

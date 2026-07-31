@@ -55,14 +55,14 @@ Because `CycleSource` will have two or more implementors, per the Liskov rule in
 
 **Given** a summary set,
 **when** emitted to any `core::fmt::Write` sink (COM1 in a fixture, a `String` in a host test),
-**then** the stream is a versioned envelope: exactly one `TINYOS-MEAS/1 BEGIN` line carrying the tier, arch, cycle-source name, calibrated overhead and timebase; one `TINYOS-MEAS/1 METRIC` line per metric with a fixed key set (`domain`, `metric`, `n`, `dropped`, `warmup`, `min`, `p50`, `p99`, `p99_9`, `max`, `unit`); and exactly one `TINYOS-MEAS/1 END` line whose `metrics=` count equals the number of METRIC lines actually emitted.
+**then** the stream is a versioned envelope: exactly one `TOS64-MEAS/1 BEGIN` line carrying the tier, arch, cycle-source name, calibrated overhead and timebase; one `TOS64-MEAS/1 METRIC` line per metric with a fixed key set (`domain`, `metric`, `n`, `dropped`, `warmup`, `min`, `p50`, `p99`, `p99_9`, `max`, `unit`); and exactly one `TOS64-MEAS/1 END` line whose `metrics=` count equals the number of METRIC lines actually emitted.
 
 ### 6. `xtask`-side parsing fails closed (`BND-15`/`BND-16`/`BND-17`)
 
 **Given** the `xtask` parser for that stream,
 **then** a well-formed stream parses into per-metric percentile records, and **every** one of the following is a *harness error* (`xtask` exit code 2), never a silently dropped sample, a zero-valued record, or a pass:
 
-- an unknown envelope version (`TINYOS-MEAS/2 ...`);
+- an unknown envelope version (`TOS64-MEAS/2 ...`);
 - a missing `BEGIN`, a missing `END`, or more than one of either;
 - an `END` whose `metrics=` count disagrees with the number of METRIC lines seen;
 - a METRIC line with a missing key, an unknown key, a duplicated key, or a non-numeric value;
@@ -71,7 +71,7 @@ Because `CycleSource` will have two or more implementors, per the Liskov rule in
 - a stream containing no METRIC lines at all;
 - truncated output (an envelope that stops mid-stream — the shape a guest that crashed or a UART that stalled actually produces).
 
-Interleaved non-envelope lines (other fixture chatter on the same UART) are ignored rather than treated as errors; only lines carrying the `TINYOS-MEAS` sentinel are parsed, and a sentinel-bearing line that is malformed is always an error.
+Interleaved non-envelope lines (other fixture chatter on the same UART) are ignored rather than treated as errors; only lines carrying the `TOS64-MEAS` sentinel are parsed, and a sentinel-bearing line that is malformed is always an error.
 
 ### 7. Tier 0 evidence for D04/D05/D07, with run-to-run variance
 
@@ -95,7 +95,7 @@ Host unit tests (`#[cfg(test)]` in `os/src/hal/src/time.rs`, `os/src/kernel/src/
 
 - `os/src/hal/src/time.rs` — `CycleSource`/`Timebase` traits and their shared conformance suite.
 - `os/src/hal-x86_64/src/tsc.rs` — the x86_64 `Tsc` implementor plus PIT-based timebase calibration.
-- `os/src/kernel/src/measure.rs` — `Samples`, `Calibration`, `Summary`, `Stopwatch`, and the `TINYOS-MEAS/1` emitter.
+- `os/src/kernel/src/measure.rs` — `Samples`, `Calibration`, `Summary`, `Stopwatch`, and the `TOS64-MEAS/1` emitter.
 - `os/src/kernel/src/fixture_measure.rs` — the Tier 0 D04/D05/D07 fixture.
 - `os/src/kernel/src/fixture_pool_bench.rs` — refactored onto the harness (its private percentile/rdtsc/report code deleted), closing `LE-06`'s divergent-sibling half.
 - `os/src/xtask/src/timing.rs` — the fail-closed stream parser and run-to-run variance computation.

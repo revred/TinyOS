@@ -97,7 +97,7 @@ bench = false
 [[bin]]
 # `STORY-P1-03-03`: the D04 same-space vs cross-space dispatch measurement
 # `FEAT-P1-03`'s exit criteria have asked for since `STORY-P1-03-01`.
-# Reports through the same TINYOS-MEAS/2 envelope `xtask measure` parses.
+# Reports through the same TOS64-MEAS/2 envelope `xtask measure` parses.
 name = "dispatch-measure-fixture"
 path = "src/fixture_dispatch_measure_main.rs"
 test = false

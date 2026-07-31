@@ -38,7 +38,7 @@ use hal::time::CycleSource;
 /// The report envelope's version sentinel. Bumping the digit is a breaking
 /// change to the format `xtask`'s parser accepts — the parser rejects every
 /// version it does not know rather than best-effort parsing an unknown one.
-pub const ENVELOPE: &str = "TINYOS-MEAS/2";
+pub const ENVELOPE: &str = "TOS64-MEAS/2";
 
 /// The value [`Environment::qualification`] carries when the measuring platform
 /// holds no secure-world qualification record.
@@ -65,7 +65,7 @@ pub const UNIT: &str = "cycles";
 /// (`LE-09` piece 4) — the pass/fail bit that reaches the host today as a QEMU
 /// exit code has to be able to reach it over the UART instead, or no gate can
 /// ever gate a board.
-pub const RESULT_SENTINEL: &str = "TINYOS-RESULT/1";
+pub const RESULT_SENTINEL: &str = "TOS64-RESULT/1";
 
 /// Writes a fixture's self-consistency verdict as the one line the host-side
 /// gate reads.
@@ -339,7 +339,7 @@ pub struct Metric<'a> {
     pub summary: Summary,
 }
 
-/// Emits the versioned `TINYOS-MEAS/2` envelope to any [`Write`] sink — COM1
+/// Emits the versioned `TOS64-MEAS/2` envelope to any [`Write`] sink — COM1
 /// inside a fixture, a `String` in a host test.
 ///
 /// The envelope is three line kinds, in order: one `BEGIN` carrying the
@@ -418,14 +418,14 @@ mod tests {
         write_result(&mut sink, "measure", true).expect("write succeeds");
         assert_eq!(
             sink,
-            "TINYOS-RESULT/1 fixture=measure ok=true
+            "TOS64-RESULT/1 fixture=measure ok=true
 "
         );
         let mut failed = String::new();
         write_result(&mut failed, "pool-bench", false).expect("write succeeds");
         assert_eq!(
             failed,
-            "TINYOS-RESULT/1 fixture=pool-bench ok=false
+            "TOS64-RESULT/1 fixture=pool-bench ok=false
 "
         );
     }
@@ -644,11 +644,11 @@ mod tests {
 
         assert_eq!(
             sink,
-            "TINYOS-MEAS/2 BEGIN tier=T0 arch=x86_64 platform=qemu-tcg-x86_64 \
+            "TOS64-MEAS/2 BEGIN tier=T0 arch=x86_64 platform=qemu-tcg-x86_64 \
              qualification=none cycle_source=rdtsc overhead_cycles=26 cycles_per_us=1000\n\
-             TINYOS-MEAS/2 METRIC domain=D07 metric=pool_alloc_free_round_trip n=10000 dropped=0 \
+             TOS64-MEAS/2 METRIC domain=D07 metric=pool_alloc_free_round_trip n=10000 dropped=0 \
              warmup=500 min=40 p50=44 p99=60 p99_9=120 max=900 unit=cycles\n\
-             TINYOS-MEAS/2 END metrics=1\n"
+             TOS64-MEAS/2 END metrics=1\n"
         );
     }
 

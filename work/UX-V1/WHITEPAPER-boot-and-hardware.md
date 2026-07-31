@@ -48,9 +48,9 @@ purpose:
    reviewed, and `STORY-P1-07-01` is not Verified until a serial capture from the board
    exists. That is stated in the module header itself, not just here.
 2. **The reporting half (pure Rust, host-tested — live).** The first thing the Rust side
-   does is *speak*: over the PL011 UART it prints `TINYOS-BOOT/1 current_el=…` — the
+   does is *speak*: over the PL011 UART it prints `TOS64-BOOT/1 current_el=…` — the
    exception level **first**, then the firmware handoff (`x0`–`x3`), then the fixed
-   known byte sequence `TINYOS-BOOT/1 READY 0123456789ABCDEF` so the capture is diffed,
+   known byte sequence `TOS64-BOOT/1 READY 0123456789ABCDEF` so the capture is diffed,
    never eyeballed. The ordering, framing and byte-exactness are pinned by tests that
    run on the x86_64 dev host against an MMIO double — the claim "`CurrentEL` is printed
    before anything else" is machine-checked, not argued from a code reading.
@@ -62,7 +62,7 @@ ceremony:
   stub prints it and drops it — it does not walk the device tree (`BND-02`, `BND-03`,
   `PD-14`). Firmware output is data crossing a boundary, and the Charter's rule that
   remote bytes are data, never code, starts at the very first instruction.
-- **Every line is tagged** (`TINYOS-BOOT/1 `) so TinyOS's own output can be separated
+- **Every line is tagged** (`TOS64-BOOT/1 `) so TinyOS's own output can be separated
   from whatever the firmware left on the same wire.
 
 ### 1.3 From stub to kernel — the load path (**designed**, mirrored from the live x86_64 path)

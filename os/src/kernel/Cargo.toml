@@ -53,7 +53,7 @@ fixture-pool-bench = []
 # Drives the performance domains `FEAT-P1-01`/`FEAT-P1-02` name as measured
 # targets (context switch D04, ready-queue dispatch D05, pool allocation D07,
 # and — since `LE-17` — fault capture/disposition latency D02) through
-# `kernel::measure`, reporting the versioned `TINYOS-MEAS/2` envelope over
+# `kernel::measure`, reporting the versioned `TOS64-MEAS/2` envelope over
 # COM1 — used only by `xtask measure` / `xtask qemu-x86_64 --fixture=measure`
 # and `TEST-P1-01-01-A`, never enabled in a real boot image. Installs its own
 # fault-only IDT and `tinyos_fault_entry` (replacing `main.rs`'s default) so
@@ -107,7 +107,7 @@ fixture-degrade-inheritance = []
 # `STORY-P1-06-01`/`TEST-P1-06-01-A`: `G-PA-1`'s decision-to-actuation path.
 # One RT task arms an activation, computes a command and emits it through
 # `hal::actuation::OutputLine` (under Tier 0 a real ISA port write), with the
-# latency measured through `kernel::measure` and reported as a `TINYOS-MEAS/2`
+# latency measured through `kernel::measure` and reported as a `TOS64-MEAS/2`
 # envelope. Two fixtures, one source file, one constant apart — the declared
 # WCET budget — so the two arms cannot drift. Never enabled in a real boot
 # image.

@@ -115,7 +115,7 @@ jobs:
             cat broken-boot.log || true
             exit 1
           fi
-          if ! grep -q 'TINYOS-PANIC/1 message=fixture-broken-boot: deliberate panic' broken-boot.log; then
+          if ! grep -q 'TOS64-PANIC/1 message=fixture-broken-boot: deliberate panic' broken-boot.log; then
             echo "broken-boot exited 1 but not from its own deliberate panic:"
             cat broken-boot.log || true
             exit 1
@@ -159,7 +159,7 @@ jobs:
             cat unrouted.log || true
             exit 1
           fi
-          if ! grep -q 'TINYOS-UNROUTED/1 fail_closed=true' unrouted.log; then
+          if ! grep -q 'TOS64-UNROUTED/1 fail_closed=true' unrouted.log; then
             echo "idt-apic-unrouted exited 1 without reaching the fail-closed default handler:"
             cat unrouted.log || true
             exit 1
@@ -384,7 +384,7 @@ jobs:
             cat wcet-trip.log
             exit 1
           fi
-          if ! grep -q 'TINYOS-RESULT/1 fixture=wcet-trip ok=true' wcet-trip.log; then
+          if ! grep -q 'TOS64-RESULT/1 fixture=wcet-trip ok=true' wcet-trip.log; then
             echo "wcet-trip exited 1 but did not report a correct trip:"
             cat wcet-trip.log
             exit 1
@@ -413,7 +413,7 @@ jobs:
           cargo run -p xtask -- qemu-x86_64 --fixture=degrade-inheritance --serial-capture=degrade-inheritance.log
           code=$?
           set -e
-          if [ "$code" -ne 0 ] || ! grep -q 'TINYOS-RESULT/1 fixture=degrade-inheritance ok=true' degrade-inheritance.log; then
+          if [ "$code" -ne 0 ] || ! grep -q 'TOS64-RESULT/1 fixture=degrade-inheritance ok=true' degrade-inheritance.log; then
             echo "the composed degrade/inheritance fixture did not pass (exit $code):"
             cat degrade-inheritance.log
             exit 1
@@ -423,7 +423,7 @@ jobs:
       # One RT task arms an activation, computes a command and drives a real
       # output boundary (an ISA port write standing in for an actuator line),
       # with the decision-to-actuation latency measured and reported as a
-      # TINYOS-MEAS/2 envelope. The same run then attacks the port with the
+      # TOS64-MEAS/2 envelope. The same run then attacks the port with the
       # background task's real TaskId, placed in Running so that the ONLY
       # thing distinguishing it from the declared owner is its identity, and
       # asserts the line is never written.
@@ -439,7 +439,7 @@ jobs:
           cargo run -p xtask -- qemu-x86_64 --fixture=actuation --serial-capture=actuation.log
           code=$?
           set -e
-          if [ "$code" -ne 0 ] || ! grep -q 'TINYOS-RESULT/1 fixture=actuation ok=true' actuation.log; then
+          if [ "$code" -ne 0 ] || ! grep -q 'TOS64-RESULT/1 fixture=actuation ok=true' actuation.log; then
             echo "the actuation fixture did not pass (exit $code):"
             cat actuation.log
             exit 1
@@ -469,7 +469,7 @@ jobs:
             cat actuation-overrun.log
             exit 1
           fi
-          if ! grep -q 'TINYOS-RESULT/1 fixture=actuation-overrun ok=true' actuation-overrun.log; then
+          if ! grep -q 'TOS64-RESULT/1 fixture=actuation-overrun ok=true' actuation-overrun.log; then
             echo "actuation-overrun exited non-zero but did not report a correct trip:"
             cat actuation-overrun.log
             exit 1

@@ -913,10 +913,10 @@ mod tests {
         reference_p50: u64,
     ) -> Envelope {
         let text = format!(
-            "TINYOS-MEAS/2 BEGIN tier=T0 arch=x86_64 platform=qemu-tcg-x86_64 qualification=none cycle_source=rdtsc overhead_cycles=36 cycles_per_us=2307\n\
-             TINYOS-MEAS/2 METRIC domain=REF metric=fixed_integer_loop n=1000 dropped=0 warmup=100 min={reference_min} p50={reference_p50} p99={reference_tail} p99_9={reference_tail} max={reference_tail} unit=cycles\n\
-             TINYOS-MEAS/2 METRIC domain=D04 metric=context_switch n=1000 dropped=0 warmup=100 min={min} p50={p50} p99={tail} p99_9={tail} max={tail} unit=cycles\n\
-             TINYOS-MEAS/2 END metrics=2\n",
+            "TOS64-MEAS/2 BEGIN tier=T0 arch=x86_64 platform=qemu-tcg-x86_64 qualification=none cycle_source=rdtsc overhead_cycles=36 cycles_per_us=2307\n\
+             TOS64-MEAS/2 METRIC domain=REF metric=fixed_integer_loop n=1000 dropped=0 warmup=100 min={reference_min} p50={reference_p50} p99={reference_tail} p99_9={reference_tail} max={reference_tail} unit=cycles\n\
+             TOS64-MEAS/2 METRIC domain=D04 metric=context_switch n=1000 dropped=0 warmup=100 min={min} p50={p50} p99={tail} p99_9={tail} max={tail} unit=cycles\n\
+             TOS64-MEAS/2 END metrics=2\n",
             tail = p50 + 100,
             reference_tail = reference_p50 + 100,
         );
@@ -1082,9 +1082,9 @@ mod tests {
         let baseline =
             parse_baseline(&header_and(&[REFERENCE_ROW, GOOD_ROW])).expect("well formed");
         let no_reference = parse_stream(
-            "TINYOS-MEAS/2 BEGIN tier=T0 arch=x86_64 platform=qemu-tcg-x86_64 qualification=none cycle_source=rdtsc overhead_cycles=36 cycles_per_us=2307\n\
-             TINYOS-MEAS/2 METRIC domain=D04 metric=context_switch n=1000 dropped=0 warmup=100 min=236 p50=246 p99=300 p99_9=340 max=400 unit=cycles\n\
-             TINYOS-MEAS/2 END metrics=1\n",
+            "TOS64-MEAS/2 BEGIN tier=T0 arch=x86_64 platform=qemu-tcg-x86_64 qualification=none cycle_source=rdtsc overhead_cycles=36 cycles_per_us=2307\n\
+             TOS64-MEAS/2 METRIC domain=D04 metric=context_switch n=1000 dropped=0 warmup=100 min=236 p50=246 p99=300 p99_9=340 max=400 unit=cycles\n\
+             TOS64-MEAS/2 END metrics=1\n",
         )
         .expect("well formed");
         let three = vec![no_reference.clone(), no_reference.clone(), no_reference];
@@ -1242,10 +1242,10 @@ mod tests {
         let baseline = parse_baseline(&header_and(&[REFERENCE_ROW, ungated])).expect("well formed");
         let stream = |min: u64, p50: u64| {
             parse_stream(&format!(
-                "TINYOS-MEAS/2 BEGIN tier=T0 arch=x86_64 platform=qemu-tcg-x86_64 qualification=none cycle_source=rdtsc overhead_cycles=36 cycles_per_us=2307\n\
-                 TINYOS-MEAS/2 METRIC domain=REF metric=fixed_integer_loop n=1000 dropped=0 warmup=100 min=100 p50=120 p99=200 p99_9=220 max=240 unit=cycles\n\
-                 TINYOS-MEAS/2 METRIC domain=D07 metric=pool_u64x64_alloc_free_round_trip n=1000 dropped=0 warmup=100 min={min} p50={p50} p99=900 p99_9=900 max=900 unit=cycles\n\
-                 TINYOS-MEAS/2 END metrics=2\n"
+                "TOS64-MEAS/2 BEGIN tier=T0 arch=x86_64 platform=qemu-tcg-x86_64 qualification=none cycle_source=rdtsc overhead_cycles=36 cycles_per_us=2307\n\
+                 TOS64-MEAS/2 METRIC domain=REF metric=fixed_integer_loop n=1000 dropped=0 warmup=100 min=100 p50=120 p99=200 p99_9=220 max=240 unit=cycles\n\
+                 TOS64-MEAS/2 METRIC domain=D07 metric=pool_u64x64_alloc_free_round_trip n=1000 dropped=0 warmup=100 min={min} p50={p50} p99=900 p99_9=900 max=900 unit=cycles\n\
+                 TOS64-MEAS/2 END metrics=2\n"
             ))
             .expect("well formed")
         };
@@ -1506,11 +1506,11 @@ mod tests {
         // refused rather than quietly dropped, or a new metric looks gated
         // when it is not.
         let three_metric = parse_stream(
-            "TINYOS-MEAS/2 BEGIN tier=T0 arch=x86_64 platform=qemu-tcg-x86_64 qualification=none cycle_source=rdtsc overhead_cycles=36 cycles_per_us=2307\n\
-             TINYOS-MEAS/2 METRIC domain=REF metric=fixed_integer_loop n=1000 dropped=0 warmup=100 min=100 p50=120 p99=200 p99_9=220 max=240 unit=cycles\n\
-             TINYOS-MEAS/2 METRIC domain=D04 metric=context_switch n=1000 dropped=0 warmup=100 min=236 p50=246 p99=300 p99_9=340 max=400 unit=cycles\n\
-             TINYOS-MEAS/2 METRIC domain=D07 metric=pool_alloc n=1000 dropped=0 warmup=100 min=70 p50=78 p99=90 p99_9=95 max=99 unit=cycles\n\
-             TINYOS-MEAS/2 END metrics=3\n",
+            "TOS64-MEAS/2 BEGIN tier=T0 arch=x86_64 platform=qemu-tcg-x86_64 qualification=none cycle_source=rdtsc overhead_cycles=36 cycles_per_us=2307\n\
+             TOS64-MEAS/2 METRIC domain=REF metric=fixed_integer_loop n=1000 dropped=0 warmup=100 min=100 p50=120 p99=200 p99_9=220 max=240 unit=cycles\n\
+             TOS64-MEAS/2 METRIC domain=D04 metric=context_switch n=1000 dropped=0 warmup=100 min=236 p50=246 p99=300 p99_9=340 max=400 unit=cycles\n\
+             TOS64-MEAS/2 METRIC domain=D07 metric=pool_alloc n=1000 dropped=0 warmup=100 min=70 p50=78 p99=90 p99_9=95 max=99 unit=cycles\n\
+             TOS64-MEAS/2 END metrics=3\n",
         )
         .expect("well formed");
         let baseline =

@@ -5,7 +5,7 @@
 //! firmware expects, prints exactly where the artifacts go on the boot
 //! partition, captures the debug UART, and exits with the **same code scheme
 //! as `qemu-x86_64`**. It is deliberately not a second harness: the verdict it
-//! consumes is `STORY-P1-01-02`'s existing `TINYOS-RESULT/1` protocol, parsed
+//! consumes is `STORY-P1-01-02`'s existing `TOS64-RESULT/1` protocol, parsed
 //! by the same [`crate::timing::parse_result`] the Tier 0 path trusts, because
 //! a second, divergent harness is the shape `LE-06` already cost this project
 //! once.
@@ -353,7 +353,7 @@ impl CapturePolicy {
 /// tool stopped listening* is part of what makes a quoted capture evidence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaptureEnd {
-    /// A complete `TINYOS-RESULT/1` line arrived — nothing more is coming
+    /// A complete `TOS64-RESULT/1` line arrived — nothing more is coming
     /// that could change the verdict.
     VerdictSeen,
     /// The overall deadline passed.
@@ -694,19 +694,19 @@ mod tests {
         // The board said something — so the wiring and baud are right — and
         // then stopped before any verdict. During bring-up this is the second
         // most common case after silence and must not read as either.
-        let outcome = classify(b"TINYOS-BOOT/1 current_el=EL2 raw=0000000000000008\r\n");
+        let outcome = classify(b"TOS64-BOOT/1 current_el=EL2 raw=0000000000000008\r\n");
         assert!(matches!(outcome, Pi5Outcome::SpokeWithoutVerdict { .. }), "got: {outcome:?}");
     }
 
     #[test]
     fn a_well_formed_passing_verdict_is_a_pass_and_names_its_fixture() {
-        let text = b"TINYOS-BOOT/1 now_at=EL1\r\nTINYOS-RESULT/1 fixture=boot ok=true\r\n";
+        let text = b"TOS64-BOOT/1 now_at=EL1\r\nTOS64-RESULT/1 fixture=boot ok=true\r\n";
         assert_eq!(classify(text), Pi5Outcome::Pass { fixture: "boot".to_string() });
     }
 
     #[test]
     fn a_well_formed_failing_verdict_is_a_reported_failure() {
-        let text = b"TINYOS-RESULT/1 fixture=boot ok=false\r\n";
+        let text = b"TOS64-RESULT/1 fixture=boot ok=false\r\n";
         assert_eq!(classify(text), Pi5Outcome::ReportedFailure { fixture: "boot".to_string() });
     }
 
@@ -714,10 +714,10 @@ mod tests {
     fn a_corrupt_verdict_line_is_a_failure_to_read_a_verdict_never_a_verdict() {
         // `TEST-P1-07-05-A` clause 4 verbatim. Truthy-looking is not true.
         for text in [
-            &b"TINYOS-RESULT/1 fixture=boot ok=yes\r\n"[..],
-            &b"TINYOS-RESULT/1 fixture=boot ok=tru"[..],
-            &b"TINYOS-RESULT/1 ok=true\r\n"[..],
-            &b"TINYOS-RESULT/1 fixture=boot ok=true extra=1\r\n"[..],
+            &b"TOS64-RESULT/1 fixture=boot ok=yes\r\n"[..],
+            &b"TOS64-RESULT/1 fixture=boot ok=tru"[..],
+            &b"TOS64-RESULT/1 ok=true\r\n"[..],
+            &b"TOS64-RESULT/1 fixture=boot ok=true extra=1\r\n"[..],
         ] {
             let outcome = classify(text);
             assert!(
@@ -731,7 +731,7 @@ mod tests {
     #[test]
     fn two_verdict_lines_are_ambiguous_and_therefore_no_verdict() {
         let text =
-            b"TINYOS-RESULT/1 fixture=boot ok=true\r\nTINYOS-RESULT/1 fixture=boot ok=false\r\n";
+            b"TOS64-RESULT/1 fixture=boot ok=true\r\nTOS64-RESULT/1 fixture=boot ok=false\r\n";
         assert!(matches!(classify(text), Pi5Outcome::SpokeWithoutVerdict { .. }));
     }
 
@@ -742,7 +742,7 @@ mod tests {
         // *around* lines must not crash or misread the parser; a verdict on
         // its own clean line still counts.
         let mut text = vec![0xFF, 0xFE, 0x80, b'\r', b'\n'];
-        text.extend_from_slice(b"TINYOS-RESULT/1 fixture=boot ok=true\r\n");
+        text.extend_from_slice(b"TOS64-RESULT/1 fixture=boot ok=true\r\n");
         assert_eq!(classify(&text), Pi5Outcome::Pass { fixture: "boot".to_string() });
     }
 
@@ -752,7 +752,7 @@ mod tests {
         // carries CRLF (the PL011 framer owns the CR), and this parser must
         // read exactly those bytes. If either side changes its spelling, one
         // of the two pinned tests goes red.
-        let text = b"\r\nTINYOS-BOOT/1 current_el=EL2 raw=0000000000000008\r\nTINYOS-BOOT/1 READY 0123456789ABCDEF\r\nTINYOS-RESULT/1 fixture=boot ok=true\r\n";
+        let text = b"\r\nTOS64-BOOT/1 current_el=EL2 raw=0000000000000008\r\nTOS64-BOOT/1 READY 0123456789ABCDEF\r\nTOS64-RESULT/1 fixture=boot ok=true\r\n";
         assert_eq!(classify(text), Pi5Outcome::Pass { fixture: "boot".to_string() });
     }
 
@@ -837,7 +837,7 @@ mod tests {
     #[test]
     fn a_board_that_speaks_and_stops_ends_on_the_quiet_window() {
         let (mut source, clock) =
-            scripted(vec![Chunk::Bytes(b"TINYOS-BOOT/1 current_el=EL2".to_vec())], 100);
+            scripted(vec![Chunk::Bytes(b"TOS64-BOOT/1 current_el=EL2".to_vec())], 100);
         let (bytes, end) = capture(&mut source, &clock, &POLICY);
         assert_eq!(end, CaptureEnd::QuietAfterBytes);
         assert!(!bytes.is_empty());
@@ -847,7 +847,7 @@ mod tests {
     #[test]
     fn a_complete_verdict_line_ends_the_capture_without_waiting_out_the_quiet_window() {
         let (mut source, clock) =
-            scripted(vec![Chunk::Bytes(b"TINYOS-RESULT/1 fixture=boot ok=true\r\n".to_vec())], 100);
+            scripted(vec![Chunk::Bytes(b"TOS64-RESULT/1 fixture=boot ok=true\r\n".to_vec())], 100);
         let (bytes, end) = capture(&mut source, &clock, &POLICY);
         assert_eq!(end, CaptureEnd::VerdictSeen);
         assert_eq!(classify(&bytes), Pi5Outcome::Pass { fixture: "boot".to_string() });
@@ -858,7 +858,7 @@ mod tests {
     fn a_verdict_split_across_chunks_is_assembled_before_being_judged() {
         let (mut source, clock) = scripted(
             vec![
-                Chunk::Bytes(b"TINYOS-RESULT/1 fixture=".to_vec()),
+                Chunk::Bytes(b"TOS64-RESULT/1 fixture=".to_vec()),
                 Chunk::Bytes(b"boot ok=true\r\n".to_vec()),
             ],
             10,
@@ -873,7 +873,7 @@ mod tests {
         // The line could still grow a corrupting continuation; judging it
         // early would be guessing. The quiet window is what ends this one.
         let (mut source, clock) =
-            scripted(vec![Chunk::Bytes(b"TINYOS-RESULT/1 fixture=boot ok=true".to_vec())], 100);
+            scripted(vec![Chunk::Bytes(b"TOS64-RESULT/1 fixture=boot ok=true".to_vec())], 100);
         let (_, end) = capture(&mut source, &clock, &POLICY);
         assert_eq!(end, CaptureEnd::QuietAfterBytes);
     }
@@ -891,7 +891,7 @@ mod tests {
     #[test]
     fn a_source_that_dies_reports_disconnected_not_a_verdict() {
         let (mut source, clock) =
-            scripted(vec![Chunk::Bytes(b"TINYOS-BOOT/1 ".to_vec()), Chunk::Disconnected], 10);
+            scripted(vec![Chunk::Bytes(b"TOS64-BOOT/1 ".to_vec()), Chunk::Disconnected], 10);
         let (bytes, end) = capture(&mut source, &clock, &POLICY);
         assert_eq!(end, CaptureEnd::Disconnected);
         assert!(!bytes.is_empty());
@@ -900,11 +900,11 @@ mod tests {
     #[test]
     fn verdict_detection_needs_the_sentinel_and_a_terminating_newline() {
         assert!(!contains_complete_verdict_line(b""));
-        assert!(!contains_complete_verdict_line(b"TINYOS-BOOT/1 READY\r\n"));
-        assert!(!contains_complete_verdict_line(b"TINYOS-RESULT/1 fixture=boot ok=true"));
-        assert!(contains_complete_verdict_line(b"TINYOS-RESULT/1 fixture=boot ok=true\n"));
+        assert!(!contains_complete_verdict_line(b"TOS64-BOOT/1 READY\r\n"));
+        assert!(!contains_complete_verdict_line(b"TOS64-RESULT/1 fixture=boot ok=true"));
+        assert!(contains_complete_verdict_line(b"TOS64-RESULT/1 fixture=boot ok=true\n"));
         assert!(contains_complete_verdict_line(
-            b"noise\r\nTINYOS-RESULT/1 fixture=boot ok=false\r\nmore"
+            b"noise\r\nTOS64-RESULT/1 fixture=boot ok=false\r\nmore"
         ));
     }
 

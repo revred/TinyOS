@@ -39,9 +39,9 @@ use crate::pl011::{hex_u64, Mmio, Pl011, Pl011Error};
 use crate::vectors::{VectorSlot, ENTRY_COUNT};
 
 /// Every line a fault report emits carries this prefix, so a capture can be
-/// separated from the boot report (`TINYOS-BOOT/1`) and from the firmware's own
+/// separated from the boot report (`TOS64-BOOT/1`) and from the firmware's own
 /// console output on the same wire.
-pub const TAG: &str = "TINYOS-FAULT/1 ";
+pub const TAG: &str = "TOS64-FAULT/1 ";
 
 /// One captured exception.
 ///

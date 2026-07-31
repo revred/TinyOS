@@ -65,7 +65,7 @@ Specifically **`None`** for:
 
 **Given** `kernel::measure` exactly as `STORY-P1-01-01` left it,
 **when** a host test drives the full measurement path — `Calibration::measure`, `Samples`, `Stopwatch`, `Report::begin`/`metric`/`end` — with the AArch64 cycle source in place of `Tsc`,
-**then** it compiles and produces a well-formed `TINYOS-MEAS/1` envelope whose `arch=aarch64` and `cycle_source=cntvct_el0`, and **no implementation code under `os/src/kernel/`, `os/src/hal/` or `os/src/xtask/` is modified by this Story**. A diff touching the harness itself would falsify the claim this Story exists to test.
+**then** it compiles and produces a well-formed `TOS64-MEAS/1` envelope whose `arch=aarch64` and `cycle_source=cntvct_el0`, and **no implementation code under `os/src/kernel/`, `os/src/hal/` or `os/src/xtask/` is modified by this Story**. A diff touching the harness itself would falsify the claim this Story exists to test.
 
 **And** that exact envelope text parses cleanly through the existing `xtask::timing::parse_stream`, with its `arch` and `cycle_source` fields carried through — the host-side tool is arch-neutral too, or the drop-in is only half real. This is checked by one added case in `xtask`'s existing `#[cfg(test)]` module: a new test is not a modification to the implementation, and the parser's own code stays untouched.
 

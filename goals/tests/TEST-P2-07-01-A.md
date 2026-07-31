@@ -32,7 +32,7 @@ MVP verb set minus one deliberately withheld verb, and the embedded parity `.TCB
 3. Two consecutive boots produce byte-identical transcripts (determinism, acceptance 4 of
    the Story).
 4. **The third signal** (`STORY-P2-07-02`, closing `LE-56`): after the transcript the
-   fixture emits one `TINYOS-SPOOR/1 len=<n> denials=<n>` marker line — the length of the
+   fixture emits one `TOS64-SPOOR/1 len=<n> denials=<n>` marker line — the length of the
    in-guest spoor journal into which a decorator policy stamped every verb denial as a
    kernel `Spoor`, and the batch runner's own denial counter. `check-shell-parity` splits
    the capture at the marker (the transcript before it stays byte-sacred for signal 1),

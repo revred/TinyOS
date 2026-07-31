@@ -6,7 +6,7 @@ Introduced in: [`session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md`](..
 
 ## Description
 
-The Story every other Story in this Feature exists to make possible: `fixture_measure` runs on a Raspberry Pi 5 and emits a `TINYOS-MEAS/2` envelope that the existing `xtask` parser reads.
+The Story every other Story in this Feature exists to make possible: `fixture_measure` runs on a Raspberry Pi 5 and emits a `TOS64-MEAS/2` envelope that the existing `xtask` parser reads.
 
 Two deliverables, one of which is a change to how this project measures everything:
 
@@ -20,7 +20,7 @@ All of `-01` through `-05`. This Story is the collection point, not a new mechan
 
 ## Acceptance criteria
 
-1. **A `TINYOS-MEAS/2` envelope parsed by the existing `xtask` parser with no changes to the parser.** That last clause is the point. It is the final test of the arch-neutrality claim `STORY-P1-01-03` made on the host and never got to check on silicon — and a parser change here would mean the seam was x86-shaped all along, which is a finding worth more than a clean run.
+1. **A `TOS64-MEAS/2` envelope parsed by the existing `xtask` parser with no changes to the parser.** That last clause is the point. It is the final test of the arch-neutrality claim `STORY-P1-01-03` made on the host and never got to check on silicon — and a parser change here would mean the seam was x86-shaped all along, which is a finding worth more than a clean run.
 2. **Batched-iteration measurement, with the batch size recorded and justified per metric.** A batch large enough to beat quantisation and small enough not to hide the tail is a trade-off, and the Report states which way each metric was resolved rather than presenting one N as obvious.
 3. **`LE-24` closes on the batched shape**, demonstrated by `D07` producing a non-zero, host-independent median.
 4. **The Report states what the numbers are *not*.** Single core, no preemption, no address spaces, no `EL0`, no WCET enforcement — this is a hardware tier for the measured paths in this slice, not a hardware tier for `EPIC-P1`'s claims at large. The distinction between "the mechanism was demonstrated" and "the guardrail closed" that every Story in this Epic has drawn applies here too, and most sharply, because these are the first non-Tier-0 numbers and they will be quoted.

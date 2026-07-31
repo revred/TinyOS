@@ -66,7 +66,7 @@ extern "C" fn kernel_main(_start_info_paddr: u64) -> ! {
             // transcript so the golden byte-comparison never sees it —
             // `check-shell-parity` splits the capture at this marker.
             let _ =
-                writeln!(serial, "TINYOS-SPOOR/1 len={} denials={}", JOURNAL.len(), stats.denials);
+                writeln!(serial, "TOS64-SPOOR/1 len={} denials={}", JOURNAL.len(), stats.denials);
             stats.denials == parity::expected_denials()
                 && !stats.truncated
                 && JOURNAL.len() as u32 == stats.denials

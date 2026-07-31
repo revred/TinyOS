@@ -44,7 +44,7 @@ Assurance state: `baseline-debt`
 **when** each space also identity-maps a low kernel-replica region (see the fixture's own doc comment for why, and for what this does and does not claim about the production design) and is loaded into `CR3` for the first time,
 **then**: the two `CR3` values are confirmed distinct; switching into task A really changes `CR3` to task A's value (read back from the register, not assumed); task A's deliberate read of task B's private virtual address — an address wholly absent from task A's own page tables — raises a real `#PF`, captured and contained (task A marked `Finished`, terminated exactly as `fixture_fault`'s victims are); and task B, scheduled afterward under its own distinct `CR3`, runs to completion, proving the fault stayed confined to task A alone.
 
-**And** the fixture reports its verdict through the `TINYOS-RESULT/1` sentinel like every other Tier 0 fixture.
+**And** the fixture reports its verdict through the `TOS64-RESULT/1` sentinel like every other Tier 0 fixture.
 
 ### 6. What this test explicitly does **not** establish
 

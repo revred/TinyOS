@@ -107,7 +107,7 @@ future one could not be introduced, and no lint in this workspace does either.
 - **That SMP is safe.** It removes one of SMP's preconditions. `LE-40`'s "before any SMP work"
   ordering constraint is satisfied for this function and for no other.
 - **Any timing guardrail.** `D13` is selected because shared-memory grant is this domain's subject,
-  not because anything here is measured. No `guardrail-evidence.tsv` row, no `TINYOS-MEAS/2`.
+  not because anything here is measured. No `guardrail-evidence.tsv` row, no `TOS64-MEAS/2`.
 - **That the rest of the kernel fails closed.** The gate in §5 covers one module. Registered as
   `LE-52` rather than silently generalised.
 

@@ -34,9 +34,9 @@ against today's tree. A green `check-assurance-spine` is therefore *not* evidenc
 **Given** the measurement envelope,
 **then** its `BEGIN` line carries `platform=` and `qualification=` in addition to `tier=`, `arch=`,
 `cycle_source=`, `overhead_cycles=` and `cycles_per_us=`, and the version sentinel reads
-`TINYOS-MEAS/2`.
+`TOS64-MEAS/2`.
 
-**And** the host-side parser requires both keys, rejects a stream carrying `TINYOS-MEAS/1` as an
+**And** the host-side parser requires both keys, rejects a stream carrying `TOS64-MEAS/1` as an
 unsupported version rather than parsing it best-effort, and rejects a `qualification=` value that is
 neither the literal `none` nor a well-formed `REPORT-YYYY-MM-DD-NN` id.
 
@@ -49,7 +49,7 @@ from the register is unqualified, never presumed clean.
 
 **Given** a `guardrail-evidence.tsv` row whose guardrail is bound-class (`G04`),
 **then** `check-assurance-spine` refuses it unless the Report named in `evidence_path` carries a
-`TINYOS-BOUND/1` line for that guardrail id, and refuses the claim if:
+`TOS64-BOUND/1` line for that guardrail id, and refuses the claim if:
 
 - its `tier` is `T0` — a Tier 0 number is emulator behaviour (`ADR 0004`, unmodified by `ADR 0005`);
 - its `arch` is `x86_64` — `ADR 0004`'s surviving half, restated in `ADR 0005` decision 1;

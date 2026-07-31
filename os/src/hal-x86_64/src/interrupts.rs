@@ -460,7 +460,7 @@ extern "C" fn unhandled_interrupt_handler() -> ! {
 ///
 /// Versioned like every other machine-read line this system produces, because
 /// a CI step that greps for it is a consumer with a contract.
-pub const UNROUTED_SENTINEL: &str = "TINYOS-UNROUTED/1";
+pub const UNROUTED_SENTINEL: &str = "TOS64-UNROUTED/1";
 
 /// Loads `idt` via `lidt`.
 ///

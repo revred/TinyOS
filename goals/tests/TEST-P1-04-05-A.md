@@ -127,7 +127,7 @@ winning selections immediately, and clause 3's frozen counter breaks. That is th
 
 **Given** any defect in the above,
 **then** the run ends by its own dispatcher-round bound or its own loop ceilings and reports a
-failing `TINYOS-RESULT/1` line, rather than spinning until the harness kills it. Every counter that
+failing `TOS64-RESULT/1` line, rather than spinning until the harness kills it. Every counter that
 could run away has a ceiling a passing run never approaches, and reaching one is reported as a failed
 run rather than as a timeout.
 
@@ -138,7 +138,7 @@ run rather than as a timeout.
 - **Anything about transitive inheritance.** `high` blocks on nothing further.
 - **Any timing guardrail.** No `PERF-Dnn-Gnn` closes here. `D03`/`D05`/`D06` are selected because the
   composition governs dispatch and lock latency, not because this fixture measures either. It reports
-  no `TINYOS-MEAS/2` envelope and files no `guardrail-evidence.tsv` row.
+  no `TOS64-MEAS/2` envelope and files no `guardrail-evidence.tsv` row.
 - **That `LE-45` is explained.** The soak anomaly was a `priority-inversion` fixture returning a
   non-zero exit with **no serial capture** (`LE-46`). This fixture adds Tier 0 coverage of the
   neighbouring composed scenario; it does not recover a diagnostic that was never captured, and an

@@ -35,7 +35,7 @@ The reason that matters more than the count: a wrong belief about what blocks `v
 
 **Given** `exec::pe::parse` — the PE64 load-and-import-validation path `D09` is stated against,
 **when** it runs inside the real `x86_64-tinyos` target binary under QEMU,
-**then** a `TINYOS-MEAS/1` envelope reports its cycle distribution, through the **shared** [`kernel::measure`] harness rather than a second copy of one.
+**then** a `TOS64-MEAS/1` envelope reports its cycle distribution, through the **shared** [`kernel::measure`] harness rather than a second copy of one.
 
 **And** both the accept path and the **denial** path are measured. `D09`'s `G20` is stated against malformed input, and a domain measured only on well-formed input has not been measured on the input that matters — the same reason `fixture_measure` measures `pool_alloc_denied_exhausted` separately from the happy path.
 

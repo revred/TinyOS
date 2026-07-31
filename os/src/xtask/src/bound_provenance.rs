@@ -19,7 +19,7 @@
 //! this module closes.
 //!
 //! **What it does not do.** It reads the machine-readable spine — the guardrail
-//! evidence register and the `TINYOS-BOUND/1` claim lines a Report must carry
+//! evidence register and the `TOS64-BOUND/1` claim lines a Report must carry
 //! to file a bound-class row. It does not read English. A Report may still
 //! write "the worst case is 1.2 µs" in a sentence, and no lint in this project
 //! parses sentences. The boundary is stated here rather than implied, because
@@ -39,11 +39,11 @@ use std::path::Path;
 
 /// The claim-line sentinel a Report must carry to file a bound-class row.
 ///
-/// Deliberately *not* `TINYOS-MEAS`: a measurement envelope is what a fixture
+/// Deliberately *not* `TOS64-MEAS`: a measurement envelope is what a fixture
 /// emitted, and a bound is what a human chose to promote it into. Conflating
 /// the two is precisely the promotion `ADR 0004` forbids, so they do not share
 /// a sentinel.
-pub const BOUND_SENTINEL: &str = "TINYOS-BOUND/1";
+pub const BOUND_SENTINEL: &str = "TOS64-BOUND/1";
 
 /// The guardrail column that states a worst-case bound rather than an observed
 /// statistic.
@@ -206,7 +206,7 @@ pub fn validate_platforms(
     Ok(PlatformIndex { rows })
 }
 
-/// One `TINYOS-BOUND/1` line, parsed.
+/// One `TOS64-BOUND/1` line, parsed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoundClaim {
     /// The `PERF-Dnn-Gnn` id this bound is filed against.
@@ -223,7 +223,7 @@ pub struct BoundClaim {
     pub qualification: String,
 }
 
-/// Parses every `TINYOS-BOUND/1` line in one Report.
+/// Parses every `TOS64-BOUND/1` line in one Report.
 ///
 /// Strict, for [`crate::timing`]'s reason: a sentinel-bearing line is the claim
 /// "this is a bound", and a claim is never parsed best-effort. A malformed one

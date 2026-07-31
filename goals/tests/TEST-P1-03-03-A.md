@@ -75,7 +75,7 @@ tinyos: boot complete, ok=true
 ```text
 first-task: IAT resolved — 7 granted, 198 trapped (198 not allowlisted, 0 denied), trap=0xdead0000
 first-task contained task 0 vector=14 rip=0xdead0000 cr2=0xdead0000
-TINYOS-RESULT/1 fixture=first-task ok=true
+TOS64-RESULT/1 fixture=first-task ok=true
 ```
 
 Compare with `TEST-P1-03-02-A` clause 5's `rip == cr2 == 0x7b9d9e`. Same containment, now for a stated reason — and `cr2` alone is enough to diagnose it.

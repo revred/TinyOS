@@ -21,7 +21,7 @@ The safety net under the net: a TSS with a dedicated IST stack so `#DF` (and a `
 4. **The primary `#PF`/`#GP`/`#UD` path is demonstrably unaffected** — `STORY-P1-02-01`'s fixture still passes, as does every other Tier 0 fixture, since the GDT and TSS are installed on the **real boot path** too, not only in the fixture that tests them.
 5. **`Disposition::of` is not extended and gains no vector-dependent branch.** A double fault is not a disposition question; it gets its own entry symbol and its own audit function, and the audit records the faulting context for *attribution* while never claiming containment in either context.
 
-Note the criterion that changed shape from the draft. The draft asked for "a distinguishable failure exit". What the fixture actually produces on success is a **`Success`** debug-exit code plus a `TINYOS-RESULT/1` line, because reaching the `#DF` handler at all is the property under test; the *failure* being distinguished from is the no-IST triple fault, which produces no debug-exit code at all. Distinguishability was the point; which side of it carries the success code was not.
+Note the criterion that changed shape from the draft. The draft asked for "a distinguishable failure exit". What the fixture actually produces on success is a **`Success`** debug-exit code plus a `TOS64-RESULT/1` line, because reaching the `#DF` handler at all is the property under test; the *failure* being distinguished from is the no-IST triple fault, which produces no debug-exit code at all. Distinguishability was the point; which side of it carries the success code was not.
 
 ## Tests
 

@@ -95,7 +95,7 @@ const MODE: Mode = if cfg!(feature = "fixture-wcet-restart") {
     Mode::Trip
 };
 
-/// The fixture name reported in the `TINYOS-RESULT/1` line.
+/// The fixture name reported in the `TOS64-RESULT/1` line.
 const NAME: &str = match MODE {
     Mode::Restart => "wcet-restart",
     Mode::Degrade => "wcet-degrade",

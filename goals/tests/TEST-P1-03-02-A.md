@@ -68,7 +68,7 @@ wx-seal: write-to-RX vector=14 execute-RW vector=14 (14 = #PF)
 wx-seal: teardown complete, generation=1 staging wiped
 wx-seal contained task 2 vector=14 rip=0x10995f cr2=0x140000000
 wx-seal: stale probe vector=14 (14 = #PF)
-TINYOS-RESULT/1 fixture=wx-seal ok=true
+TOS64-RESULT/1 fixture=wx-seal ok=true
 ```
 
 The two W^X faults are distinguishable in the capture, which is the point: task 0 faults at a `rip` inside kernel text with `cr2` at the RX page (a *write* violation), while task 1 faults with `rip == cr2 == 0x140001000` (an *instruction fetch* violation on the NX page). One mechanism could not produce both shapes.
@@ -95,7 +95,7 @@ first-task: W^X audit of the live image tree, violations=0
 first-task: dispatching the real task into its own CR3
 first-task contained task 0 vector=14 rip=0x7b9d9e cr2=0x7b9d9e
 first-task: captured=true vector=14 rip=0x7b9d9e cr2=0x7b9d9e task_finished=true spoor_journal_len=5
-TINYOS-RESULT/1 fixture=first-task ok=true
+TOS64-RESULT/1 fixture=first-task ok=true
 ```
 
 **What that fault actually was**, established against the image's own bytes rather than inferred. `rip == cr2 == 0x7b9d9e` is an instruction-fetch fault, and at file offset `0x7b9d9e` in `blue-sharc.txe` the bytes are `00 00 47 65 74 53 79 73 74 65 6d 54 69 6d 65 41 73 46 69 6c 65 54 69 6d 65 00` — a zero hint word followed by the ASCII string `GetSystemTimeAsFileTime`. That is an `IMAGE_IMPORT_BY_NAME` record. So `blue-sharc.exe`'s real MSVC CRT startup called `GetSystemTimeAsFileTime` — a Win32 API this shim's nine-call allowlist does not contain — through its **unpatched** import address table, whose thunk still holds the RVA of that record; the indirect call took the RVA as an absolute address and fetched from a string. The address was *present* (it falls inside the kernel's own mapped low memory) but **NX**, so the fetch faulted and the task was contained.

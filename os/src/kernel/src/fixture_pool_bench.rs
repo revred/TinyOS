@@ -21,7 +21,7 @@
 //!   of trusting the caller's index arithmetic;
 //! - percentiles come from the one shared, host-unit-tested implementation
 //!   rather than a second copy that could drift from it;
-//! - output is the versioned `TINYOS-MEAS/2` envelope that
+//! - output is the versioned `TOS64-MEAS/2` envelope that
 //!   `cargo run -p xtask -- measure` parses and fails closed on, replacing
 //!   prose lines that only a human could read — which is what made this
 //!   fixture's numbers reachable *only* by invoking QEMU by hand with

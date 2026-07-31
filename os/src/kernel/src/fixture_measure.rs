@@ -10,7 +10,7 @@
 //! `RDTSC` — `hal_x86_64::tsc::Tsc` does), the buffers are
 //! [`kernel::measure::Samples`], the percentiles are
 //! [`kernel::measure::Samples::summarize`], and the output is the versioned
-//! `TINYOS-MEAS/2` envelope `xtask measure` parses. The fixture's own code is
+//! `TOS64-MEAS/2` envelope `xtask measure` parses. The fixture's own code is
 //! therefore *only* the three workloads plus their self-consistency checks —
 //! which is the point of the Story: a new domain becomes a phase function,
 //! not a new copy of a measurement harness.

@@ -87,7 +87,7 @@ enum Mode {
 const MODE: Mode =
     if cfg!(feature = "fixture-actuation-overrun") { Mode::Overrun } else { Mode::Clean };
 
-/// The fixture name reported in the `TINYOS-RESULT/1` line.
+/// The fixture name reported in the `TOS64-RESULT/1` line.
 const NAME: &str = match MODE {
     Mode::Clean => "actuation",
     Mode::Overrun => "actuation-overrun",
@@ -621,7 +621,7 @@ extern "C" fn background_task() -> ! {
 /// dispatcher would not be a safe state.
 ///
 /// The exit code cannot distinguish a correct trip from a broken one — both are
-/// failures — so the `TINYOS-RESULT/1` line is the only thing that can, and
+/// failures — so the `TOS64-RESULT/1` line is the only thing that can, and
 /// every clause below is what makes it able to.
 fn enter_safe_state(task: TaskId, attributed: u32) -> ! {
     // SAFETY: this function never returns, so re-initializing COM1 cannot race

@@ -62,7 +62,7 @@ started**; this Story is startable and finishable without it, and cannot make th
 
 1. **The path exists and is measured.** 1,000 sampled decision-to-actuation iterations, each arming an
    activation, computing a command and emitting it through `hal::actuation::OutputLine`, with
-   p50/p99/p99.9/max recorded in a `TINYOS-MEAS/2` envelope carrying `tier`, `platform` and
+   p50/p99/p99.9/max recorded in a `TOS64-MEAS/2` envelope carrying `tier`, `platform` and
    `qualification`. Every sample is a command that actually reached the line, on a write count the
    fixture keeps **independently of the port's own bookkeeping**.
 

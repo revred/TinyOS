@@ -91,7 +91,7 @@ The two findings are one defect in two grammars, so they are fixed and tested to
   ordering constraint is satisfied here and nowhere else.
 - **No performance guardrail closes.** `D13` is selected because shared-memory grant is that domain's
   subject, not because this Story measures anything. No `guardrail-evidence.tsv` row, no
-  `TINYOS-MEAS/2` envelope.
+  `TOS64-MEAS/2` envelope.
 - **No Tier 0 evidence.** Deliberate: no fixture drives `grant`, and the claim is the *absence* of a
   panic. A host test that provokes the panic and watches it become an error is stronger evidence than
   a boot that never reaches the code.

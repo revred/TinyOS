@@ -16,7 +16,7 @@ This Story builds the four machines. It writes no kernel code and closes no perf
 
 | Row | The prose rule today | The machine this Story builds |
 |---|---|---|
-| `LE-33` | `ADR 0004` forbids promoting an x86_64 or Tier 0 measurement into a `G04`-class bound; `ADR 0005` adds ARM64 platforms holding no secure-world qualification record | `TINYOS-MEAS/2` carries platform identity and a qualification-record reference; a register of platforms and their qualification state; a bound-provenance gate inside `check-assurance-spine` |
+| `LE-33` | `ADR 0004` forbids promoting an x86_64 or Tier 0 measurement into a `G04`-class bound; `ADR 0005` adds ARM64 platforms holding no secure-world qualification record | `TOS64-MEAS/2` carries platform identity and a qualification-record reference; a register of platforms and their qualification state; a bound-provenance gate inside `check-assurance-spine` |
 | `LE-35` | Handover 25 refused to record `G11` evidence for domains whose subsystem does not exist. The rule that implies was never written down | The rule written into [`README.md`](README.md), plus `open-debt.tsv` and a gate: selecting a `design`/`stand-in-only`/`specified`/`unbuilt` domain requires initialising it as stated open debt |
 | `LE-36` | `CONCURRENT_SESSIONS` rule 8 asks a session to validate a hand-edited spine TSV before its next tool call, and names the instrument | `xtask check-spine-files` — the named instrument, fast enough that skipping it has no excuse |
 | `LE-44` | A Feature's Stories table and a Story's own `Status:` header can disagree indefinitely | `check-assurance-spine` cross-checks every Feature Stories-table row against the referenced Story's header |
@@ -28,13 +28,13 @@ This Story builds the four machines. It writes no kernel code and closes no perf
 
 ## Acceptance criteria
 
-1. **A `G04`-class bound cannot be filed from a disqualified source (`LE-33`).** The `TINYOS-MEAS`
+1. **A `G04`-class bound cannot be filed from a disqualified source (`LE-33`).** The `TOS64-MEAS`
    envelope carries `platform=` and `qualification=` alongside `tier=` and `arch=`, bumped to
-   `TINYOS-MEAS/2` because adding required keys is a breaking format change and this parser rejects
+   `TOS64-MEAS/2` because adding required keys is a breaking format change and this parser rejects
    versions it does not know rather than best-effort parsing them. `goals/assurance/qualified-platforms.tsv`
    records every measuring platform and whether it holds a qualification record. `check-assurance-spine`
    refuses a `guardrail-evidence.tsv` row for a bound-class guardrail unless its Report carries a
-   well-formed `TINYOS-BOUND/1` claim line, and refuses that claim when its tier is `T0`, its
+   well-formed `TOS64-BOUND/1` claim line, and refuses that claim when its tier is `T0`, its
    architecture is `x86_64`, or its platform is not `qualified` in the register.
 2. **The gate is shown to detect, not merely to return zero (`ADR 0005`'s trap, Handover 38A trap 7).**
    No `G04` row exists in the evidence register today, so the gate is vacuously satisfied against the

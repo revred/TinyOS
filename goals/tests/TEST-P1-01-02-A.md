@@ -26,7 +26,7 @@ Two inputs from later work are folded in here rather than deferred, both because
 ### 1. A pass/fail bit that survives having no QEMU under it
 
 **Given** a measurement fixture,
-**then** it emits exactly one sentinel result line on the same UART as the envelope — `TINYOS-RESULT/1 fixture=<name> ok=<true|false>` — carrying its own self-consistency verdict.
+**then** it emits exactly one sentinel result line on the same UART as the envelope — `TOS64-RESULT/1 fixture=<name> ok=<true|false>` — carrying its own self-consistency verdict.
 
 **And** the host side parses that line strictly: no result line, more than one, an unknown key, a missing key, or an `ok=` value that is not exactly `true` or `false` is a **harness error**, never a pass. A run whose evidence does not say whether it passed is not evidence.
 
@@ -98,7 +98,7 @@ Host unit tests (`#[cfg(test)]` in `os/src/xtask/src/timing.rs`) for the result-
 
 ## Implementation location
 
-- `os/src/kernel/src/measure.rs` — the `TINYOS-RESULT/1` emitter.
+- `os/src/kernel/src/measure.rs` — the `TOS64-RESULT/1` emitter.
 - `os/src/kernel/src/fixture_measure.rs`, `os/src/kernel/src/fixture_pool_bench.rs` — emit it.
 - `os/src/xtask/src/timing.rs` — result-line parser, baseline model and parser, median/tolerance comparison.
 - `os/src/xtask/src/main.rs` — `check-timing-regression`, and `--profile=release` for `measure`.

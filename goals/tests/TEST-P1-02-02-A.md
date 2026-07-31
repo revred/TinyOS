@@ -77,7 +77,7 @@ This is the same discipline `idt.rs` and `paging.rs` already apply: a bit-layout
 
 **And** the frame's saved `RSP` is reported and checked against the destroyed value, so the evidence shows the fault really did originate from the broken stack rather than from somewhere incidental.
 
-**And** the fixture reports over COM1 and exits through `isa-debug-exit`, so its verdict travels on `STORY-P1-01-02`'s `TINYOS-RESULT/1` line like every other fixture's.
+**And** the fixture reports over COM1 and exits through `isa-debug-exit`, so its verdict travels on `STORY-P1-01-02`'s `TOS64-RESULT/1` line like every other fixture's.
 
 **And** the *contrast* is recorded, not assumed: what this same fixture does with the IST removed (a triple fault — QEMU resets and never reaches the debug-exit port, so the harness sees no kernel verdict at all) is observed and written into the Report. "It passes now" is not evidence that the IST is what made it pass.
 

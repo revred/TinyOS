@@ -6,7 +6,7 @@
 //! divergence or hide one that matters — everything else is exact.
 
 /// The parsed spoor trailer (`LE-56`): the fixture's post-transcript
-/// `TINYOS-SPOOR/1 len=<n> denials=<n>` marker line, the third parity signal.
+/// `TOS64-SPOOR/1 len=<n> denials=<n>` marker line, the third parity signal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SpoorTrailer {
     /// Spoors the in-guest denial journal holds after the run.
@@ -24,7 +24,7 @@ impl SpoorTrailer {
             Ok(self.len)
         } else {
             Err(format!(
-                "spoor journal does not corroborate the denial count (TINYOS-SPOOR/1 len={} denials={})",
+                "spoor journal does not corroborate the denial count (TOS64-SPOOR/1 len={} denials={})",
                 self.len, self.denials
             ))
         }
@@ -32,9 +32,9 @@ impl SpoorTrailer {
 }
 
 /// The marker that starts the fixture's spoor trailer line. Versioned like
-/// `TINYOS-MEAS/2`: a format change bumps the suffix and fails old parsers
+/// `TOS64-MEAS/2`: a format change bumps the suffix and fails old parsers
 /// closed instead of silently misreading them.
-const SPOOR_MARKER: &str = "TINYOS-SPOOR/1";
+const SPOOR_MARKER: &str = "TOS64-SPOOR/1";
 
 /// Split a serial capture at the spoor trailer: everything before the marker
 /// line is the transcript (byte-untouched, for the sacred golden comparison);
@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn splitter_separates_transcript_from_a_wellformed_trailer() {
-        let capture = "line one\nline two\nTINYOS-SPOOR/1 len=1 denials=1\n";
+        let capture = "line one\nline two\nTOS64-SPOOR/1 len=1 denials=1\n";
         let (transcript, trailer) = split_capture(capture).expect("well-formed capture splits");
         assert_eq!(transcript, "line one\nline two\n", "transcript bytes untouched");
         assert_eq!(trailer.len, 1);
@@ -134,7 +134,7 @@ mod tests {
 
     #[test]
     fn splitter_handles_crlf_captures() {
-        let capture = "a\r\nTINYOS-SPOOR/1 len=2 denials=2\r\n";
+        let capture = "a\r\nTOS64-SPOOR/1 len=2 denials=2\r\n";
         let (transcript, trailer) = split_capture(capture).expect("CRLF capture splits");
         assert_eq!(transcript, "a\r\n");
         assert_eq!(trailer.len, 2);
@@ -154,11 +154,11 @@ mod tests {
     #[test]
     fn a_malformed_trailer_fails_closed() {
         for capture in [
-            "a\nTINYOS-SPOOR/1\n",
-            "a\nTINYOS-SPOOR/1 len=x denials=1\n",
-            "a\nTINYOS-SPOOR/1 len=1\n",
-            "a\nTINYOS-SPOOR/1 denials=1 len=1\n",
-            "a\nTINYOS-SPOOR/1 len=1 denials=\n",
+            "a\nTOS64-SPOOR/1\n",
+            "a\nTOS64-SPOOR/1 len=x denials=1\n",
+            "a\nTOS64-SPOOR/1 len=1\n",
+            "a\nTOS64-SPOOR/1 denials=1 len=1\n",
+            "a\nTOS64-SPOOR/1 len=1 denials=\n",
         ] {
             let error = split_capture(capture).unwrap_err();
             assert!(error.contains("malformed"), "capture {capture:?}: {error}");
@@ -169,7 +169,7 @@ mod tests {
     // string (e.g. an ECHO of it) is not a trailer.
     #[test]
     fn a_mid_line_marker_is_not_a_trailer() {
-        let error = split_capture("ECHO TINYOS-SPOOR/1 len=1 denials=1\n").unwrap_err();
+        let error = split_capture("ECHO TOS64-SPOOR/1 len=1 denials=1\n").unwrap_err();
         assert!(error.contains("missing"), "{error}");
     }
 
@@ -177,12 +177,12 @@ mod tests {
     #[test]
     fn a_count_mismatch_fails_corroboration() {
         let (_, trailer) =
-            split_capture("a\nTINYOS-SPOOR/1 len=2 denials=1\n").expect("well-formed");
+            split_capture("a\nTOS64-SPOOR/1 len=2 denials=1\n").expect("well-formed");
         let error = trailer.corroborated().unwrap_err();
         assert!(error.contains("does not corroborate"), "{error}");
         assert!(error.contains("len=2") && error.contains("denials=1"), "{error}");
 
-        let (_, good) = split_capture("a\nTINYOS-SPOOR/1 len=1 denials=1\n").expect("well-formed");
+        let (_, good) = split_capture("a\nTOS64-SPOOR/1 len=1 denials=1\n").expect("well-formed");
         assert_eq!(good.corroborated().expect("equal counts corroborate"), 1);
     }
 

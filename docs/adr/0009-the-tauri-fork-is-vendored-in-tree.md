@@ -29,7 +29,7 @@ source, which the repository can simply carry.
    hashes cited in `REPORT-2026-07-29-03/-04` (`65089e8…1bf5882`) resolve there.
 3. **The health metric survives the loss of in-repo upstream history** two ways, per
    [`external/README.md`](../../external/README.md): the committed divergence record
-   `external/tauri/TINYOS-PATCH-vs-tauri-runtime-wry-v2.11.4.diff` (16 files, +224/−19 —
+   `external/tauri/TOS64-PATCH-vs-tauri-runtime-wry-v2.11.4.diff` (16 files, +224/−19 —
    regenerated in the same commit as any `crates/` change, a stale patch file being exactly
    the drift the metric catches), and re-derivation against the baseline tag on the GitHub
    fork or upstream.

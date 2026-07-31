@@ -47,7 +47,7 @@ enum XtaskExit {
     BoardSpokeWithoutVerdict = 4,
 }
 
-/// A fixture that emits a `TINYOS-MEAS/2` envelope, identified by what has
+/// A fixture that emits a `TOS64-MEAS/2` envelope, identified by what has
 /// to be built to run it.
 ///
 /// Previously this was just a Cargo feature name, because every measurable
@@ -255,7 +255,7 @@ const FIXTURES: &[Fixture] = &[
         feature: Some("fixture-measure"),
         expects_failure: false,
         owning_test: "TEST-P1-01-01-A",
-        summary: "Measurement harness emits a parseable TINYOS-MEAS/2 envelope",
+        summary: "Measurement harness emits a parseable TOS64-MEAS/2 envelope",
     },
     Fixture {
         name: "fault",
@@ -425,7 +425,7 @@ const FIXTURES: &[Fixture] = &[
     // `actuation-overrun`'s correct outcome is exit 1: the decision overruns
     // its declared budget, the system enters its declared safe state, and no
     // command reaches the line. Its CI step expects failure, as `broken-boot`,
-    // `idt-apic-unrouted` and `wcet-trip` already do — and its `TINYOS-RESULT/1`
+    // `idt-apic-unrouted` and `wcet-trip` already do — and its `TOS64-RESULT/1`
     // line is what distinguishes a correct trip from a broken one, since the
     // exit code cannot.
     Fixture {
@@ -707,7 +707,7 @@ fn main() -> ExitCode {
             match result {
                 Ok((lines, corroborated)) => {
                     println!(
-                        "shell-parity: transcript matches golden ({lines} lines), the fixture's in-guest assertions passed, and the spoor journal corroborates the denial count (TINYOS-SPOOR/1 len={corroborated} denials={corroborated})"
+                        "shell-parity: transcript matches golden ({lines} lines), the fixture's in-guest assertions passed, and the spoor journal corroborates the denial count (TOS64-SPOOR/1 len={corroborated} denials={corroborated})"
                     );
                     ExitCode::SUCCESS
                 }
@@ -1892,7 +1892,7 @@ mod tests {
         // indistinguishable from one that passed.
         //
         // `wcet-trip` closed that exit-code hole by asserting its own
-        // `TINYOS-RESULT/1` line as well as the exit code; `actuation-overrun`
+        // `TOS64-RESULT/1` line as well as the exit code; `actuation-overrun`
         // (`STORY-P1-06-01`) is held to the same standard by its own CI step,
         // and its `run` emits a *failing* result line on every path that
         // reaches the safe state for the wrong reason.

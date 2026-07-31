@@ -15,9 +15,9 @@ Retire the assurance debt in `xtask`'s own tooling, and close the exit-code hole
 
 ## Acceptance criteria (final)
 
-1. **A panicking TinyOS binary says so on the UART before it stops.** **Met**: `hal_x86_64::qemu_exit::panic_report` emits `TINYOS-PANIC/1 message=… file=… line=…` and then `exit_qemu(Failure)`. All **eleven** `#[panic_handler]`s in the workspace were byte-identical bare `exit_qemu` calls and now route through it, so the behaviour is shared rather than copied. Every write is `let _ =`: a UART that will not accept bytes must not be able to turn a panic into a hang.
+1. **A panicking TinyOS binary says so on the UART before it stops.** **Met**: `hal_x86_64::qemu_exit::panic_report` emits `TOS64-PANIC/1 message=… file=… line=…` and then `exit_qemu(Failure)`. All **eleven** `#[panic_handler]`s in the workspace were byte-identical bare `exit_qemu` calls and now route through it, so the behaviour is shared rather than copied. Every write is `let _ =`: a UART that will not accept bytes must not be able to turn a panic into a hang.
 
-2. **An unrouted interrupt is diagnosable.** **Met**: `hal_x86_64::interrupts::unhandled_interrupt_handler` emits `TINYOS-UNROUTED/1 fail_closed=true` before the same fail-closed stop. The containment action is unchanged; only a diagnostic was added.
+2. **An unrouted interrupt is diagnosable.** **Met**: `hal_x86_64::interrupts::unhandled_interrupt_handler` emits `TOS64-UNROUTED/1 fail_closed=true` before the same fail-closed stop. The containment action is unchanged; only a diagnostic was added.
 
 3. **Both fixtures' CI steps assert on content.** **Met**: `broken-boot` greps for its own deliberate panic message and `idt-apic-unrouted` for the fail-closed sentinel, each alongside the exit-code check — the shape `wcet-trip` and `os-runaway` already use.
 

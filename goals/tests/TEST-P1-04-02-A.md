@@ -80,7 +80,7 @@ The failure mode this clause exists to prevent is a fixture that asserts the dis
 fixture-wcet-restart: offender entries=3 acc_at_enforce=2265348 acc_on_reentry=1574987 restarts=3 exhausted=false
 fixture-wcet-restart: ticks_attributed=[15, 40, 0] unattributed=0 unknown=0 preemptions=9
 fixture-wcet-restart: spoors overrun=3 restart=3 degrade=0 terminate=0
-TINYOS-RESULT/1 fixture=wcet-restart ok=true
+TOS64-RESULT/1 fixture=wcet-restart ok=true
 ```
 
 `acc_on_reentry=1574987` is the claim: the accumulator is zeroed at the entry point and nowhere else, so a re-entry that found 1.57 million counts there is a re-entry that threw away 1.57 million counts of work. `ticks_attributed[0]=15` against three enforcements is the other half — exactly `3 × (budget + 1)`, which is the only observable consequence of the kernel having reset the budget window each time. **That second assertion was added because a deliberate falsification showed the fixture passing without it**; see clause 10.
@@ -91,7 +91,7 @@ TINYOS-RESULT/1 fixture=wcet-restart ok=true
 fixture-wcet-degrade: competitor counter=20000000 at_enforce=0 (target 20000000)
 fixture-wcet-degrade: dispatch order=[1, 0, 1, 0, 1, 2, 1, 2, 1, 2, 1, 2, ... 1, 2]
 fixture-wcet-degrade: spoors overrun=1 restart=0 degrade=1 terminate=0
-TINYOS-RESULT/1 fixture=wcet-degrade ok=true
+TOS64-RESULT/1 fixture=wcet-degrade ok=true
 ```
 
 Slot 0 is the offender (priority 20 → floor 5), slot 2 the competitor (priority 15), `Ready` from before the overrun until after it. Before the degrade the competitor appears **nowhere** in the dispatch order and its counter is exactly `0`; after it, the offender appears nowhere and the competitor takes every selection it used to lose. That is a task losing a selection it would previously have won, not a priority field changing value.
@@ -101,7 +101,7 @@ Slot 0 is the offender (priority 20 → floor 5), slot 2 the competitor (priorit
 ```text
 fixture-wcet-trip: TRIP task=0 attributed_ticks=5 budget=4 (bound 5) tick=12 within_bound=true task_finished=true
 fixture-wcet-trip: entering declared safe state — fail-closed stop is this fixture's pass condition
-TINYOS-RESULT/1 fixture=wcet-trip ok=true
+TOS64-RESULT/1 fixture=wcet-trip ok=true
 ```
 
 (xtask exit code 1.)

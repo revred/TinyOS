@@ -17,7 +17,7 @@ beside the fixture — the `shell` crate stays `no_std`, kernel-free) journals e
 denial as a `Spoor` `(Category::Shell, Actor::Session, Action::VerbDenied, Outcome::Failed,
 target = the denied verb)` at the same `VerbPolicy::allows` decision point every request
 passes. The `shell-batch` fixture asserts `spoor_journal_len == denials ==
-expected_denials()` in-guest, emits a `TINYOS-SPOOR/1 len=<n> denials=<n>` trailer *after*
+expected_denials()` in-guest, emits a `TOS64-SPOOR/1 len=<n> denials=<n>` trailer *after*
 the transcript, and `check-shell-parity` splits the capture at that marker: the transcript
 before it stays byte-sacred against the golden; the trailer parses into a **third signal**
 (missing/malformed fails closed). The register-decided `SPOOR` verb renders the journal

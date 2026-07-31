@@ -30,7 +30,7 @@ That reframes the work, and in a direction worth having: **a TinyOS kernel that 
 
 **Given** any TinyOS binary built for the target,
 **when** its `panic_handler` runs,
-**then** it emits exactly one sentinel line on COM1 — `TINYOS-PANIC/1 ` followed by the panic location where one is available — **before** signalling `exit_qemu(QemuExitCode::Failure)`.
+**then** it emits exactly one sentinel line on COM1 — `TOS64-PANIC/1 ` followed by the panic location where one is available — **before** signalling `exit_qemu(QemuExitCode::Failure)`.
 
 **And** the handler remains divergent, fail-closed and allocation-free: it must not take a lock, must not call back into the scheduler, and must reach the exit port even if serial output fails. A panic handler that can itself fail to terminate is worse than a silent one.
 
@@ -39,7 +39,7 @@ That reframes the work, and in a direction worth having: **a TinyOS kernel that 
 ### 2. An unrouted interrupt is diagnosable
 
 **Given** the shared fail-closed default `hal_x86_64::interrupts::unhandled_interrupt_handler`,
-**then** it emits exactly one sentinel line — `TINYOS-UNROUTED/1 fail_closed=true` — before `exit_qemu(QemuExitCode::Failure)`.
+**then** it emits exactly one sentinel line — `TOS64-UNROUTED/1 fail_closed=true` — before `exit_qemu(QemuExitCode::Failure)`.
 
 **And** the vector is deliberately **not** named. The handler is one shared stub installed for every unrouted vector and receives no vector argument; naming it would require per-vector trampolines, which is a larger change than this Story's charge and is recorded as a loose end rather than smuggled in.
 

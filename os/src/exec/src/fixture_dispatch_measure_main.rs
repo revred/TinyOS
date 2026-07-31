@@ -35,7 +35,7 @@
 //! where it belongs: it is this fixture's own setup, not part of the
 //! dispatch round under test.
 //!
-//! Reports through the same `TINYOS-MEAS/2` envelope and `TINYOS-RESULT/1`
+//! Reports through the same `TOS64-MEAS/2` envelope and `TOS64-RESULT/1`
 //! sentinel every other measured fixture uses, so `xtask measure` and the
 //! `check-timing-regression` gate consume it with no special case.
 

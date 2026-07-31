@@ -29,14 +29,14 @@ use crate::pl011::{hex_u64, Mmio, Pl011, Pl011Error};
 
 /// Every line the stub emits carries this prefix, so a capture can be
 /// separated from the firmware's own console output on the same wire.
-const TAG: &str = "TINYOS-BOOT/1 ";
+const TAG: &str = "TOS64-BOOT/1 ";
 
 /// The known byte sequence `TEST-P1-07-01-A` clause 4 looks for in the capture.
 ///
 /// Fixed, so evidence is diffed rather than eyeballed, and containing no bare
 /// line feed so that framing (see [`crate::pl011::framed`]) cannot make the
 /// bytes on the wire depend on which write method the stub happened to call.
-pub const KNOWN_BYTE_SEQUENCE: &[u8] = b"TINYOS-BOOT/1 READY 0123456789ABCDEF\r\n";
+pub const KNOWN_BYTE_SEQUENCE: &[u8] = b"TOS64-BOOT/1 READY 0123456789ABCDEF\r\n";
 
 /// What the firmware left in the first four argument registers, plus the
 /// exception level it handed over at.
@@ -135,13 +135,13 @@ pub fn report_ready<M: Mmio>(uart: &Pl011<M>) -> Result<(), Pl011Error> {
 /// The fixture name the default boot image reports in its verdict line.
 pub const BOOT_FIXTURE_NAME: &str = "boot";
 
-/// Writes the UART pass/fail verdict — `STORY-P1-01-02`'s `TINYOS-RESULT/1`
+/// Writes the UART pass/fail verdict — `STORY-P1-01-02`'s `TOS64-RESULT/1`
 /// protocol, byte-compatible with what every Tier 0 fixture emits, because
 /// `STORY-P1-07-05`'s run path drives its exit code with the parser that
 /// already exists and no new protocol is invented for hardware. The framer
 /// owns the CR; this line supplies LF only, like every other report here.
 pub fn report_result<M: Mmio>(uart: &Pl011<M>, fixture: &str, ok: bool) -> Result<(), Pl011Error> {
-    uart.write_str("TINYOS-RESULT/1 fixture=")?;
+    uart.write_str("TOS64-RESULT/1 fixture=")?;
     uart.write_str(fixture)?;
     uart.write_str(" ok=")?;
     uart.write_str(if ok { "true\n" } else { "false\n" })
@@ -441,7 +441,7 @@ mod tests {
         // carries no information, so it does not count as "anything else".
         let body = captured.strip_prefix("\r\n").expect("a leading line break");
         assert!(
-            body.starts_with("TINYOS-BOOT/1 current_el="),
+            body.starts_with("TOS64-BOOT/1 current_el="),
             "the level must lead the capture, got: {body:?}"
         );
     }
@@ -551,8 +551,8 @@ mod tests {
         let uart = Pl011::new(&wire);
         report_ready(&uart).expect("ready");
         let captured = wire.captured();
-        assert!(captured.ends_with("TINYOS-BOOT/1 READY 0123456789ABCDEF\r\n"));
-        assert_eq!(KNOWN_BYTE_SEQUENCE, b"TINYOS-BOOT/1 READY 0123456789ABCDEF\r\n");
+        assert!(captured.ends_with("TOS64-BOOT/1 READY 0123456789ABCDEF\r\n"));
+        assert_eq!(KNOWN_BYTE_SEQUENCE, b"TOS64-BOOT/1 READY 0123456789ABCDEF\r\n");
     }
 
     #[test]
@@ -588,7 +588,7 @@ mod tests {
     }
 
     // `STORY-P1-07-05` clause 2: the host run path's exit code is driven by
-    // the *existing* UART pass/fail protocol — `TINYOS-RESULT/1`, exactly as
+    // the *existing* UART pass/fail protocol — `TOS64-RESULT/1`, exactly as
     // `STORY-P1-01-02` shipped it and exactly as `xtask`'s `parse_result`
     // consumes it. No new protocol is invented for hardware, so the line this
     // board emits must be byte-compatible with the Tier 0 one.
@@ -599,7 +599,7 @@ mod tests {
         report_result(&uart, BOOT_FIXTURE_NAME, true).expect("ready");
         // The framer owns the CR (see the no-doubled-CR test above), so the
         // wire carries CRLF while the source supplies LF only.
-        assert_eq!(wire.captured(), "TINYOS-RESULT/1 fixture=boot ok=true\r\n");
+        assert_eq!(wire.captured(), "TOS64-RESULT/1 fixture=boot ok=true\r\n");
     }
 
     #[test]
@@ -610,7 +610,7 @@ mod tests {
         let wire = Wire::new();
         let uart = Pl011::new(&wire);
         report_result(&uart, BOOT_FIXTURE_NAME, false).expect("ready");
-        assert_eq!(wire.captured(), "TINYOS-RESULT/1 fixture=boot ok=false\r\n");
+        assert_eq!(wire.captured(), "TOS64-RESULT/1 fixture=boot ok=false\r\n");
     }
 
     #[test]

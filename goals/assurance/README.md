@@ -77,7 +77,7 @@ Added by [`STORY-P0-01-07`](../stories/STORY-P0-01-07.md), closing `LE-33`. The 
 
 `G04` is the bound-class column — *"observed maximum and WCET bound"* — and it is the only one that asserts what cannot be exceeded rather than describing what was seen. Filing a `G04` row therefore requires more than a measurement:
 
-1. The Report must carry a `TINYOS-BOUND/1` claim line for that guardrail id, naming its `tier`, `arch`, `platform` and `qualification` — the same provenance the `TINYOS-MEAS/2` envelope now emits at the moment of measurement.
+1. The Report must carry a `TOS64-BOUND/1` claim line for that guardrail id, naming its `tier`, `arch`, `platform` and `qualification` — the same provenance the `TOS64-MEAS/2` envelope now emits at the moment of measurement.
 2. The claim is **refused** if its tier is `T0` (an emulator), its architecture is `x86_64` (SMIs are outside the OS's authority by design), or its platform is not `qualified` in [`qualified-platforms.tsv`](qualified-platforms.tsv).
 3. **A platform absent from that register is unqualified, never presumed clean.** Silence is not evidence. As of writing, the count of qualified platforms is **zero — the Raspberry Pi 5 included.**
 
@@ -113,7 +113,7 @@ All 23 currently functional-Verified Phase-0 Stories are `baseline-debt`; the tw
 - malformed, duplicate, or unknown `Dnn` and `SEC-nn` references;
 - a guardrail-evidence row whose id is malformed, whose domain disagrees with its own id, whose Story has no contract row, whose Story does not select the domain it claims evidence in, or that duplicates an existing `(guardrail, story)` pair;
 - a domain selection whose subsystem does not exist and which is not initialised as stated open debt, a debt row for an implemented domain, a debt row disagreeing with the catalogue's readiness, or a `(Story, domain)` pair that is both open debt and evidenced (`LE-35`);
-- a `G04` bound-class evidence row whose Report carries no `TINYOS-BOUND/1` claim, or whose claim is sourced from Tier 0, from `x86_64`, or from a platform holding no secure-world qualification record (`LE-33`, `ADR 0004` + `ADR 0005`);
+- a `G04` bound-class evidence row whose Report carries no `TOS64-BOUND/1` claim, or whose claim is sourced from Tier 0, from `x86_64`, or from a platform holding no secure-world qualification record (`LE-33`, `ADR 0004` + `ADR 0005`);
 - a malformed platform register row, a `qualified` platform citing a Report that does not exist, or an `unqualified` one citing a qualification record at all;
 - **a Feature Stories-table row that disagrees with the referenced Story's own `Status:` header** — the state word compared exactly, and `criterion N` / `criteria N and M` tokens compared as a set (`LE-44`);
 - **a shipped crate that could allocate** — every crate inside the image must declare `no_std` and must not declare `#[global_allocator]`, `extern crate alloc`, or `use alloc::` outside `#[cfg(test)]`. This is the evidence behind every `PERF-Dnn-G11` row: the guardrail asks for zero heap allocations per steady-state work unit, and this system has no heap at all, which is stronger and compiler-enforced. The gate exists so that adding an allocator withdraws the evidence loudly instead of invalidating it silently;

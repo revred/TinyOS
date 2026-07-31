@@ -41,7 +41,7 @@
 ///   only property the whole path is measured against.
 pub trait OutputLine {
     /// Which line this is, as it appears in evidence — the same role
-    /// `hal::time::CycleSource`'s backend name plays in a `TINYOS-MEAS/2`
+    /// `hal::time::CycleSource`'s backend name plays in a `TOS64-MEAS/2`
     /// envelope. An unnamed output boundary produces measurements nobody can
     /// attribute to a device.
     const NAME: &'static str;

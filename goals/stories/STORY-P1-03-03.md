@@ -25,7 +25,7 @@ Closes the three gaps [`REPORT-2026-07-28-01`](../reports/REPORT-2026-07-28-01.m
 3. **A denied call is contained at a named address.** An import the allowlist rejects, or the policy denies, faults with `CR2` equal to `CAPABILITY_TRAP_VIRT` — contained by the unmodified `kernel::fault` policy, and diagnosable as a refused capability rather than as a wild jump.
 4. **Patching precedes sealing, and the IAT is read-only to the task.** The patch is applied through the loader's identity view before `seal_kernel_alias` closes it, so the task can never rewrite its own IAT to grant itself capabilities.
 5. **The real boot path runs a real task.** The `os` binary performs the same ACPI/PCI discovery with the same success gates, brings up W^X memory protection, loads and schedules the embedded workload, and reports what it returned — all under `G-DX-8`'s image-size ceiling, which now measures `os` rather than `kernel`.
-6. **The `D04` delta is measured.** Two dispatch rounds through the production `run_once_in_space` differing only in whether the selected task's address space is already loaded, reported through the standard `TINYOS-MEAS/1` envelope, with the difference between them stated as what isolation costs per scheduling decision.
+6. **The `D04` delta is measured.** Two dispatch rounds through the production `run_once_in_space` differing only in whether the selected task's address space is already loaded, reported through the standard `TOS64-MEAS/1` envelope, with the difference between them stated as what isolation costs per scheduling decision.
 
 ## Tests
 
