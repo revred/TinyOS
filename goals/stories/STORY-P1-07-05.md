@@ -50,6 +50,15 @@ fixture, port, baud, operator-supplied board revision and firmware version
 ("unrecorded" rather than omitted), image and capture SHA-256, capture end
 reason, outcome, exit code, timestamp — beside the raw capture.
 
+## The board session, when hardware is in hand
+
+The operator's exact steps — kit checklist, adapter loopback test, image build and
+SD placement, the capture command, the five exit codes with their triage order, and
+the evidence/status/claims discipline after a pass — are recorded in
+[`docs/pi5-board-session-runbook.md`](../../docs/pi5-board-session-runbook.md)
+(added 2026-07-31 on the owner's request). One successful run of that runbook closes
+this Story's criteria 2 and 3, `-01`'s criteria 3 and 4, and `-02`'s vector half.
+
 ## Tests
 
 [`TEST-P1-07-05-A`](../tests/TEST-P1-07-05-A.md) — written before implementation, per the TDD mandate.
