@@ -487,7 +487,7 @@ const SUBCOMMANDS: &[Subcommand] = &[
     },
     Subcommand {
         name: "emit-dashboard",
-        summary: "Print goals/index.html's generated stat-tile block from live spine data",
+        summary: "Print goals/index.html's generated blocks (overall progress + stat tiles) from live spine data",
     },
     Subcommand {
         name: "check-spine-files",
@@ -763,6 +763,10 @@ fn main() -> ExitCode {
             });
             match result {
                 Ok(facts) => {
+                    // Both generated regions, in page order, separated so each
+                    // block is pasteable on its own (`STORY-P0-01-09`).
+                    println!("{}", dashboard::emit_overall_progress(&facts));
+                    println!();
                     println!("{}", dashboard::emit_stat_row(&facts));
                     ExitCode::SUCCESS
                 }

@@ -26,7 +26,7 @@
 //! for. One of the seven was written by the session that built the `LE-44`
 //! gate, which is the argument for the machine rather than against it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
@@ -36,6 +36,14 @@ use crate::assurance::ArtifactStatus;
 const BEGIN_MARKER: &str =
     "<!-- BEGIN GENERATED stat-row: cargo run -p xtask -- emit-dashboard -->";
 const END_MARKER: &str = "<!-- END GENERATED stat-row -->";
+
+/// Where the generated Overall-progress block starts and ends (`STORY-P0-01-09`).
+///
+/// A second region rather than an extension of the first: the two blocks sit in
+/// different sections of the page and must be pasteable independently.
+const PROGRESS_BEGIN_MARKER: &str =
+    "<!-- BEGIN GENERATED overall-progress: cargo run -p xtask -- emit-dashboard -->";
+const PROGRESS_END_MARKER: &str = "<!-- END GENERATED overall-progress -->";
 
 /// The spine numbers the dashboard renders.
 ///
@@ -82,6 +90,18 @@ pub struct DashboardFacts {
     pub loose_ends: usize,
     /// Loose ends still open.
     pub open_loose_ends: usize,
+    /// Roadmap Epics (`EPIC-P*` on disk or in the backlog phase table).
+    pub epics_total: usize,
+    /// Of those, Epics with at least one Story contract row.
+    pub epics_decomposed: usize,
+    /// Stories whose own `Status:` header state is `Verified`.
+    pub stories_verified: usize,
+    /// Stories whose own `Status:` header state is `Functionally Verified`.
+    pub stories_functionally_verified: usize,
+    /// Stories whose own `Status:` header state is `Specified`.
+    pub stories_specified: usize,
+    /// Stories whose own `Status:` header state is `In progress`.
+    pub stories_in_progress: usize,
 }
 
 /// Renders the generated stat-row block, markers included.
@@ -128,6 +148,97 @@ pub fn emit_stat_row(facts: &DashboardFacts) -> String {
     block
 }
 
+/// Renders the generated Overall-progress block, markers included
+/// (`STORY-P0-01-09`).
+///
+/// Four tiles, replacing the four the page carried by hand from 2026-07-28 to
+/// 2026-08-01 — during which the tabstrip beneath them drifted twice. The
+/// labels are chosen here, deliberately, not derived: the values are
+/// statistics, the wording is not.
+pub fn emit_overall_progress(facts: &DashboardFacts) -> String {
+    let mut block = String::from(PROGRESS_BEGIN_MARKER);
+    block.push('\n');
+    for (value, label) in [
+        (
+            format!("{}&nbsp;/&nbsp;{}", facts.epics_decomposed, facts.epics_total),
+            "Epics decomposed",
+        ),
+        (format!("{}", facts.features), "Features in the spine"),
+        (
+            format!(
+                "{}&nbsp;/&nbsp;{}",
+                facts.stories_verified + facts.stories_functionally_verified,
+                facts.stories
+            ),
+            "Stories functionally verified",
+        ),
+        (format!("{}", facts.tests), "Test docs in the spine"),
+    ] {
+        block.push_str(&format!(
+            "  <div class=\"stat\"><div class=\"n\">{value}</div><div class=\"l\">{label}</div></div>\n"
+        ));
+    }
+    block.push_str(PROGRESS_END_MARKER);
+    block
+}
+
+/// The progress bar's width: the integer-rounded percentage of Stories whose
+/// header state is `Verified` or `Functionally Verified`.
+///
+/// Derived rather than hand-tuned, because a hand-tuned percentage is a
+/// decoration pretending to be a statistic (`STORY-P0-01-09`).
+pub fn progress_bar_percent(facts: &DashboardFacts) -> usize {
+    if facts.stories == 0 {
+        return 0;
+    }
+    let functionally_verified = facts.stories_verified + facts.stories_functionally_verified;
+    (functionally_verified * 100 + facts.stories / 2) / facts.stories
+}
+
+/// The roadmap Epic population: `EPIC-P*` documents on disk plus the `EPIC-P*`
+/// rows of the backlog's phase table, as a union.
+///
+/// Horizon Epics (`EPIC-H*`) are excluded on the backlog's own authority: its
+/// *Destination horizons* section states their ids "are not inserted into the
+/// numbered critical path and do not imply sequence", so they are not part of
+/// the denominator the page's Epics-decomposed tile argues about. Only the
+/// table above that heading is read.
+pub fn roadmap_epics(epic_doc_ids: &BTreeSet<String>, backlog: &str) -> BTreeSet<String> {
+    let mut epics: BTreeSet<String> =
+        epic_doc_ids.iter().filter(|id| id.starts_with("EPIC-P")).cloned().collect();
+    for line in backlog.lines() {
+        if line.starts_with("## Destination horizons") {
+            break;
+        }
+        let Some(row) = line.strip_prefix('|') else { continue };
+        let Some(first_cell) = row.split('|').next() else { continue };
+        let Some(position) = first_cell.find("EPIC-P") else { continue };
+        let id: String = first_cell[position..]
+            .chars()
+            .take_while(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '-' | '_')
+            })
+            .collect();
+        epics.insert(id);
+    }
+    epics
+}
+
+/// How many roadmap Epics have at least one Story contract row.
+///
+/// The Story id carries its Epic token — `STORY-P0-01-08` belongs to
+/// `EPIC-P0` — so decomposition is derived from the contracts register rather
+/// than asserted by whoever last counted.
+pub fn decomposed_epics(roadmap: &BTreeSet<String>, story_ids: &BTreeSet<String>) -> usize {
+    let with_stories: BTreeSet<String> = story_ids
+        .iter()
+        .filter_map(|id| id.strip_prefix("STORY-"))
+        .filter_map(|rest| rest.split('-').next())
+        .map(|epic| format!("EPIC-{epic}"))
+        .collect();
+    roadmap.iter().filter(|epic| with_stories.contains(*epic)).count()
+}
+
 /// What the dashboard check looked at, so a caller can print coverage rather
 /// than a bare "ok".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,7 +249,10 @@ pub struct DashboardSummary {
 
 /// Refuses a dashboard that disagrees with the spine.
 ///
-/// Three checks, in the order a reader meets them on the page.
+/// The checks run in the order a reader meets their subjects on the page: the
+/// tabstrip, the Overall-progress tiles and bar, the footnote beneath them,
+/// the Epic-denominator sentence, then `-08`'s assurance tiles, spine
+/// sentence, and Story badges.
 pub fn check_dashboard(
     repo_root: &Path,
     facts: &DashboardFacts,
@@ -148,6 +262,11 @@ pub fn check_dashboard(
     let contents = fs::read_to_string(&path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
 
+    check_tabstrip(&contents, facts)?;
+    check_progress_region(&contents, facts)?;
+    check_progress_bar(&contents, facts)?;
+    check_footnote_counts(&contents, facts)?;
+    check_epic_denominator(&contents, facts)?;
     check_generated_region(&contents, facts)?;
     check_spine_sentence(&contents, facts)?;
     let badges_checked = check_story_badges(&contents, statuses)?;
@@ -155,28 +274,132 @@ pub fn check_dashboard(
     Ok(DashboardSummary { badges_checked })
 }
 
-/// The generated tiles must be byte-identical to what the emitter produces.
-fn check_generated_region(contents: &str, facts: &DashboardFacts) -> Result<(), String> {
-    let expected = emit_stat_row(facts);
+/// A marked region must be byte-identical to what the emitter produces.
+///
+/// Shared by both generated regions. The three failure modes get three
+/// messages, because a missing region, a truncated region and a stale region
+/// are different defects and a single message for all would misdirect.
+fn check_marked_region(
+    contents: &str,
+    begin: &str,
+    end: &str,
+    expected: &str,
+    subject: &str,
+) -> Result<(), String> {
     let normalised = contents.replace("\r\n", "\n");
 
-    let Some(start) = normalised.find(BEGIN_MARKER) else {
+    let Some(start) = normalised.find(begin) else {
         return Err(format!(
-            "goals/index.html carries no `{BEGIN_MARKER}` marker. The stat tiles are generated: \
+            "goals/index.html carries no `{begin}` marker. The {subject} are generated: \
              run `cargo run -p xtask -- emit-dashboard` and paste the block (LE-30)"
         ));
     };
-    let Some(end_offset) = normalised[start..].find(END_MARKER) else {
+    let Some(end_offset) = normalised[start..].find(end) else {
         return Err(format!(
-            "goals/index.html opens the generated region but never closes it with `{END_MARKER}`"
+            "goals/index.html opens the generated {subject} region but never closes it with \
+             `{end}`"
         ));
     };
-    let found = &normalised[start..start + end_offset + END_MARKER.len()];
+    let found = &normalised[start..start + end_offset + end.len()];
     if found != expected {
         return Err(format!(
-            "goals/index.html's generated stat tiles are stale. Run \
+            "goals/index.html's generated {subject} are stale. Run \
              `cargo run -p xtask -- emit-dashboard` and replace the block between the markers. \
              Expected:\n{expected}\n\nFound:\n{found}"
+        ));
+    }
+    Ok(())
+}
+
+/// The generated tiles must be byte-identical to what the emitter produces.
+fn check_generated_region(contents: &str, facts: &DashboardFacts) -> Result<(), String> {
+    check_marked_region(contents, BEGIN_MARKER, END_MARKER, &emit_stat_row(facts), "stat tiles")
+}
+
+/// The generated Overall-progress tiles, same contract (`STORY-P0-01-09`).
+fn check_progress_region(contents: &str, facts: &DashboardFacts) -> Result<(), String> {
+    check_marked_region(
+        contents,
+        PROGRESS_BEGIN_MARKER,
+        PROGRESS_END_MARKER,
+        &emit_overall_progress(facts),
+        "Overall-progress tiles",
+    )
+}
+
+/// The tabstrip's two inline counts, gated rather than generated: one number
+/// inside a one-line label is cheaper to extract than to generate, and the
+/// label's markup is layout a generator has no business owning
+/// (`STORY-P0-01-09`).
+fn check_tabstrip(contents: &str, facts: &DashboardFacts) -> Result<(), String> {
+    let expected_epics =
+        format!("Epics <span class=\"count\">{} decomposed", facts.epics_decomposed);
+    if !contents.contains(&expected_epics) {
+        return Err(format!(
+            "goals/index.html's tabstrip does not state the current decomposed-Epic count. \
+             Expected the Epics tab label to open with `{expected_epics}` (STORY-P0-01-09)"
+        ));
+    }
+    let expected_loose =
+        format!("Loose ends <span class=\"count\">{} open</span>", facts.open_loose_ends);
+    if !contents.contains(&expected_loose) {
+        return Err(format!(
+            "goals/index.html's tabstrip does not state the current open loose-end count. \
+             Expected `{expected_loose}` (STORY-P0-01-09)"
+        ));
+    }
+    Ok(())
+}
+
+/// The progress bar's width must be the derived Stories ratio, not a hand-tuned
+/// percentage (`STORY-P0-01-09`).
+fn check_progress_bar(contents: &str, facts: &DashboardFacts) -> Result<(), String> {
+    let expected =
+        format!("<div class=\"bar-fill\" style=\"width:{}%\">", progress_bar_percent(facts));
+    if !contents.contains(&expected) {
+        return Err(format!(
+            "goals/index.html's progress bar width is stale. Expected `{expected}` — the \
+             integer-rounded percentage of Stories functionally verified (STORY-P0-01-09)"
+        ));
+    }
+    Ok(())
+}
+
+/// The footnote's four state counts, gated; the sentence and its date stay
+/// editorial (`STORY-P0-01-09`).
+///
+/// The date is deliberately not machine-stamped: an emitter-written date would
+/// fail the byte-compare on every day boundary with no content change. The
+/// counts moving forces the sentence to be re-edited, which moves the date.
+fn check_footnote_counts(contents: &str, facts: &DashboardFacts) -> Result<(), String> {
+    let expected = format!(
+        "{} <code>Verified</code> + {} <code>Functionally Verified</code> of {} Stories, \
+         {} <code>Specified</code>, {} <code>In progress</code>",
+        facts.stories_verified,
+        facts.stories_functionally_verified,
+        facts.stories,
+        facts.stories_specified,
+        facts.stories_in_progress
+    );
+    if !contents.contains(&expected) {
+        return Err(format!(
+            "goals/index.html's list-status footnote does not state the current Story state \
+             counts. Expected `{expected}` (STORY-P0-01-09)"
+        ));
+    }
+    Ok(())
+}
+
+/// The Epic-denominator claim, gated against the Epics on disk so the next
+/// written Epic cannot leave the page claiming the old denominator
+/// (`STORY-P0-01-09`).
+fn check_epic_denominator(contents: &str, facts: &DashboardFacts) -> Result<(), String> {
+    let expected = format!("The Epic denominator is now {}", facts.epics_total);
+    if !contents.contains(&expected) {
+        return Err(format!(
+            "goals/index.html does not state the current roadmap-Epic denominator. Expected \
+             `{expected}` — EPIC-P* documents on disk plus the backlog phase table \
+             (STORY-P0-01-09)"
         ));
     }
     Ok(())
@@ -324,6 +547,12 @@ mod tests {
             reports: 47,
             loose_ends: 46,
             open_loose_ends: 28,
+            epics_total: 12,
+            epics_decomposed: 4,
+            stories_verified: 30,
+            stories_functionally_verified: 11,
+            stories_specified: 12,
+            stories_in_progress: 6,
         }
     }
 
@@ -373,6 +602,162 @@ mod tests {
     fn crlf_line_endings_do_not_fail_the_byte_comparison() {
         let windows = page("").replace('\n', "\r\n");
         check_generated_region(&windows, &facts()).expect("a CRLF checkout is not a defect");
+    }
+
+    // --- the Overall-progress region (STORY-P0-01-09) -------------------------
+
+    /// A page whose generated Overall-progress region and gated numerics all
+    /// agree with `facts()`. 41 of 59 Stories functionally verified is 69.49%,
+    /// so the derived bar width is 69.
+    fn progress_page() -> String {
+        format!(
+            "<label>Epics <span class=\"count\">4 decomposed &middot; P2 partial</span></label>\n\
+             <label>Loose ends <span class=\"count\">28 open</span></label>\n\
+             {}\n\
+             <div class=\"bar-fill\" style=\"width:69%\"></div>\n\
+             30 <code>Verified</code> + 11 <code>Functionally Verified</code> of 59 Stories, \
+             12 <code>Specified</code>, 6 <code>In progress</code>\n\
+             The Epic denominator is now 12: as the backlog says.",
+            emit_overall_progress(&facts())
+        )
+    }
+
+    #[test]
+    fn a_stale_overall_progress_tile_is_refused_and_the_fix_is_printed() {
+        let stale = progress_page().replace("4&nbsp;/&nbsp;12", "3&nbsp;/&nbsp;12");
+        let error = check_progress_region(&stale, &facts()).expect_err("a stale tile must fail");
+        assert!(error.contains("emit-dashboard"), "{error}");
+        assert!(error.contains("4&nbsp;/&nbsp;12"), "the fix is in the message: {error}");
+    }
+
+    #[test]
+    fn a_page_with_no_overall_progress_markers_is_refused() {
+        let error = check_progress_region("<html></html>", &facts())
+            .expect_err("a page without the region must fail");
+        assert!(error.contains("carries no"), "{error}");
+    }
+
+    #[test]
+    fn an_unclosed_overall_progress_region_is_refused() {
+        let truncated = progress_page().replace(PROGRESS_END_MARKER, "");
+        let error =
+            check_progress_region(&truncated, &facts()).expect_err("an unclosed region must fail");
+        assert!(error.contains("never closes it"), "{error}");
+    }
+
+    #[test]
+    fn the_emitted_overall_progress_block_is_what_the_check_accepts() {
+        check_progress_region(&progress_page(), &facts()).expect("emitter and checker agree");
+    }
+
+    #[test]
+    fn crlf_line_endings_do_not_fail_the_overall_progress_comparison() {
+        let windows = progress_page().replace('\n', "\r\n");
+        check_progress_region(&windows, &facts()).expect("a CRLF checkout is not a defect");
+    }
+
+    // --- the gated numerics that survived -08 (STORY-P0-01-09) ----------------
+
+    #[test]
+    fn a_stale_tabstrip_epic_count_is_refused_and_the_fix_is_printed() {
+        let stale = progress_page().replace("4 decomposed", "3 decomposed");
+        let error = check_tabstrip(&stale, &facts()).expect_err("a stale Epic count must fail");
+        assert!(error.contains("4 decomposed"), "the fix is in the message: {error}");
+    }
+
+    #[test]
+    fn a_stale_tabstrip_loose_end_count_is_refused() {
+        let stale = progress_page().replace("28 open", "26 open");
+        let error =
+            check_tabstrip(&stale, &facts()).expect_err("a stale loose-end count must fail");
+        assert!(error.contains("28 open"), "the fix is in the message: {error}");
+    }
+
+    #[test]
+    fn an_agreeing_tabstrip_is_accepted() {
+        check_tabstrip(&progress_page(), &facts()).expect("agreement is accepted");
+    }
+
+    #[test]
+    fn a_hand_tuned_bar_width_is_refused_and_the_derived_width_is_accepted() {
+        check_progress_bar(&progress_page(), &facts()).expect("the derived width is accepted");
+        let stale = progress_page().replace("width:69%", "width:75%");
+        let error = check_progress_bar(&stale, &facts()).expect_err("a hand-tuned width must fail");
+        assert!(error.contains("width:69%"), "the fix is in the message: {error}");
+    }
+
+    #[test]
+    fn the_bar_width_is_the_integer_rounded_story_ratio() {
+        assert_eq!(progress_bar_percent(&facts()), 69, "41 of 59 is 69.49%");
+        let mut two_thirds = facts();
+        two_thirds.stories = 3;
+        two_thirds.stories_verified = 2;
+        two_thirds.stories_functionally_verified = 0;
+        assert_eq!(progress_bar_percent(&two_thirds), 67, "2 of 3 rounds up");
+        let mut empty = facts();
+        empty.stories = 0;
+        empty.stories_verified = 0;
+        empty.stories_functionally_verified = 0;
+        assert_eq!(progress_bar_percent(&empty), 0, "no Stories is 0%, not a division fault");
+    }
+
+    #[test]
+    fn stale_footnote_state_counts_are_refused_and_the_fix_is_printed() {
+        check_footnote_counts(&progress_page(), &facts()).expect("agreeing counts are accepted");
+        let stale = progress_page().replace(
+            "11 <code>Functionally Verified</code>",
+            "9 <code>Functionally Verified</code>",
+        );
+        let error =
+            check_footnote_counts(&stale, &facts()).expect_err("stale state counts must fail");
+        assert!(error.contains("11 <code>Functionally Verified</code>"), "{error}");
+    }
+
+    #[test]
+    fn a_stale_epic_denominator_is_refused_and_the_fix_is_printed() {
+        check_epic_denominator(&progress_page(), &facts()).expect("an agreeing claim is accepted");
+        let stale = progress_page().replace("denominator is now 12", "denominator is now 11");
+        let error =
+            check_epic_denominator(&stale, &facts()).expect_err("a stale denominator must fail");
+        assert!(error.contains("The Epic denominator is now 12"), "{error}");
+    }
+
+    // --- the Epic population, derived from disk (STORY-P0-01-09) --------------
+
+    #[test]
+    fn the_roadmap_population_is_the_union_of_docs_and_the_phase_table() {
+        let docs = BTreeSet::from(["EPIC-P0".to_string(), "EPIC-H2".to_string()]);
+        let backlog = "| Epic | Roadmap phase |\n\
+                       |---|---|\n\
+                       | [`EPIC-P1`](EPIC-P1.md) — **decomposed** | Phase 1 |\n\
+                       | `EPIC-P1_5` | Phase 1.5 |\n\
+                       ## Destination horizons\n\
+                       | `EPIC-H1` | Games |\n";
+        let roadmap = roadmap_epics(&docs, backlog);
+        assert_eq!(
+            roadmap,
+            BTreeSet::from(
+                ["EPIC-P0".to_string(), "EPIC-P1".to_string(), "EPIC-P1_5".to_string(),]
+            ),
+            "P0 from disk, P1 and P1_5 from the table; horizon Epics excluded on both sides"
+        );
+    }
+
+    #[test]
+    fn an_epic_is_decomposed_when_a_story_contract_row_belongs_to_it() {
+        let roadmap =
+            BTreeSet::from(["EPIC-P0".to_string(), "EPIC-P1".to_string(), "EPIC-P2".to_string()]);
+        let stories = BTreeSet::from([
+            "STORY-P0-01-01".to_string(),
+            "STORY-P0-02-01".to_string(),
+            "STORY-P2-01-01".to_string(),
+            "STORY-P9-01-01".to_string(),
+        ]);
+        assert_eq!(
+            decomposed_epics(&roadmap, &stories),
+            2,
+            "P0 counts once, P2 counts, P1 has no Story, P9 is outside the population"
+        );
     }
 
     // --- the gated prose ------------------------------------------------------

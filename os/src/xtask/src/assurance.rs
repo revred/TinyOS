@@ -444,6 +444,25 @@ fn walk_spine(
     let reach = performance_catalogue::release_gate_reach(repo_root, &in_play_domains)?;
     let assurance_verified =
         contracts.details_by_story.values().filter(|contract| contract.state == "verified").count();
+
+    // `STORY-P0-01-09`: the Overall-progress numerics. The Epic population is
+    // derived from disk — Epic documents plus the backlog phase table — and
+    // the Story state counts from the same headers the badge check reads, so
+    // no human retypes either.
+    let epic_dir = repo_root.join("goals").join("epics");
+    let epic_docs = markdown_ids(&epic_dir, "EPIC-")?;
+    let backlog_path = epic_dir.join("backlog.md");
+    let backlog_contents = fs::read_to_string(&backlog_path)
+        .map_err(|error| format!("failed to read {}: {error}", backlog_path.display()))?;
+    let roadmap = dashboard::roadmap_epics(&epic_docs, &backlog_contents);
+    let epics_decomposed = dashboard::decomposed_epics(&roadmap, &contracts.stories);
+    let story_state_count = |state: &str| {
+        statuses
+            .iter()
+            .filter(|status| status.id.starts_with("STORY-") && status.state == state)
+            .count()
+    };
+
     let facts = dashboard::DashboardFacts {
         catalogue_cells: PERFORMANCE_GUARDRAILS_PER_DOMAIN * PERFORMANCE_GUARDRAILS_PER_DOMAIN,
         containment_classes: containment_classes.len(),
@@ -464,6 +483,12 @@ fn walk_spine(
         reports: report_files.len(),
         loose_ends: loose_ends.ids.len(),
         open_loose_ends: loose_ends.open_count,
+        epics_total: roadmap.len(),
+        epics_decomposed,
+        stories_verified: story_state_count("Verified"),
+        stories_functionally_verified: story_state_count("Functionally Verified"),
+        stories_specified: story_state_count("Specified"),
+        stories_in_progress: story_state_count("In progress"),
     };
     let dashboard_summary = match dashboard_policy {
         DashboardPolicy::Check => dashboard::check_dashboard(repo_root, &facts, &statuses)?,
