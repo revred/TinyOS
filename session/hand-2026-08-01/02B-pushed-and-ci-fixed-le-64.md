@@ -51,6 +51,17 @@ before pushing (workspace clippy cross-targeted to `x86_64-unknown-linux-gnu`, a
 mirror of CI's lint gate; host-target clippy is structurally blind to every `cfg(not(windows))`
 line in this repository.
 
+## Second postscript: one timing-gate flake, witnessed and re-run
+
+The docs-only commit after the green run failed CI once more — on the timing gate, not on code:
+`D07/pool_u64x4_alloc_denied_exhausted_per_op_of_64` p50 measured 82,692 ppm against its
+81,632 ppm limit (1.3% over the 2× tolerance, on an operation whose whole cost is 20–43 cycles —
+quantisation range). The kernel bytes were identical to the green run seven minutes earlier; a
+re-run of the same commit passed. This is a new instance of **`LE-18`'s registered class** —
+run-to-run instability surviving inside the ratio, previously seen as `D05/dispatch_select`
+swinging +80% then +4.4% on unchanged code — now witnessed on a D07 metric, recorded here rather
+than re-registered. `main` stands green at the head of this session's work.
+
 ## State after this session
 
 - `main` pushed and, once the fixing commit's run is green, CI-green for the first time since
