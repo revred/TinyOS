@@ -22,11 +22,18 @@ use shell::{batch, parity};
 /// The spoor-journaling decorator (`LE-56`), shared by `#[path]` with the
 /// shell library's `#[cfg(test)]`-only include — see `spoor_policy.rs`'s own
 /// doc comment for why it lives beside this binary and not in the library.
+///
+/// `#[path = "."]` keeps the nested include's resolved path free of the
+/// phantom `aci/` directory this inline module would otherwise imply —
+/// `aci/../spoor_policy.rs` opens on Windows (lexical normalisation) and
+/// fails on Linux (component-by-component resolution), which held CI red
+/// from 2026-07-30 to 2026-08-01 (`LE-64`).
+#[path = "."]
 mod aci {
     pub use shell::policy::{GrantSet, VerbPolicy};
     pub use shell::verbs::{SpoorRow, SpoorView, VerbKind};
 
-    #[path = "../spoor_policy.rs"]
+    #[path = "spoor_policy.rs"]
     pub mod spoor_policy;
 }
 

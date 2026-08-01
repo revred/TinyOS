@@ -27,14 +27,18 @@ pub mod volume;
 /// this `#[cfg(test)]`-only include exists so its unit tests run under
 /// `cargo test -p shell --lib` (the exact surface CI and the parity tab
 /// drive), while the library itself stays kernel-free.
+/// `#[path = "."]` keeps the nested include's resolved path free of the
+/// phantom `spoor_policy_host/` directory this inline module would otherwise
+/// imply — see `fixture_batch_main.rs`'s twin note and `LE-64`.
 #[cfg(test)]
+#[path = "."]
 pub(crate) mod spoor_policy_host {
     use crate::policy::{GrantSet, VerbPolicy};
     use crate::verbs::{SpoorRow, SpoorView, VerbKind};
 
     /// The decorator, compiled here for its host-side tests — and for the
     /// parity harness's own tests, which install it to mirror the fixture.
-    #[path = "../spoor_policy.rs"]
+    #[path = "spoor_policy.rs"]
     pub mod spoor_policy;
 }
 
