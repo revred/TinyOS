@@ -25,6 +25,7 @@ The first milestone, per [`docs/mvp-delivery-strategy.md`](../../docs/mvp-delive
 | [`STORY-P0-01-07`](../stories/STORY-P0-01-07.md) | Four prose rules become gates: bound provenance (`LE-33`), design-readiness open debt (`LE-35`), the fast spine-file check (`LE-36`), and Feature/Story status agreement (`LE-44`) | Functionally Verified (Host; assurance `baseline-debt`) |
 | [`STORY-P0-01-08`](../stories/STORY-P0-01-08.md) | The dashboard stops being hand-maintained: tiles generated, spine counts and Story badges gated, and `41A`'s 345-of-391 reachability count derived (`LE-30`) | Functionally Verified (Host; assurance `baseline-debt`) |
 | [`STORY-P0-01-09`](../stories/STORY-P0-01-09.md) | The numerics that survived `-08` become generated or gated: Overall-progress tiles emitted, tabstrip/bar/footnote/Epic-denominator counts gated, and the Epic population derived from disk | Functionally Verified (Host; assurance `baseline-debt`) |
+| [`STORY-P0-01-10`](../stories/STORY-P0-01-10.md) | A `Specified` header cannot outlive its own passing Report (`LE-65`); `In progress` deliberately exempt on the `REPORT-2026-07-30-01` precedent | Functionally Verified (Host; assurance `baseline-debt`) |
 
 ## Containment contract
 

@@ -105,6 +105,9 @@ pub struct AssuranceSummary {
     pub open_loose_end_count: usize,
     /// Number of Epic/Feature/Story documents with a parseable `Status:` header.
     pub status_header_count: usize,
+    /// Number of passing Reports cross-checked against their Stories' headers
+    /// (`LE-65`).
+    pub passing_report_count: usize,
     /// Number of `PERF-Dnn-Gnn` release gates with dated evidence recorded.
     ///
     /// This is a count of gates that have *evidence*, never a score and never a
@@ -431,6 +434,12 @@ fn walk_spine(
     // `LE-44`: the headers above are individually well-formed; this is the
     // check that they agree with what their Features say about them.
     let feature_story_row_count = validate_feature_story_tables(repo_root, &statuses)?;
+    // `LE-65`: and this is the check that a header agrees with the Story's own
+    // filed evidence — the direction every other gate here misses, which is
+    // how `STORY-P0-01-08` read `Specified` for four days after its Report
+    // recorded Pass with everything green.
+    let passing_report_count =
+        validate_specified_headers_against_reports(&report_dir, &report_files, &statuses)?;
 
     // `LE-30`: and this is the check that the page a reader meets first agrees
     // with all of the above. Nine sessions hand-synced it; none of them was
@@ -503,6 +512,7 @@ fn walk_spine(
             qualified_platform_count: platforms.qualified_count(),
             bound_claim_count,
             feature_story_row_count,
+            passing_report_count,
             dashboard_badge_count: dashboard_summary.badges_checked,
             external_manifest_count: external_isolation.manifest_count,
             feature_count: feature_contracts.features.len(),
@@ -2691,6 +2701,246 @@ fn validate_report_coverage(
         }
     }
     Ok(())
+}
+
+/// The Story ids a Report's `Test(s) covered:` line claims — named directly,
+/// or through a covered Test's id (`TEST-P0-01-08-A` covers `STORY-P0-01-08`).
+fn covered_story_ids(covered_line: &str) -> BTreeSet<String> {
+    let mut stories = BTreeSet::new();
+    for (position, _) in
+        covered_line.match_indices("STORY-").chain(covered_line.match_indices("TEST-"))
+    {
+        let token: String = covered_line[position..]
+            .chars()
+            .take_while(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '-' | '_')
+            })
+            .collect();
+        if let Some(rest) = token.strip_prefix("TEST-") {
+            // A Test id is its Story id plus a trailing letter.
+            if let Some((story_part, suffix)) = rest.rsplit_once('-') {
+                if suffix.len() == 1 && suffix.chars().all(|c| c.is_ascii_alphabetic()) {
+                    stories.insert(format!("STORY-{story_part}"));
+                }
+            }
+        } else {
+            stories.insert(token);
+        }
+    }
+    stories
+}
+
+/// The Report's verdict: the first bolded token after its `## Result` heading,
+/// lowercased — `Some("pass")` for `**Pass**, all five clauses`.
+///
+/// Deliberately narrow (`LE-65`): a Report with no `## Result` section — the
+/// 2026-07-26 generation — or whose Result opens with anything unbolded
+/// extracts no verdict and triggers nothing. A gate that guessed at prose
+/// would produce false refusals, and false refusals teach people to bypass
+/// gates.
+fn report_result_verdict(contents: &str) -> Option<String> {
+    let mut in_result = false;
+    for line in contents.lines() {
+        if line.trim_start().starts_with("## ") {
+            in_result = line.trim() == "## Result";
+            continue;
+        }
+        if !in_result || line.trim().is_empty() {
+            continue;
+        }
+        let opener = line.trim().strip_prefix("**")?;
+        let verdict: String =
+            opener.chars().take_while(|character| character.is_ascii_alphabetic()).collect();
+        return if verdict.is_empty() { None } else { Some(verdict.to_ascii_lowercase()) };
+    }
+    None
+}
+
+/// `LE-65`: a `Specified` Story header cannot outlive the Story's own passing
+/// Report.
+///
+/// `STORY-P0-01-08` read *Specified* for four days after `REPORT-2026-07-28-11`
+/// recorded Pass on all five clauses, with every gate green — because every
+/// gate compares sideways (badge to header, Feature table to header) and
+/// nothing compared the header to the Story's own evidence.
+///
+/// `In progress` is deliberately **not** refused: `REPORT-2026-07-30-01`
+/// records PASS while its `FEAT-P2` Stories stay `In progress` with their
+/// performance numbers stated as open debt. A passing Report beside an
+/// `In progress` header is honest partial delivery; a passing Report beside
+/// "not started" is a contradiction whatever fraction it covers.
+fn validate_specified_headers_against_reports(
+    report_dir: &Path,
+    reports: &BTreeSet<String>,
+    statuses: &[ArtifactStatus],
+) -> Result<usize, String> {
+    let state_by_story: BTreeMap<&str, &str> = statuses
+        .iter()
+        .filter(|status| status.id.starts_with("STORY-"))
+        .map(|status| (status.id.as_str(), status.state.as_str()))
+        .collect();
+
+    let mut passing_reports = 0;
+    for report in reports {
+        let path = report_dir.join(format!("{report}.md"));
+        let contents = fs::read_to_string(&path)
+            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+        if specified_story_refusal(report, &contents, &state_by_story)? {
+            passing_reports += 1;
+        }
+    }
+    Ok(passing_reports)
+}
+
+/// The `LE-65` decision for one Report, exposed for tests.
+///
+/// `Ok(true)` when the Report records a pass (and contradicts no `Specified`
+/// header), `Ok(false)` when it carries no readable verdict.
+fn specified_story_refusal(
+    report: &str,
+    contents: &str,
+    state_by_story: &BTreeMap<&str, &str>,
+) -> Result<bool, String> {
+    if report_result_verdict(contents).as_deref() != Some("pass") {
+        return Ok(false);
+    }
+    let covered = contents
+        .lines()
+        .find(|line| line.contains("Test(s) covered:"))
+        .map(covered_story_ids)
+        .unwrap_or_default();
+    for story in covered {
+        if state_by_story.get(story.as_str()).copied() == Some("Specified") {
+            return Err(format!(
+                "`{story}`'s own `Status:` header says `Specified`, but `{report}` records \
+                 a passing result for it. A filed passing Report contradicts \"not started\" \
+                 outright: re-verify the Report's evidence against the current tree, then \
+                 advance the header — verify, don't inherit (Handover 35's rule; LE-65)"
+            ));
+        }
+    }
+    Ok(true)
+}
+
+#[cfg(test)]
+mod le65_tests {
+    use super::*;
+
+    fn report(covered: &str, result_opener: &str) -> String {
+        format!(
+            "# REPORT-2026-07-28-11 — fixture\n\n\
+             **Test(s) covered:** {covered}\n\n## Result\n\n{result_opener}, all five clauses.\n"
+        )
+    }
+
+    fn states<'a>(pairs: &[(&'a str, &'a str)]) -> BTreeMap<&'a str, &'a str> {
+        pairs.iter().copied().collect()
+    }
+
+    /// The `-08` incident's exact shape: a filed Report recording Pass above a
+    /// header still reading Specified, four days along.
+    #[test]
+    fn a_specified_header_with_a_passing_report_is_refused() {
+        let contents = report("`TEST-P0-01-08-A` (`STORY-P0-01-08` — the dashboard)", "**Pass**");
+        let error = specified_story_refusal(
+            "REPORT-2026-07-28-11",
+            &contents,
+            &states(&[("STORY-P0-01-08", "Specified")]),
+        )
+        .expect_err("the -08 incident must be refused");
+        assert!(error.contains("STORY-P0-01-08"), "{error}");
+        assert!(error.contains("verify, don't inherit"), "the fix direction is named: {error}");
+    }
+
+    /// Coverage through the Test id alone refuses the same — a Report need not
+    /// name the Story directly to contradict its header.
+    #[test]
+    fn coverage_through_the_test_id_is_the_same_claim() {
+        let contents = report("`TEST-P0-01-08-A`", "**Pass**");
+        specified_story_refusal(
+            "REPORT-2026-07-28-11",
+            &contents,
+            &states(&[("STORY-P0-01-08", "Specified")]),
+        )
+        .expect_err("a Test id resolves to its Story");
+    }
+
+    /// The acceptance case beside the refusal: the corrected header.
+    #[test]
+    fn the_same_report_beside_an_advanced_header_is_accepted() {
+        let contents = report("`TEST-P0-01-08-A` (`STORY-P0-01-08`)", "**Pass**");
+        let passing = specified_story_refusal(
+            "REPORT-2026-07-28-11",
+            &contents,
+            &states(&[("STORY-P0-01-08", "Functionally Verified")]),
+        )
+        .expect("an advanced header agrees with its Report");
+        assert!(passing, "the Report still counts as cross-checked");
+    }
+
+    /// The `REPORT-2026-07-30-01` precedent: In progress beside a passing
+    /// Report is honest partial delivery and is deliberately not refused.
+    #[test]
+    fn in_progress_beside_a_passing_report_is_deliberately_accepted() {
+        let contents = report("`STORY-P2-04-01`", "**PASS on all four**");
+        specified_story_refusal(
+            "REPORT-2026-07-30-01",
+            &contents,
+            &states(&[("STORY-P2-04-01", "In progress")]),
+        )
+        .expect("stated-debt partial delivery is not a contradiction");
+    }
+
+    /// A Report with no readable verdict — the 2026-07-26 generation — triggers
+    /// nothing, even above a Specified header.
+    #[test]
+    fn a_resultless_report_extracts_no_verdict_and_refuses_nothing() {
+        let contents = "# REPORT — fixture\n\n**Test(s) covered:** `STORY-P0-01-08`\n\nProse only.";
+        let passing = specified_story_refusal(
+            "REPORT-2026-07-26-01",
+            contents,
+            &states(&[("STORY-P0-01-08", "Specified")]),
+        )
+        .expect("no verdict, no refusal");
+        assert!(!passing, "a resultless Report is not cross-checked");
+    }
+
+    /// An unbolded or non-pass opener is not a verdict.
+    #[test]
+    fn only_a_bolded_pass_opener_is_a_verdict() {
+        assert_eq!(
+            report_result_verdict("## Result\n\n**Pass**, all clauses").as_deref(),
+            Some("pass")
+        );
+        assert_eq!(
+            report_result_verdict("## Result\n\n**PASS on all four**").as_deref(),
+            Some("pass")
+        );
+        assert_eq!(
+            report_result_verdict("## Result\n\n**Blocked** on the adapter").as_deref(),
+            Some("blocked"),
+            "other verdicts are read, they just never match pass"
+        );
+        assert_eq!(report_result_verdict("## Result\n\nPass, but unbolded"), None);
+        assert_eq!(report_result_verdict("## Something else\n\n**Pass**"), None);
+    }
+
+    /// Both spellings of coverage resolve to Story ids; the trailing Test
+    /// letter is stripped, everything else is not a Test id.
+    #[test]
+    fn covered_story_ids_resolve_direct_and_test_spellings() {
+        let ids = covered_story_ids(
+            "**Test(s) covered:** `TEST-P0-01-08-A` (`STORY-P0-01-09` — sibling), TEST-P1_5-01-01-B",
+        );
+        assert_eq!(
+            ids,
+            BTreeSet::from([
+                "STORY-P0-01-08".to_string(),
+                "STORY-P0-01-09".to_string(),
+                "STORY-P1_5-01-01".to_string(),
+            ])
+        );
+    }
 }
 
 fn join_ids(ids: &[&String]) -> String {

@@ -812,7 +812,7 @@ fn main() -> ExitCode {
             match result {
                 Ok(summary) => {
                     println!(
-                        "assurance-spine-check: {} Features, {} Stories, {} Tests, {} Reports, {} containment classes, {} boundary tests, {} security controls, {} Protection Domain contracts, {} code-admission gates, {} class communication pairs, {} application/platform targets, {} landing zones, {} selected Story/performance contracts, {} selected application/performance contracts, {} loose ends ({} open), {} status headers, {} release gates with evidence, {} open-debt selections, {} platforms ({} qualified), {} bound claims checked, {} Feature/Story status rows agree, {} dashboard badges agree, {} manifests isolated from external/",
+                        "assurance-spine-check: {} Features, {} Stories, {} Tests, {} Reports, {} containment classes, {} boundary tests, {} security controls, {} Protection Domain contracts, {} code-admission gates, {} class communication pairs, {} application/platform targets, {} landing zones, {} selected Story/performance contracts, {} selected application/performance contracts, {} loose ends ({} open), {} status headers, {} release gates with evidence, {} open-debt selections, {} platforms ({} qualified), {} bound claims checked, {} Feature/Story status rows agree, {} passing Reports cross-checked against headers, {} dashboard badges agree, {} manifests isolated from external/",
                         summary.feature_count,
                         summary.story_count,
                         summary.test_count,
@@ -836,6 +836,7 @@ fn main() -> ExitCode {
                         summary.qualified_platform_count,
                         summary.bound_claim_count,
                         summary.feature_story_row_count,
+                        summary.passing_report_count,
                         summary.dashboard_badge_count,
                         summary.external_manifest_count
                     );
