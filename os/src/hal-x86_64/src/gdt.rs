@@ -275,6 +275,7 @@ pub unsafe fn installed_double_fault_stack_top() -> u64 {
 /// # Safety
 /// Only meaningful after [`install`], on the single CPU.
 #[cfg(not(target_os = "windows"))]
+#[allow(static_mut_refs, clippy::deref_addrof)]
 pub unsafe fn installed_ring0_stack_top() -> u64 {
     // SAFETY: see this function's own doc comment.
     unsafe { (*(&raw const TSS)).ring0_stack() }
