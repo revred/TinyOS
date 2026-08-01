@@ -35,6 +35,22 @@ The defect was two lines. The process hole was bigger: **a push whose CI run is 
 gate that does not exist.** Two sessions pushed onto red without reading it, and the red carried no
 register row — it lived nowhere but in a GitHub tab nobody had open. `LE-64` records both halves.
 
+## Postscript: the red was two failures deep
+
+The `LE-64` fix's own run (`30716801991`) cleared rustfmt and every shell build — and then failed
+on the **next** failure the rustfmt step had been masking since 07-30: a
+`clippy::deref_addrof` error on `installed_ring0_stack_top()` in
+[`gdt.rs`](../../os/src/hal-x86_64/src/gdt.rs), whose sibling function directly above already
+carries the sanctioned `#[allow]` for the same `static mut` readback pattern. It was never seen
+locally because the function is `cfg(not(windows))` — local clippy compiles it out, the same
+Windows-blindness class as `LE-64` itself. Fixed by mirroring **both** CI clippy jobs locally
+before pushing (workspace clippy cross-targeted to `x86_64-unknown-linux-gnu`, and the AArch64
+`-Zbuild-std` job), both exit 0. The follow-up commit's run is **green — the first green CI on
+`main` since 2026-07-27.** The practical rule this adds to `LE-64`'s: on a Windows dev host,
+`cargo clippy --workspace --all-targets --target x86_64-unknown-linux-gnu` is the honest local
+mirror of CI's lint gate; host-target clippy is structurally blind to every `cfg(not(windows))`
+line in this repository.
+
 ## State after this session
 
 - `main` pushed and, once the fixing commit's run is green, CI-green for the first time since
