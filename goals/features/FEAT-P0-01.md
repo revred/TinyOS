@@ -23,7 +23,7 @@ The first milestone, per [`docs/mvp-delivery-strategy.md`](../../docs/mvp-delive
 | [`STORY-P0-01-05`](../stories/STORY-P0-01-05.md) | A guardrail evidence register, and the first release gates that need no hardware: `G11` recorded for ten domains on a compiler-enforced no-heap property | Functionally Verified (Host; assurance `baseline-debt`) |
 | [`STORY-P0-01-06`](../stories/STORY-P0-01-06.md) | The `D09` disposition: all 25 gates given a named blocker, `G20` closed on the first measurement of the PE64 load path, and `LE-09` shown to block exactly one of them | Verified (Tier 0 + Host; assurance `baseline-debt`) |
 | [`STORY-P0-01-07`](../stories/STORY-P0-01-07.md) | Four prose rules become gates: bound provenance (`LE-33`), design-readiness open debt (`LE-35`), the fast spine-file check (`LE-36`), and Feature/Story status agreement (`LE-44`) | Functionally Verified (Host; assurance `baseline-debt`) |
-| [`STORY-P0-01-08`](../stories/STORY-P0-01-08.md) | The dashboard stops being hand-maintained: tiles generated, spine counts and Story badges gated, and `41A`'s 345-of-391 reachability count derived (`LE-30`) | Specified |
+| [`STORY-P0-01-08`](../stories/STORY-P0-01-08.md) | The dashboard stops being hand-maintained: tiles generated, spine counts and Story badges gated, and `41A`'s 345-of-391 reachability count derived (`LE-30`) | Functionally Verified (Host; assurance `baseline-debt`) |
 
 ## Containment contract
 

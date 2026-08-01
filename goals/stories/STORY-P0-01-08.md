@@ -1,6 +1,6 @@
 # STORY-P0-01-08 — The Dashboard Stops Being Hand-Maintained
 
-Status: **Specified — `TEST-P0-01-08-A` written first, per the TDD mandate**
+Status: **Functionally Verified (Host), 2026-07-28** — assurance state `baseline-debt` (no guardrail closed, per the Report itself); delivered by [`REPORT-2026-07-28-11`](../reports/REPORT-2026-07-28-11.md), Pass on all five clauses. *Header corrected 2026-08-01, four days stale*: it still read `Specified` while the Story's own filed Report recorded the pass, and every gate stayed green because the badge gate compares the dashboard to this header, not this header to the Report — the gap is registered as `LE-65`. Corrected only after re-verifying the evidence against the current tree (241 `xtask` host tests, `emit-dashboard`'s byte-compared region, the badge and count gates), per Handover 35's verify-don't-inherit rule
 Feature: [`FEAT-P0-01`](../features/FEAT-P0-01.md)
 Introduced in: [`session/hand-2026-07-28/41A-the-dashboard-as-a-work-order.md`](../../session/hand-2026-07-28/41A-the-dashboard-as-a-work-order.md) §1 and §3 (`L3`); registered as `LE-30`
 
