@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TinyOS Handovers — 31 July 2026</title>
+<title>TinyOS Handovers — 1 August 2026</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -96,6 +96,18 @@
   <li class="entry">
     <span class="num">01A</span><a href="01A-tinytile-planning-session-mandate.md">Cover note: plan <strong>TinyTile</strong>, the heterogeneous compute access layer</a>
     <p>Commissions &mdash; and scopes &mdash; the session that plans TinyTile: a Rust, C-ABI, native-fast compute-access layer letting AI and similar throughput workloads reach a GPU or accelerator, inspired by TileLang&rsquo;s tile-level programming model. Four owner-settled constraints are recorded as closed. The mandate&rsquo;s centre is the collision nobody has ruled on yet: <strong>a GPU kernel is executable code for a bus-mastering processor</strong>, TileLang natively reaches the device through Python&rarr;TVM&rarr;<code>nvcc</code> JIT, and <code>RCG-11</code> denies JIT by name &mdash; three candidate shapes are tabled, with ahead-of-time off-target compilation recommended and an ADR required either way. Second-order: <code>PD-10</code>&rsquo;s &ldquo;IOMMU or wiped bounce buffer&rdquo; is in direct tension with <code>G-HW-6</code>&rsquo;s zero-copy promise; the vendor-driver question (&ldquo;consume CUDA&rdquo; cannot mean &ldquo;run NVIDIA&rsquo;s Linux driver&rdquo;) must be answered or recorded as unknown. Fills the <code>EPIC-P6B</code> slot that has sat in the backlog with no Epic document. Explicitly <strong>not</strong> a design and <strong>not</strong> an implementation.</p>
+  </li>
+  <li class="entry">
+    <span class="num">01B</span><a href="01B-tinytile-planned-epic-p6b-and-two-adrs.md">TinyTile planned: <code>EPIC-P6B</code> written, two ADRs accepted</a>
+    <p>The session <code>01A</code> commissioned. <a href="../../docs/adr/0012-device-kernels-are-admitted-code-compiled-ahead-of-time-off-target.md">ADR 0012</a> rules that device kernels are admitted code bound <em>harder</em> by the charter than CPU code, compiled ahead of time off target &mdash; no compiler on any TinyOS device, bounded interpreted fallback as data, missing variants resolve fail-safe. <a href="../../docs/adr/0013-zero-copy-buffer-sharing-is-conditional-on-dma-containment-qualification.md">ADR 0013</a> resolves <code>PD-10</code> vs <code>G-HW-6</code> the <code>ADR 0005</code> way: zero-copy is a per-platform qualified capability (currently zero qualified), explicit copy is the honest default. <a href="../../goals/epics/EPIC-P6B.md"><code>EPIC-P6B.md</code></a> enumerates seven Features including the Stage&nbsp;1 <strong>HBP compute broker</strong> (accelerator behind a Linux-hosted C2 broker, proving ABI and artifacts before any native driver) and the <code>G-AI-9</code>-measured vertical proof. Driver finding: the Orin iGPU&rsquo;s <code>nvgpu</code>/<code>host1x</code>/<code>nvmap</code> stack is source-available and is the submission-interface reference; TileLang&rsquo;s published validation covers no Tegra device. Contracts and decisions only &mdash; nothing implemented; spine green throughout.</p>
+  </li>
+  <li class="entry">
+    <span class="num">01C</span><a href="01C-next-steps-after-tinytile-planning.md">Next steps after the TinyTile planning session</a>
+    <p>The next-session mandate. Order of work: owner review of 01B&rsquo;s four artifacts (blocks everything), then <code>docs/tinytile-architecture.md</code> &mdash; the one 01A deliverable still owed, planning-only &mdash; with two optional cheap probes alongside (an <code>nvgpu</code> desk study to make <code>FEAT-P6B-06</code>&rsquo;s gate concrete, and an off-target sm_87 TileLang compile on stock Jetson Linux to retire the Epic&rsquo;s named unknown). Implementation stays queued behind the Pi&nbsp;5 hardware-evidence sprint; when the queue opens, decompose <code>FEAT-P6B-02</code> then <code>-01</code>, tests first, contracts before code. Traps named: no re-opening ADR&nbsp;0012&rsquo;s rejected shapes, the architecture doc wanting to become code, broker-stage numbers reading better than they are, and a desk study mistaken for a driver.</p>
+  </li>
+  <li class="entry">
+    <span class="num">02A</span><a href="02A-tinytile-architecture-document.md"><code>docs/tinytile-architecture.md</code> delivered: the one 01A deliverable still owed</a>
+    <p>Executes <code>01C</code> Step&nbsp;2 &mdash; design only, zero code. <a href="../../docs/tinytile-architecture.md">The architecture document</a> lands downstream of ADR&nbsp;0012/0013: the tile programming model split off-target/on-target in <code>no_std</code> terms; a v1 C&nbsp;ABI surface under six boundary rules (caller-owned buffers, stable integer errors, no panic across the boundary, generation-tagged handles, non-RT contexts only, additive-only stability); the Tiny Kernel Artifact in field-level detail with its zero-trust <code>TOS64-TKA/1</code> envelope; the admission path walked through all fourteen <code>RCG-*</code> gates; the three-backend device seam; and an RT non-interference argument stated as <strong>seven falsifiable claims with named refutation experiments</strong> &mdash; NI-1..4 closed by construction, memory-bandwidth/DMA/thermal honestly per-platform measured, the composite claim never quotable unqualified. Spine green, counts unchanged. 01C Step&nbsp;1 (owner review) and Step&nbsp;3 (opt-in probes) remain open; implementation stays queued behind Pi&nbsp;5.</p>
   </li>
 </ol>
 
