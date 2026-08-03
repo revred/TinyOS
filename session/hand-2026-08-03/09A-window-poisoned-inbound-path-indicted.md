@@ -779,4 +779,289 @@ priority 1 has its first end-to-end proof. Every rung between here and there is 
 written and host-tested except the one the next capture will name. The board has stopped
 being a mystery and become a witness; keep asking it questions it can answer with a number.
 
-— session close, 2026-08-03, with the card in the Pi OS role and the cable still connected.
+---
+
+## Appendix A — the conviction capture, verbatim (commands and answers, 2026-08-03 ~23:55)
+
+Reproduced exactly so the next session can re-run any line without reconstruction, and so
+the numbers exist in two places (here and the ground-truth file) against file loss. All
+commands ran over `ssh -o BatchMode=yes "revanur@fe80::375c:1a61:f858:2034%16"` with the
+remote command wrapped in a PowerShell single-quoted here-string (§6.6).
+
+### A.1 PCI device inventory and endpoint config
+
+```sh
+ls /sys/bus/pci/devices/
+# 0002:00:00.0      <- the root port / bridge
+# 0002:01:00.0      <- RP1
+
+echo sonu | sudo -S hexdump -C /sys/bus/pci/devices/0002:01:00.0/config | head -6
+# 00000000  e4 1d 01 00 06 04 10 00  00 00 00 02 00 00 00 00
+# 00000010  00 00 41 00 00 00 00 00  00 00 40 00 00 00 00 00
+# 00000020  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00
+# 00000030  00 00 00 00 40 00 00 00  00 00 00 00 26 01 00 00
+# 00000040  01 70 c3 db 08 00 00 00  00 00 00 00 00 00 00 00
+# 00000050  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00
+
+echo sonu | sudo -S setpci -s 0002:01:00.0 COMMAND    # -> 0406
+echo sonu | sudo -S setpci -s 0002:01:00.0 0x10.l     # -> 00410000   BAR0
+echo sonu | sudo -S setpci -s 0002:01:00.0 0x14.l     # -> 00000000   BAR1  <- the number
+echo sonu | sudo -S setpci -s 0002:01:00.0 0x18.l     # -> 00400000   BAR2
+```
+
+Header decode, for the record: `e4 1d 01 00` = vendor `0x1DE4` device `0x0001` (RP1, matches
+`EndpointVendor`'s expectation); class dword `00 00 00 02` at 0x08 (revision 0, class
+`0x020000` Ethernet controller — mildly interesting: RP1 presents as a network device);
+capabilities pointer 0x40 → `01 70 c3 db` = power-management capability, next 0x70. The
+BARs are all 32-bit non-prefetchable (low nibble 0).
+
+### A.2 Bridge config
+
+```sh
+echo sonu | sudo -S hexdump -C /sys/bus/pci/devices/0002:00:00.0/config | head -6
+# 00000000  e4 14 12 27 06 00 10 00  30 00 04 06 00 00 01 00
+# 00000010  00 00 00 00 00 00 00 00  00 01 01 00 00 00 00 00
+# 00000020  00 00 40 00 f1 ff 01 00  00 00 00 00 00 00 00 00
+# 00000030  00 00 00 00 48 00 00 00  00 00 00 00 26 01 00 00
+# 00000040  00 00 00 00 00 00 00 00  01 ac 13 48 08 20 00 00
+
+echo sonu | sudo -S setpci -s 0002:00:00.0 PRIMARY_BUS.b      # -> 00
+echo sonu | sudo -S setpci -s 0002:00:00.0 SECONDARY_BUS.b    # -> 01
+echo sonu | sudo -S setpci -s 0002:00:00.0 SUBORDINATE_BUS.b  # -> 01
+echo sonu | sudo -S setpci -s 0002:00:00.0 0x20.l             # -> 00400000
+echo sonu | sudo -S setpci -s 0002:00:00.0 0x24.l             # -> 0001fff1
+```
+
+Decode: `e4 14 12 27` = Broadcom `0x14E4` device `0x2712` (matches `RootVendor` and the
+`RC_VENDOR` scripted value `0x2712_14E4` in the `HealthyRc` double — note the dword is
+device-high/vendor-low). `0x20 = 0x00400000` → memory base field `0x0000` (bus `0x0000_0000`),
+limit field `0x0040` (bus `0x004F_FFFF` inclusive) — **identical to TinyOS's `MEM_WINDOW`
+constant**. `0x24 = 0x0001fff1` → prefetchable window disabled (base `0xFFF...` > limit
+`0x001...`; the trailing `1`s are the 64-bit-capable flags). Bus triplet 00/01/01 —
+**identical to TinyOS's `BUS_NUMBERS = 0x0001_0100`** (byte-packed primary/secondary/
+subordinate/latency).
+
+### A.3 Controller window registers, live (mmap probe at `PCIE2_BASE = 0x10_0012_0000`)
+
+```sh
+echo sonu | sudo -S /tmp/rp1rd 0x100012400c 0x1000124010 0x1000124070 0x1000124080 0x1000124084
+# 0x100012400c = 0x00000000     WIN0_LO        (PCI target base, low)
+# 0x1000124010 = 0x00000000     WIN0_HI        (PCI target base, high)
+# 0x1000124070 = 0xfff00000     WIN0_BASE_LIMIT
+# 0x1000124080 = 0x0000001f     WIN0_BASE_HI
+# 0x1000124084 = 0x0000001f     WIN0_LIMIT_HI
+```
+
+Decoded with `OutboundWindow::decode`'s own documented encoding: CPU base
+`0x1F_0000_0000`, CPU limit `0x1F_FFFF_FFFF` (limit chunk `0xFFF`), PCI base `0x0`.
+**Identical to TinyOS's `window_program` constants** — the five values our fallback path
+writes are exactly what the working system runs with. (Our `HealthyRc` test double scripts
+`WIN0_BASE_LIMIT = 0x03F0_0000` — a 64 MiB window from the *earlier* capture; Linux tonight
+shows the full-4-GiB variant. Both cover the 4 MiB peripheral span; the span gate passes
+either way. Not a defect, but worth knowing the double and tonight's silicon differ here.)
+
+### A.4 RP1 BAR0 block head (kept for contingency; see Appendix D)
+
+```sh
+echo sonu | sudo -S /tmp/rp1rd 0x1f00410000 0x1f00410004 0x1f00410008 0x1f0041000c \
+                              0x1f00410010 0x1f00410014 0x1f00410018 0x1f0041001c \
+                              0x1f00410020 0x1f00410024 0x1f00410028 0x1f0041002c \
+                              0x1f00410030 0x1f00410034 0x1f00410038 0x1f0041003c
+# +0x00: fffff000 000000ff 00000000 00000000
+# +0x10: fffff000 000000ff 00000001 00000000
+# +0x20: fffff000 000000ff 00000002 00000000
+# +0x30: fffff000 000000ff 00000003 00000000
+```
+
+Shape: four 16-byte entries, `{0xfffff000, 0x000000ff, index, 0}`. Reads like an address
+window/mask table with indices 0–3 (plausibly inbound or MSI-X-adjacent windows). Nobody
+needs to understand it unless Appendix D triggers.
+
+### A.5 The dts translation, from `bcm2712.dtsi` (`rpi-6.12.y`)
+
+```text
+pcie2 = pcie@1000120000, reg = <0x10 0x00120000 0x0 0x9310>
+ranges = <0x02000000 0x00 0x00000000  0x1f 0x00000000  0x00 0xfffffffc>,
+         <0x43000000 0x04 0x00000000  0x1c 0x00000000  0x03 0x00000000>
+dma-ranges = <0x02000000 0x00 0x00000000  0x1f 0x00000000  0x00 0x00400000>,
+             <0x43000000 0x10 0x00000000  0x00 0x00000000  0x10 0x00000000>,
+             <0x03000000 0xff 0xfffff000  0x10 0x00130000  0x00 0x00001000>
+```
+
+First `ranges` row read as (pci-flags, pci-addr-hi, pci-addr-lo, cpu-hi, cpu-lo, size-hi,
+size-lo): non-prefetchable 32-bit memory at **PCI `0x0`** ↔ **CPU `0x1F_0000_0000`**, size
+~4 GiB. The second `dma-ranges` row is the inbound RAM alias PCI `0x10_0000_0000` → RAM 0
+(the `RP1_DMA_RAM_BASE` our beacon DMA already uses — independently confirmed tonight).
+The third is the MSI target page (`mip0` at `0x10_0013_0000`) — irrelevant to this arc
+(we poll, never interrupt, by Feature non-goal).
+
+---
+
+## Appendix B — STORY-P1-09-13 drafts (adapt, do not paste blindly)
+
+Drafted tonight while the evidence was hot. The next session should re-derive each number
+against Appendix A before committing — that re-derivation *is* the review.
+
+### B.1 Story sketch
+
+Title: **"The address nobody wrote: the endpoint's BARs are sized, assigned from the
+capture, and believed only from the mask and the readback."**
+
+Description core: enumeration proved who answers; it never told the device *where to
+listen*. The conviction capture shows every register in the working inbound chain
+byte-identical to ours except three: the endpoint BARs, which Linux assigns and the
+firmware does not (`dmesg`: BAR1 found unassigned at probe). The rung sizes each BAR by the
+architectural all-ones probe (BAR1's mask is dmesg-and-silicon-confirmed `0xffc00000` =
+4 MiB), assigns the capture-pinned bus addresses `BAR0 = 0x0041_0000`, `BAR1 = 0x0000_0000`,
+`BAR2 = 0x0040_0000`, and believes each assignment from its readback — with the stated
+subtlety that BAR1's happy readback is zero, so BAR1's belief rests on the size mask
+(a BAR that answered the probe exists; a readback of the assigned value seals it).
+
+Acceptance-criteria shape (five, following -12's pattern):
+
+1. **Sizing before assignment.** Each BAR is probed all-ones exactly once; a mask readback
+   of `0` or all-ones (no BAR / floating) refuses with its own code and the readback's
+   decisive half; the pinned masks (`0xffffc000` / `0xffc00000` / `0xffff0000` per dmesg
+   probe lines) are asserted by the host tests.
+2. **Assignment believed from readback.** Each BAR is written exactly once with the pinned
+   bus address; a readback disagreeing with the assignment (masked of flag bits) refuses,
+   carrying the readback. BAR1's zero is believed only in conjunction with clause 1's mask.
+3. **Order and idempotence.** BARs are sized/assigned strictly after the vendor gates and
+   strictly before `EP_COMMAND`'s memory-enable write; a re-probe pass that finds the BARs
+   already holding the pinned values performs zero writes (the size probe is skipped when
+   the readback already matches — sizing is destructive to a live BAR, and the re-probe
+   loop must never blink the window).
+4. **Confession + report wiring.** New codes (19: BAR silent, 20: BAR not held — check the
+   next free numbers against `blink_code` at write time), `TOS64-LINK/1` reasons
+   (`bar-silent`, `bar-held`? — pick names in the `clk-*` style), exhaustive-match wiring,
+   every previously pinned line byte-identical.
+5. **Board.** The canvas walks past `CLK-SILENT`: the clock rung's pre-flight now reads a
+   credible one-hot `CLK_SYS_SEL`, the enables land, and the identity rung answers
+   `0x0007` — or the confession names the new rung's number and the ladder continues.
+
+Named debt: bring-up-size only (three BARs, fixed addresses from one capture); a real
+resource allocator is EPIC-P3's root-complex driver. The `0xDEADDEAD`-origin question
+(who exactly poisons an unclaimed read on this RC — see Appendix D) is recorded, not owed.
+
+### B.2 Contract row draft (`story-contracts.tsv`, after -12's row)
+
+```text
+STORY-P1-09-13	FEAT-P1-09	D01	SEC-19,SEC-20	C1,C2	specified	Enumeration proved who answers but never told the device where to listen so each endpoint BAR is sized by the architectural probe assigned from the capture and believed from mask and readback with the memory enable strictly after because an address nobody wrote leaves every read unclaimed
+```
+
+### B.3 Test-double sketch (the decisive host tests)
+
+Extend `HealthyRc` (or a variant) with BAR state: config reads at EP BAR offsets return a
+scripted register that (a) initially reads `0` (the silicon truth with `pciex4_reset=0`),
+(b) answers the all-ones probe with the pinned mask, (c) latches an assigned value and
+returns it thereafter. The arms: probe answered zeros/all-ones → code 19 with readback
+half; assignment readback mismatch → code 20; happy path → exactly four config writes per
+BAR-bearing pass (3 probes + 3 assigns is six — count precisely when writing; the test pins
+the exact write sequence to the exact offsets `0x10/0x14/0x18` through the `EXT_CFG_INDEX`
+path); re-probe pass with matching readbacks → zero writes. Then the pipeline-order test:
+a BAR-refusing RC double proves the clocks block and GEM are never touched (reuse
+`UntouchableClocks`/`UntouchableGem`), and the settled pass proves `EP_COMMAND` is written
+*after* the last BAR readback (scriptable by asserting the double's write log order).
+
+### B.4 Which config offsets, concretely
+
+The endpoint's config space is reached through `EXT_CFG_INDEX` (`RP1_INDEX = 1 << 20`
+selects bus 1 dev 0 fn 0) + the `EXT_CFG_DATA` window — `pcie.rs` already does this for
+`EP_VENDOR` and `EP_COMMAND`; the BAR dwords are plain offsets `0x10`, `0x14`, `0x18` in
+that same window. No new addressing mechanism is needed; the story is three constants, two
+gates, and the wiring.
+
+---
+
+## Appendix C — lamp transcription drills (for the next boxed boot)
+
+The bench reality: the sentence is read off a blinking LED, and tonight's transcription was
+correct on the first try because the shapes were rehearsed. Worked examples for the codes
+the next boot could plausibly show (seven groups, least-significant first, zero = one long
+1.5 s burn, group gap ≈ 1.2 s dark, sentence gap ≈ 3.5 s dark):
+
+- **Code 16, detail 57005** (tonight's actual): groups `6,1, 5,0,0,7,5` → reads as
+  *six blinks, one blink — five blinks, BURN, BURN, seven blinks, five blinks*.
+- **Code 19, detail 0** (BAR probe answered zeros, if 19 is chosen): `9,1, 0,0,0,0,0` →
+  *nine, one — five long burns in a row* (unmistakable: the only all-burn detail).
+- **Code 20, detail 16400 = 0x4010** (BAR readback `0x4010`-shaped): `0,2, 0,0,4,6,1` →
+  *BURN, two — BURN, BURN, four, six, one*.
+- **Code 9, detail 7** (the ladder's next rung succeeding into the old identity gate with a
+  half-broken read would look like): `9,0, 7,0,0,0,0` — if this appears, the BARs landed
+  but the read is still wrong: capture the detail exactly, it is a *different* diagnosis.
+- **Health** (the goal): no sentence at all — the plain 1 Hz pulse, and the canvas line is
+  the real report.
+
+Rule from tonight restated: the latch guarantees a whole sentence is one outcome; if two
+*different* sentences alternate cleanly, that alternation is itself the diagnosis
+(a flickering rung), not a garble.
+
+---
+
+## Appendix D — contingency tree, if the BAR fix does NOT clear the poison
+
+Ranked, with the discriminating observation for each, so a surprising next boot still
+converges in one session:
+
+1. **Reads still `0xDEADDEAD` everywhere after BARs verify-read correctly.** Then the
+   claim-side is fine and the poison source is *between* BAR claim and fabric: RP1's
+   inbound translation. Diff the Appendix A.4 table against TinyOS's readback of the same
+   sixteen words (they are inside BAR0, which will now be readable... unless they aren't —
+   if BAR0 reads poison while BAR1 reads poison but both BARs verified, that symmetry
+   itself says the translation table applies to all BARs). Next capture: widen A.4 to
+   +0x100 under Pi OS and diff word-by-word; the differing word is the register the
+   firmware leaves unset. The rp1 platform driver source (§5.4) names it.
+2. **Reads become `0xFFFFFFFF` (not poison).** Progress in disguise: the TLPs now miss
+   differently — the RC is master-aborting. Re-check the bridge decode against the BAR
+   values actually assigned (a transposed nibble in a pinned constant would do it), and
+   whether `EP_COMMAND`'s memory-enable readback held.
+3. **Reads become zeros.** The claim lands but the fabric target decodes to backed-nothing:
+   almost certainly an offset error — re-verify WIN0's PCI target is 0 *on TinyOS's boot*
+   (the fallback path only writes WIN0 when validation refused; the primary path trusts the
+   firmware's window — and tonight's A.3 numbers are Linux's, not the firmware's. If the
+   firmware's kept window targets PCI `0x1f_00000000` instead of `0x0`, the window gate
+   passes on CPU-side checks while the PCI side is wrong — **check `WindowPci`'s gate
+   actually validates the PCI base against zero; it does (`window-pci` is code 5), so this
+   arm should be impossible — which is itself information: if zeros appear, the gate lied,
+   look at the decode**).
+4. **The clock rung refuses with 17/18 (enable didn't hold / never ran).** The window is
+   fixed and the clocks block is real but the enables misbehave — welcome news; the -12
+   machinery carries the exact readback; proceed on its number.
+5. **Identity flickers 8/9 again (the pre--11 symptom).** The window works, clocks run, and
+   the GEM's answer is unstable — re-open the 08A "flickering readback" thread with the
+   sentence latch's alternation as the instrument; suspect marginal link/retraining
+   (`DL_ACTIVE` re-probe counts in the beat line would corroborate).
+
+In every arm: the board answers with a number, the number picks the branch, and the branch
+was already written down tonight. That is the whole method this ladder has run on since the
+lamp first blinked 3 — keep it.
+
+---
+
+## Appendix E — session ledger (for the auditor)
+
+Commits, all pushed, all CI-green at close:
+
+- `e2e8e35` — STORY-P1-09-12 delivered: `rp1_clocks.rs` (new), `etherrors.rs` (new),
+  `ethernostics.rs` (new), `ethernet.rs` (pipeline slimmed, clock rung spliced, re-exports),
+  `board.rs` (`RP1_CLOCKS_OFFSET`/`_SIZE`), `lib.rs`, story/test/feature/TSV/index spine
+  artifacts, both evidence reports. 13 files, +1444/−522.
+- `241755f` — board verdict postscript: story progress table (criterion 5, refusal arm),
+  test/feature status, ground-truth board-verdict section. 4 files.
+- `20e41a0` — this handover + the conviction capture appended to ground truth + the session
+  index entry. (This appendix and the 0.5 addendum land in the follow-up commit.)
+
+Numbers at close: 231 hal-arm64 host tests (was 221); spine 29 Features / 87 Stories /
+71 Tests / 61 Reports; `cargo fmt --all -- --check` clean; clippy clean on host
+`--all-targets` and `--target aarch64-unknown-none`; crate sizes all under ceiling
+(hal-arm64 at 5135 of 20000). Card: Pi OS role, `pios-backup/` holds the TOS64 pair, staged
+TOS64 kernel `9672f517…` (contains -12; **rebuild after -13 lands before the next
+`cardswap tos64`**). Board: powered per the owner's last action, Pi OS running, link
+steady on `169.254.133.66` + the fe80. Probe: rebuilt at `/tmp/rp1rd` this boot. Linkwatch:
+PID from tonight is stale by next session — re-arm per §11 step 2. The `_soak-p0-03-01.log`
+modification predates this session and was deliberately left uncommitted, as was
+`work/tools/` (untracked by prior sessions' choice — the C# fleet still lacks a committed
+home; a future session should decide its `.gitignore`-or-commit fate explicitly).
+
+— session close, 2026-08-03, with the card in the Pi OS role, the cable still connected,
+the probe rebuilt at `/tmp/rp1rd`, and STORY-P1-09-13 waiting fully-specified for daylight.
