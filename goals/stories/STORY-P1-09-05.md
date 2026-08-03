@@ -81,7 +81,7 @@ Feature) — the park itself is never disturbed.
 
 | Criterion | State |
 |---|---|
-| 1 — heartbeat exact bytes | **Green.** `TOS64-BEAT/1 seq=<dec> state=<beaconing\|parked>` pinned, sequence the only variance. |
+| 1 — heartbeat exact bytes | **Green.** `TOS64-BEAT/1 seq=<dec> state=<beaconing\|parked> fb=<granted\|refused>` pinned, sequence the only variance — `fb=` added 2026-08-03 as 06A's Question-1 discriminator. |
 | 2 — placement and restraint | **Green (host).** One LINK line still (its pinned test unchanged); heartbeat emitted only in the park loop after it; a refused UART write stops heartbeating permanently (wedged-FIFO double). |
 | 3 — bounce pure, bounded, in-bounds | **Green.** Wall reflection driven on all four walls; a too-small surface parks the block; per-tick work is two small rectangles through the `Surface` seam with zero out-of-bounds writes; verdict colors pinned. |
 | 4 — board: something reaches a human | **Blocked on the next power-on.** The untimed experiment this Story exists for: heartbeats on a swept COM5, or motion on a from-power-on monitor — or a dark screen that finally indicts the mailbox path. |
