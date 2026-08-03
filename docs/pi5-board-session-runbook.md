@@ -94,6 +94,17 @@ card's FAT32 boot partition:
 
 The Pi 5's bootloader is in on-board EEPROM; no other firmware files are needed.
 
+**One-command card preparation:** [`docs/pi5-prepare-sd.ps1`](pi5-prepare-sd.ps1)
+does the format *and* the verified copy in one elevated run —
+`powershell -ExecutionPolicy Bypass -File docs\pi5-prepare-sd.ps1 -DiskNumber <n>`.
+It refuses disk 0, refuses non-removable disks, refuses a card carrying data
+(unless `-Force`), demands a typed `YES`, formats MBR + 2 GiB FAT32 labelled
+`TOS64BOOT` (the EEPROM bootloader cannot read exFAT, and Windows cannot
+FAT32-format >32 GiB — hence the small partition), then copies both files and
+verifies the copied `kernel8.img`'s SHA-256 against the build before declaring
+the card ready. A failed verification deletes the bad copy rather than leaving
+a plausible-looking card.
+
 ## 3. Wire and run
 
 1. SD card into the Pi. Adapter into the 3-pin debug connector; USB into the laptop.
