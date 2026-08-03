@@ -108,6 +108,34 @@ not to compete with it.
    than sixteen bits; the mailbox-splash question is moot in practice now
    but `STORY-P1-07-07`'s board criteria still want their honest answer.
 
+## Postscript — the canvas boot ran after all, and the monitor spoke
+
+The owner booted `db5218bf…` before closing. **Full raster paint, then:**
+
+```text
+TINYOS
+TOS64-LINK/1 RP1=ABSENT REASON=ID-MODULE DETAIL=0xDEAD BEACON=SKIPPED
+TOS64-BEAT/1 SEQ=..43..45..48..50.. STATE=PARKED FB=REFUSED
+CODE 09 DETAIL 57005
+```
+
+Three verdicts in one screen. (1) **`STORY-P1-07-09` criterion 4: Green** —
+the geometry bet held exactly, the heartbeat ticks live, and the hex and
+decimal renderings of the same readback (0xDEAD = 57005) cross-validate
+through two independent paths. (2) **`fb=refused` on the proven chain
+settles `STORY-P1-07-07`'s open question**: this firmware refuses the
+legacy mailbox framebuffer; the canvas is the display path. (3) **The
+identity readback is `0xDEAD` — the RP1 fabric's poison sentinel**, not
+noise: the bus routing works and the reads reach RP1, but the GEM block is
+clock-gated/held in internal reset. The next rung is therefore **RP1's
+internal clock/reset tree** — transcribe it from ground truth
+(`/sys/kernel/debug/clk_summary` over SSH on the Pi OS card half, plus the
+`rp1` clocks driver) into the next Story, per the owner's standing
+directive above: that fix is the last one the screen bootstraps; from the
+trained link onward, diagnosis moves to the wire. Minor observed: the
+heartbeat sequence skips numbers on screen (redraw cost eating ticks) —
+cosmetic, note for the canvas story's debt if it persists.
+
 ## State of record
 
 221 hal-arm64 host tests green · spine green at **29 Features / 86 Stories /

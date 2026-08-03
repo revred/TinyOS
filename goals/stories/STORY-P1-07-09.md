@@ -1,6 +1,6 @@
 # STORY-P1-07-09 — The Firmware's Canvas: the Report Becomes Text on the Monitor
 
-Status: **In progress — host half Green 2026-08-03 (RGB565 conversion pinned, the canvas surface bounds-honest, the font total over the report charset, the console composition pure); criterion 4 awaits the board. Not Verified.**
+Status: **In progress — every criterion Green 2026-08-03: the same evening's final boot painted the canvas top-to-bottom and the monitor showed the title, the report line (`REASON=ID-MODULE DETAIL=0xDEAD`), the live ticking heartbeat and the amber refusal — the geometry bet held exactly, and the decimal and hex renderings of the same readback cross-validated on screen. `fb=refused` on the same screen settles `STORY-P1-07-07`'s question: this firmware refuses the legacy mailbox path; the canvas is the display path. Not Verified pending the assurance pass.**
 Feature: [`FEAT-P1-07`](../features/FEAT-P1-07.md)
 Introduced in: the 2026-08-03 evening board session — the owner's order after four blink-counted diagnoses: "fix the display of the HDMI and not just an LED"
 
@@ -72,7 +72,7 @@ hostile; this Story adds the canvas beside it rather than replacing either.
 | 1 — constants and conversion pinned | **Green.** Corners and citation asserted. |
 | 2 — bounds-honest surface | **Green.** Host slice surface, same geometry: rejects, stride, full clear. |
 | 3 — total font and console | **Green.** Report charset covered; composition pinned at positions. |
-| 4 — board | **Blocked on the next power-on.** |
+| 4 — board | **Green.** Final boot of 2026-08-03: full raster paint, then `TINYOS`, `TOS64-LINK/1 RP1=ABSENT REASON=ID-MODULE DETAIL=0xDEAD BEACON=SKIPPED`, the heartbeat ticking live (`SEQ=43…50`), and `CODE 09 DETAIL 57005` — hex and decimal agreeing across two render paths. The identity readback is the RP1 fabric's poison sentinel: the GEM is clock-gated/reset internally; the next rung is RP1's clock/reset tree. |
 
 ## Tests
 
