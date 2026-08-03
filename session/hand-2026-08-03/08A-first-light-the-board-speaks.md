@@ -79,6 +79,16 @@ were written**.
 
 ## Where the next session starts
 
+**Owner directive, recorded at close:** the on-screen `DETAIL` digits are a
+*bootstrap* instrument only — good for exactly as many boots as it takes to
+clear the identity rung. The destination is **diagnosis over the Ethernet
+cable**: once the chain reaches the PHY and the wire trains, the board's
+diagnostic voice moves to `TOS64-*` envelopes over the peer-to-peer link
+(beacon first, then the diagnostic/spoor stream into Ti64Dink), and
+screen-reading is retired exactly as blink-counting was. Every instrument
+this session built — lamp, spelling, canvas — exists to bootstrap the wire,
+not to compete with it.
+
 **The card is staged with `db5218bf…` and sits ready.** Boot it:
 
 1. **Read the monitor.** First boot ever with on-screen text. Expected:
