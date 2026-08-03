@@ -27,6 +27,7 @@ pub mod boot;
 pub mod esr;
 pub mod exception_level;
 pub mod fault;
+pub mod hdmi;
 pub mod pl011;
 pub mod timer;
 pub mod vectors;

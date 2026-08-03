@@ -373,6 +373,14 @@ extern "C" fn continue_at_el1() -> ! {
     let _ =
         report_result(&uart, BOOT_FIXTURE_NAME, boot_self_check(current_el, requested, readback));
 
+    // `STORY-P1-07-07`: the boot splash, strictly after the verdict — the
+    // screen is UX, the serial line is evidence, and the order is the
+    // guarantee that a splash failure (or a hung display path, bounded as it
+    // is) can never delay or alter a byte of the protocol above. Every wait
+    // inside is budget-bounded and every failure silently falls through to
+    // the same park.
+    crate::hdmi::show_splash();
+
     park()
 }
 
