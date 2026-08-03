@@ -162,6 +162,23 @@ that never reaches identity never touches the GPIO. `LE-68` stays open until
 the board's link watch shows a training transition — that is the criterion.
 
 Image rebuilt: **109,276 bytes, sha256 `0f8cf11b…a23550ac`**. The card was
-back in the Pi by then, so **the staged card still carries the pre-release
-image (`e77aeb88…`)** — it must be re-staged with `0f8cf11b…` before the next
-board attempt, or the wire will be exactly as dead as the record above.
+back in the Pi by then and was re-staged with `0f8cf11b…` (hash-verified on
+`E:`) once the owner remounted it.
+
+### Second board attempt, release-enabled image — still flat
+
+Card carrying `0f8cf11b…` (PHY release included), cable connected, powered:
+the laptop NIC stayed `Disconnected / 0 bps` through a four-minute watch at
+4 Hz spanning the power-on. Not a transient. The result does **not** localise
+the fault — at least four stories fit and they produce *different*
+`TOS64-LINK/1` lines nobody can read yet: (a) the firmware ignored or
+overrode `pciex4_reset=0` and the probe honestly reported `rp1=absent`
+without ever touching the PHY; (b) the probe passed but a bank/alias/pad
+transcription in the release is wrong; (c) the release ran and the PHY needs
+more than reset (a power rail, a clock); (d) the discovery path faulted
+after the splash and the board parked on the fault report. **Every branch is
+one serial capture away from being distinguished, and zero branches are
+distinguishable without it.** The adapter loopback (offered twice, TX–RX
+bridge at the adapter end, sixty seconds) is now the sole gate on all
+further Ethernet diagnosis; it was still unexecuted when the session record
+closed.
