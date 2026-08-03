@@ -494,20 +494,35 @@ pub fn contains_complete_verdict_line(bytes: &[u8]) -> bool {
     }
 }
 
+/// The exact `config.txt` the build stages next to `kernel8.img`
+/// (`STORY-P1-09-01` criterion 1 — generated and pinned, no longer folklore):
+///
+/// - `os_check=0` / `kernel=kernel8.img` — divergence record §3; without them
+///   the firmware relocates the image and enters it mid-file, as silence.
+/// - `pciex4_reset=0` — `FEAT-P1-09`: keeps the firmware-established PCIe ×4
+///   link to RP1 alive across the handoff, so the kernel's probe can find the
+///   window instead of a reset controller. A card without this line is the
+///   `rp1=absent reason=port-not-rc` outcome, honestly reported, not a hang.
+pub const CONFIG_TXT: &str = "os_check=0\nkernel=kernel8.img\npciex4_reset=0\n";
+
 /// The SD-card placement instructions, printed after every build so nothing
 /// about the image is folklore held by whoever did it last (`TEST-P1-07-05-A`
 /// clause 1). Every line traces to the divergence record
-/// (`session/hand-2026-07-28/23-bcm2712-divergence-record.md`).
+/// (`session/hand-2026-07-28/23-bcm2712-divergence-record.md`) or, for the
+/// PCIe keep-line, to `FEAT-P1-09`.
 pub fn placement_instructions(image_bytes: usize, image_sha256: &str) -> String {
     format!(
         "place on the SD card's boot (FAT32) partition:\n\
          \x20 kernel8.img   {image_bytes} bytes, sha256 {image_sha256}\n\
-         \x20 config.txt    must contain BOTH of these lines:\n\
+         \x20 config.txt    staged beside the image by this build; it must contain:\n\
          \x20                 os_check=0\n\
          \x20                 kernel=kernel8.img\n\
+         \x20                 pciex4_reset=0\n\
          \x20   (without os_check=0 the Pi 5 firmware relocates the image to 0x200000 and\n\
          \x20    execution starts mid-image, as total silence — divergence record §3, the\n\
-         \x20    one constant no test can check because config.txt lives on the card)\n\
+         \x20    one constant no test can check because config.txt lives on the card;\n\
+         \x20    without pciex4_reset=0 the firmware resets the RP1 link and the kernel\n\
+         \x20    reports rp1=absent — FEAT-P1-09's honest no-network outcome)\n\
          serial: the dedicated 3-pin debug connector (NOT the GPIO header), 115200 8N1;\n\
          \x20       loopback-test the adapter first (TEST-P1-07-01-A clause 1)\n\
          then: reinsert the card and power-cycle the board\n"
@@ -1168,10 +1183,34 @@ mod tests {
     #[test]
     fn the_placement_instructions_name_every_fact_the_divergence_record_pinned() {
         let text = placement_instructions(62_000, "abc123");
-        for needle in
-            ["kernel8.img", "os_check=0", "kernel=kernel8.img", "config.txt", "115200", "abc123"]
-        {
+        for needle in [
+            "kernel8.img",
+            "os_check=0",
+            "kernel=kernel8.img",
+            "pciex4_reset=0",
+            "config.txt",
+            "115200",
+            "abc123",
+        ] {
             assert!(text.contains(needle), "missing `{needle}` in:\n{text}");
+        }
+    }
+
+    // -- config.txt (`TEST-P1-09-01-A` clause 1): generated, not folklore ----
+
+    #[test]
+    fn the_generated_config_carries_the_keep_line_and_both_boot_lines_verbatim() {
+        // Pinned as exact contents: the card-prep tool checks line presence,
+        // the firmware parses key=value, and any drift here is a staged card
+        // that boots differently than the build intended.
+        assert_eq!(CONFIG_TXT, "os_check=0\nkernel=kernel8.img\npciex4_reset=0\n");
+    }
+
+    #[test]
+    fn every_config_line_the_placement_instructions_promise_is_in_the_generated_file() {
+        let text = placement_instructions(1, "d0");
+        for line in CONFIG_TXT.lines() {
+            assert!(text.contains(line), "instructions omit generated line `{line}`");
         }
     }
 }

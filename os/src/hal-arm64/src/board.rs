@@ -66,6 +66,57 @@ pub const DEBUG_UART_CLOCK_HZ: u32 = 9_216_000;
 /// parameter, which names the same base address as [`DEBUG_UART_BASE`].
 pub const DEBUG_UART_BAUD: u32 = 115_200;
 
+// --- FEAT-P1-09: the firmware-kept PCIe link to RP1 -------------------------
+//
+// Source of record for everything below: Raspberry Pi Linux `rpi-6.12.y` —
+// `arch/arm64/boot/dts/broadcom/bcm2712.dtsi` (the `pcie@120000` node's `reg`,
+// `ranges` and `dma-ranges`), `arch/arm64/boot/dts/broadcom/rp1.dtsi` (the
+// `ethernet@100000` node), and `drivers/pci/controller/pcie-brcmstb.c`
+// (register offsets, shared across the driver's SoC table). Retrieved
+// 2026-08-03. Nothing below has been observed on silicon; `TEST-P1-09-01-A`
+// clause 6 is what turns these transcriptions into facts.
+
+/// CPU-physical base of the BCM2712's third PCIe controller (`pcie@120000`,
+/// `linux,pci-domain = <2>`) — the ×4 port the RP1 southbridge hangs off.
+///
+/// Like the debug UART this sits above 4 GiB (`soc` ranges put it at
+/// `0x10_0000_0000 + 0x12_0000`); a 32-bit truncation is silent and lands in
+/// DRAM. See this module's tests.
+pub const PCIE2_BASE: u64 = 0x0000_0010_0012_0000;
+
+/// Size of the PCIe2 controller register window, from the device tree's `reg`.
+pub const PCIE2_SIZE: usize = 0x9310;
+
+/// CPU-physical base of the outbound window the firmware programs onto RP1's
+/// peripheral BAR: `pcie@120000`'s `ranges` maps PCI address `0x0` at CPU
+/// `0x1F_0000_0000`.
+///
+/// This window only answers while the firmware-established link is alive —
+/// which is exactly why `STORY-P1-09-01` interrogates [`PCIE2_BASE`]'s status
+/// and window registers *before* the first read through here.
+pub const RP1_WINDOW_BASE: u64 = 0x0000_001F_0000_0000;
+
+/// The span the probe requires the outbound window to cover: RP1's peripheral
+/// space is 4 MiB (`0x4000_0000..0x4040_0000` on RP1's internal bus).
+pub const RP1_WINDOW_MIN_SPAN: u64 = 0x0040_0000;
+
+/// Offset of the Cadence GEM Ethernet block inside the RP1 window:
+/// `rp1.dtsi` `ethernet@100000` — RP1 bus `0x4010_0000`, so CPU
+/// [`RP1_WINDOW_BASE`]` + 0x10_0000`.
+pub const RP1_GEM_OFFSET: u64 = 0x0010_0000;
+
+/// Size of the GEM register window, from `rp1.dtsi`'s `reg`.
+pub const RP1_GEM_SIZE: usize = 0x4000;
+
+/// The PCI-bus address at which the RP1's bus masters (the GEM's DMA included)
+/// see system RAM: `pcie@120000`'s `dma-ranges` maps CPU `0x0` at PCI
+/// `0x10_0000_0000`.
+///
+/// Every buffer or descriptor address handed to the GEM is a CPU-physical
+/// address **plus this offset**; handing the device an untranslated address
+/// makes it read the wrong 4 GiB of bus space, silently.
+pub const RP1_DMA_RAM_BASE: u64 = 0x0000_0010_0000_0000;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,6 +154,45 @@ mod tests {
         let truncated = u64::from(DEBUG_UART_BASE as u32);
         assert_eq!(truncated, 0x7D00_1000);
         assert!(truncated < MIN_RAM_SIZE, "truncation lands inside RAM, silently");
+    }
+
+    // `TEST-P1-09-01-A`: the PCIe2/RP1 transcriptions, pinned the same way.
+    #[test]
+    fn the_rp1_controller_is_pcie2_at_the_bcm2712_cpu_physical_address() {
+        assert_eq!(PCIE2_BASE, 0x0000_0010_0012_0000);
+        assert_eq!(PCIE2_SIZE, 0x9310);
+    }
+
+    #[test]
+    fn the_rp1_window_maps_pci_zero_at_0x1f_and_covers_the_peripheral_span() {
+        assert_eq!(RP1_WINDOW_BASE, 0x0000_001F_0000_0000);
+        assert_eq!(RP1_WINDOW_MIN_SPAN, 0x0040_0000);
+    }
+
+    #[test]
+    fn the_gem_sits_one_megabyte_into_the_window_like_rp1_bus_0x40100000() {
+        // RP1-internal `0x4010_0000` minus the peripheral-space base
+        // `0x4000_0000` is the window offset — the test states the arithmetic
+        // so a "cleaned up" constant has to argue with it.
+        assert_eq!(RP1_GEM_OFFSET, 0x4010_0000_u64 - 0x4000_0000_u64);
+        assert_eq!(RP1_GEM_SIZE, 0x4000);
+    }
+
+    #[test]
+    fn pcie_addresses_do_not_fit_in_32_bits_and_truncation_lands_in_ram() {
+        // The same silent Pi 4 habit `DEBUG_UART_BASE`'s test pins, for the
+        // three new apertures: truncation faults nothing and lands in DRAM.
+        for base in [PCIE2_BASE, RP1_WINDOW_BASE, RP1_DMA_RAM_BASE] {
+            assert!(base > u64::from(u32::MAX), "Pi 5 PCIe apertures are above 4 GiB");
+            assert!(u64::from(base as u32) < MIN_RAM_SIZE, "truncation lands inside RAM, silently");
+        }
+    }
+
+    #[test]
+    fn dma_addresses_are_cpu_physical_plus_the_recorded_ram_offset() {
+        // `dma-ranges`: CPU 0x0 appears at PCI 0x10_0000_0000. A buffer at the
+        // load address is therefore *not* at its CPU address on the RP1's bus.
+        assert_eq!(RP1_DMA_RAM_BASE + KERNEL_LOAD_ADDRESS, 0x0000_0010_0008_0000);
     }
 
     #[test]

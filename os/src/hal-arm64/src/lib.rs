@@ -25,9 +25,12 @@
 pub mod board;
 pub mod boot;
 pub mod esr;
+pub mod ethernet;
 pub mod exception_level;
 pub mod fault;
+pub mod gem;
 pub mod hdmi;
+pub mod pcie;
 pub mod pl011;
 pub mod timer;
 pub mod vectors;

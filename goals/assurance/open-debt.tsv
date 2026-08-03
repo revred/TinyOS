@@ -34,3 +34,4 @@ STORY-P2-07-02	D14	stand-in-only	The spoor-gate parity run exercises file verbs 
 STORY-P2-07-02	D23	design	The SPOOR verb and decorator run in the same unmeasured shell subsystem; no D23 number is claimable until the measurement harness covers the shell lane	2026-07-30
 STORY-P1-08-01	D21	design	CAN USB and field I O does not exist: no EtherCAT stack NIC driver or field transport is built so no field-I/O guardrail can be closed; the motion contracts are the data plane that domain will carry	2026-07-30
 STORY-P1-08-02	D21	design	CAN USB and field I O does not exist: no EtherCAT stack NIC driver or field transport is built so no field-I/O guardrail can be closed; typed feedback ownership is data-plane contract work for that domain	2026-07-30
+STORY-P1-09-03	D20	design	The TCP IP data path domain has no stack behind it; a single raw broadcast beacon is its first fragment and none of the 25 guardrails can close before the stack exists	2026-08-03

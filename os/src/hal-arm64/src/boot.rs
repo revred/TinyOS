@@ -381,7 +381,13 @@ extern "C" fn continue_at_el1() -> ! {
     // the same park.
     crate::hdmi::show_splash();
 
-    park()
+    // `FEAT-P1-09`: the discovery signal, strictly after both the verdict and
+    // the splash. It appends exactly one `TOS64-LINK/1` line — the protocol
+    // lines above are already on the wire and cannot be perturbed — then
+    // parks, beaconing board-presence while the link and the transmit path
+    // stay healthy. Every wait inside is budget-bounded and every refusal
+    // resolves to the same fail-safe park this function always ended in.
+    crate::ethernet::announce_and_park(&uart)
 }
 
 /// Parks the core in `wfe` forever.
