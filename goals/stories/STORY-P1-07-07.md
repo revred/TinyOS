@@ -60,6 +60,14 @@ The discipline that keeps this from corrupting the Feature:
    attached shows the splash within firmware-boot time — the UX moment this
    Story exists for, evidenced by photograph beside the capture.
 
+## Progress, 2026-08-03 (evening)
+
+The adaptive-mode image (`18a28448…54d9`) was staged to the card and powered on
+the physical board. **The board outcome is unconfirmed** — an initial sighting
+report was withdrawn by the owner moments later ("too early to celebrate"), so
+nothing is recorded as observed. The criteria close on committed evidence
+(photograph beside a capture; serial byte-identity), and none exists yet.
+
 ## Named debt this Story leaves open
 
 - No general display driver, no compositor, no text console, no double

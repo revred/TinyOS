@@ -117,6 +117,16 @@ a plausible-looking card.
 
 3. Power-cycle the board when the tool says so, and let the capture finish.
 
+## 3b. What the screen shows (since `STORY-P1-07-07`, 2026-08-03)
+
+A monitor on HDMI is now a first-class boot indicator: **success shows
+"TinyOS" in block letters, centred at the display's native resolution**
+(fallback 720p), painted strictly after the serial verdict — designed
+behaviour, not yet confirmed on silicon. A quiet dark screen means *boot
+possibly succeeded but the splash path failed* — only the serial capture
+distinguishes that from a hang. A firmware diagnostic screen still means the
+boot never reached our code.
+
 ## 4. Read the result — five distinguishable exits
 
 | Exit | Meaning | What you do |
