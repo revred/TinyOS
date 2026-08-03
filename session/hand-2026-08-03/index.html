@@ -105,6 +105,10 @@
     <span class="num">03A</span><a href="03A-headless-pi5-direction.md">Owner direction: the Pi&nbsp;5 is headless; the display is a remote desktop over peer-to-peer Ethernet</a>
     <p>No dedicated display, ever: any device connects to the Pi&nbsp;5&rsquo;s Ethernet port peer-to-peer (the recorded link-local deploy transport) and gets the UX as a remote desktop; the same authenticated link carries dev loop, deploy and the spoor stream. Converges with TinySpot and the Ti64 console&rsquo;s seam architecture, and dissolves the on-target display problem. Chain: serial bootstrap (unchanged) &rarr; <code>LE-26</code> Stories (PCIe &rarr; RP1 &rarr; NIC/DMA as a C2 service) &rarr; deploy-protocol/WCI session &rarr; UX stream as a console tab. Splash stays as-built, photo criterion opportunistic; first adaptive-splash boot remains <strong>unconfirmed</strong> (initial sighting withdrawn, recorded honestly).</p>
   </li>
+  <li class="entry">
+    <span class="num">04A</span><a href="04A-tinyremote-vision.md">Owner direction: TinyRemote &mdash; the cable is the signal, the window is the machine</a>
+    <p>Names the product that replaces the ditched display: plug a peer-to-peer Ethernet cable between a TinyOS Pi&nbsp;5 and a laptop and the <strong>TinyRemote</strong> host application renders the TinyOS desktop as if the machine were in that window &mdash; with a chooser for &ldquo;something else&rdquo; (Hardware Evidence, spoors, deploy, diagnostics). The cable is a <em>discovery</em> signal, never authority: sessions authenticate per the deploy-protocol/WCI model, remote bytes stay data, escape sequences stay inert. The Ti64 console is the embryo &mdash; its seams grow a transport. Chain unchanged: serial bring-up &rarr; <code>LE-26</code> driver Stories &rarr; authenticated session &rarr; UX stream &rarr; chooser; first Ethernet Story can ship board-present detection as the earliest visible win.</p>
+  </li>
 </ol>
 
 <footer>
