@@ -139,6 +139,33 @@ path), Ethernet (`LE-68`), serial (unverified wiring). Owner called it:
 back to the drawing board. The one test that splits the space, still undone,
 is the sixty-second adapter loopback.
 
+## The constraint round: `STORY-P1-09-05`, the heartbeat on every channel
+
+The owner then drew the real boundary — no monitor experiments, no Ethernet,
+no bridging wires, *"solve with the constraints we have"* — and asked the
+question this Story answers: **"what stopped you from making a ball bounce?"**
+Acknowledged in the Story itself: nothing but a too-literal reading of 03A's
+no-display-investment line. The board's problem all along was that it speaks
+*once*, at boot, so hearing it required wiring ∧ clock ∧ operator timing to
+hold simultaneously. `STORY-P1-09-05` (host Green same evening; 182 hal-arm64
+tests) removes the timing term and adds a second channel:
+
+- **Serial:** the park loop emits `TOS64-BEAT/1 seq=N state=…` every second,
+  forever — so the host can listen at leisure and *sweep bauds*; a wrong UART
+  clock becomes bytes at a findable rate instead of silence, and the first
+  contact of any kind also carries the `TOS64-LINK/1` verdict.
+- **Screen:** the splash surface, if the firmware granted one, animates — a
+  verdict-colored block (green = beaconing, amber = parked) bouncing at
+  ~10 Hz. A monitor connected from power-on shows *motion* whenever the board
+  is alive; a dark screen under exactly those conditions finally becomes
+  evidence against the mailbox path itself.
+
+Each channel stops independently and fail-safe (wedged UART, stuck counter);
+the pinned protocol lines and the single LINK line are untouched. Image:
+**117,780 bytes, sha256 `114bc9b3…418374c2`** — the card was in the Pi at
+build time and **must be re-staged with this image** for the untimed
+experiment to begin.
+
 ## Same evening, continued — `LE-68`'s answer found and implemented
 
 The owner said "lets go", the two commits were pushed (**CI green**, run

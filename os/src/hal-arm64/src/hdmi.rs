@@ -298,6 +298,89 @@ const GLYPHS: [[u8; 8]; 6] = [
     [0x3E, 0x60, 0x60, 0x3C, 0x06, 0x06, 0x7C, 0x00],
 ];
 
+// --- STORY-P1-09-05: the visual heartbeat --------------------------------
+//
+// The splash was a single static frame, which made a live board and a dead
+// one look identical on screen. The park loop now animates a small block
+// over the splash so a monitor connected from power-on shows *motion*
+// whenever the board is alive, with the block's color carrying the
+// discovery verdict. Pure state + pure painting over the same `Surface`
+// seam; the glue only ticks it.
+
+/// The bouncing block: position, velocity, size — stepped by a pure
+/// function so wall reflection is host-tested, corners included.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Bounce {
+    /// Left edge, pixels.
+    pub x: u32,
+    /// Top edge, pixels.
+    pub y: u32,
+    /// Block edge length, pixels.
+    pub size: u32,
+    dx: i32,
+    dy: i32,
+}
+
+/// Pixels the block moves per tick (the park loop ticks at roughly 10 Hz,
+/// so this reads as unhurried, unmistakable motion).
+pub const BOUNCE_STEP: i32 = 16;
+
+impl Bounce {
+    /// A block sized to the surface (1/24th of the smaller dimension,
+    /// clamped to at least 8 pixels), starting at the top-left of the text
+    /// area's clear margin, moving down-right.
+    #[must_use]
+    pub const fn new(width: u32, height: u32) -> Self {
+        let smaller = if width < height { width } else { height };
+        let size = if smaller / 24 < 8 { 8 } else { smaller / 24 };
+        Bounce { x: 0, y: 0, size, dx: BOUNCE_STEP, dy: BOUNCE_STEP }
+    }
+
+    /// Advances one tick inside `width × height`, reflecting at the walls.
+    /// A surface smaller than the block parks it at the origin.
+    pub fn step(&mut self, width: u32, height: u32) {
+        let max_x = width.saturating_sub(self.size) as i32;
+        let max_y = height.saturating_sub(self.size) as i32;
+        let mut next_x = self.x as i32 + self.dx;
+        if next_x < 0 || next_x > max_x {
+            self.dx = -self.dx;
+            next_x = (self.x as i32 + self.dx).clamp(0, max_x);
+        }
+        let mut next_y = self.y as i32 + self.dy;
+        if next_y < 0 || next_y > max_y {
+            self.dy = -self.dy;
+            next_y = (self.y as i32 + self.dy).clamp(0, max_y);
+        }
+        self.x = next_x.clamp(0, max_x) as u32;
+        self.y = next_y.clamp(0, max_y) as u32;
+    }
+}
+
+/// Fills a rectangle through the seam; the surface's own bounds checks are
+/// the last line of defence, but the caller stays in-bounds by construction.
+pub fn fill_rect<S: Surface>(surface: &mut S, x: u32, y: u32, w: u32, h: u32, color: u32) {
+    let mut row = 0;
+    while row < h {
+        let mut col = 0;
+        while col < w {
+            surface.put(x + col, y + row, color);
+            col += 1;
+        }
+        row += 1;
+    }
+}
+
+/// The block's color carries the discovery verdict at a glance: green while
+/// the board-present beacon is running, amber while parked without one.
+#[must_use]
+pub const fn heartbeat_color(beaconing: bool) -> u32 {
+    if beaconing {
+        0x0020_C020
+    } else {
+        0x00E0_9010
+    }
+}
+
 /// The integer scale the text is drawn at for a given surface: large enough
 /// to fill roughly half the width or a third of the height, never zero.
 #[must_use]
@@ -433,9 +516,11 @@ mod board {
 
     /// The framebuffer as a [`Surface`]: volatile pixel writes through the
     /// validated descriptor, coordinates re-checked here so no caller can
-    /// aim a write outside the buffer the firmware granted.
-    struct Framebuffer {
-        info: FramebufferInfo,
+    /// aim a write outside the buffer the firmware granted. Crate-visible so
+    /// the park loop's visual heartbeat (`STORY-P1-09-05`) can keep painting
+    /// the surface the splash validated.
+    pub(crate) struct Framebuffer {
+        pub(crate) info: FramebufferInfo,
     }
 
     impl Surface for Framebuffer {
@@ -524,7 +609,7 @@ mod board {
     /// Every failure returns silently: the caller is post-verdict boot code
     /// whose next act is `park()`, and a dark screen is the accepted fallback
     /// (`TEST-P1-07-07-A` clause 4). Never called before the verdict.
-    pub fn show_splash() {
+    pub fn show_splash() -> Option<FramebufferInfo> {
         // Phase 1: the native-size query. A failed exchange or hostile
         // answer degrades to the fallback mode, never to an abort — the
         // splash owes the operator its best effort.
@@ -541,24 +626,35 @@ mod board {
         let mut message = PropertyMessage::framebuffer_request(width, height);
         let buffer_address = message.words().as_ptr() as usize as u32;
         if !exchange(buffer_address) {
-            return;
+            return None;
         }
 
         // The firmware wrote the response into our buffer; validate whole.
         // The *answer's* geometry is what gets drawn into — the firmware may
         // have granted something other than what was asked.
         let Ok(info) = parse_response(message.words_mut()) else {
-            return;
+            return None;
         };
         render_splash(&mut Framebuffer { info });
+        Some(info)
     }
 }
 
-/// Paints the splash on the board; a no-op in host builds so the boot path
-/// can call it unconditionally.
-pub fn show_splash() {
+#[cfg(target_arch = "aarch64")]
+pub(crate) use board::Framebuffer;
+
+/// Paints the splash on the board and returns the validated descriptor so
+/// the park loop can keep the surface alive (`STORY-P1-09-05`'s visual
+/// heartbeat); `None` on the host or on any silent splash failure.
+pub fn show_splash() -> Option<FramebufferInfo> {
     #[cfg(target_arch = "aarch64")]
-    board::show_splash();
+    {
+        board::show_splash()
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -753,6 +849,65 @@ mod tests {
     }
 
     // --- clause 3: the renderer is pure, bounded and centred ----------------
+
+    // --- STORY-P1-09-05 clause 4: the visual heartbeat is pure ---------------
+
+    #[test]
+    fn the_bounce_reflects_at_every_wall_and_survives_a_corner() {
+        let (w, h) = (200, 120);
+        let mut bounce = Bounce::new(w, h);
+        let size = bounce.size;
+        // Drive it long enough to visit every wall multiple times.
+        let mut hit_right = false;
+        let mut hit_bottom = false;
+        let mut hit_left = false;
+        let mut hit_top = false;
+        for _ in 0..10_000 {
+            bounce.step(w, h);
+            assert!(bounce.x + size <= w, "x escaped: {}", bounce.x);
+            assert!(bounce.y + size <= h, "y escaped: {}", bounce.y);
+            hit_right |= bounce.x + size + (BOUNCE_STEP as u32) > w;
+            hit_left |= bounce.x < BOUNCE_STEP as u32;
+            hit_bottom |= bounce.y + size + (BOUNCE_STEP as u32) > h;
+            hit_top |= bounce.y < BOUNCE_STEP as u32;
+        }
+        assert!(
+            hit_left && hit_top && hit_right && hit_bottom,
+            "the block never visited every wall: l={hit_left} t={hit_top} r={hit_right} b={hit_bottom}"
+        );
+    }
+
+    #[test]
+    fn a_surface_smaller_than_the_block_parks_it_rather_than_escaping() {
+        let mut bounce = Bounce::new(4, 4); // size clamps to 8 > surface
+        for _ in 0..100 {
+            bounce.step(4, 4);
+            assert_eq!((bounce.x, bounce.y), (0, 0));
+        }
+    }
+
+    #[test]
+    fn fill_rect_stays_in_bounds_and_paints_exactly_its_rectangle() {
+        let mut surface = MockSurface::new(64, 48);
+        fill_rect(&mut surface, 10, 20, 8, 8, 0xABCD);
+        assert_eq!(surface.out_of_bounds, 0);
+        let painted = (0..48)
+            .flat_map(|y| (0..64).map(move |x| (x, y)))
+            .filter(|&(x, y)| surface.at(x, y) == 0xABCD)
+            .count();
+        assert_eq!(painted, 64, "exactly the 8x8 block");
+        assert_eq!(surface.at(10, 20), 0xABCD);
+        assert_eq!(surface.at(17, 27), 0xABCD);
+        assert_eq!(surface.at(18, 27), 0);
+    }
+
+    #[test]
+    fn the_heartbeat_color_is_a_pinned_verdict_function() {
+        assert_eq!(heartbeat_color(true), 0x0020_C020, "beaconing is green");
+        assert_eq!(heartbeat_color(false), 0x00E0_9010, "parked is amber");
+        assert_ne!(heartbeat_color(true), BACKGROUND);
+        assert_ne!(heartbeat_color(false), BACKGROUND);
+    }
 
     struct MockSurface {
         width: u32,

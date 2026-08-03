@@ -379,15 +379,17 @@ extern "C" fn continue_at_el1() -> ! {
     // is) can never delay or alter a byte of the protocol above. Every wait
     // inside is budget-bounded and every failure silently falls through to
     // the same park.
-    crate::hdmi::show_splash();
+    let splash = crate::hdmi::show_splash();
 
     // `FEAT-P1-09`: the discovery signal, strictly after both the verdict and
     // the splash. It appends exactly one `TOS64-LINK/1` line — the protocol
     // lines above are already on the wire and cannot be perturbed — then
-    // parks, beaconing board-presence while the link and the transmit path
-    // stay healthy. Every wait inside is budget-bounded and every refusal
-    // resolves to the same fail-safe park this function always ended in.
-    crate::ethernet::announce_and_park(&uart)
+    // parks, keeping every channel the board has alive (`STORY-P1-09-05`):
+    // the serial heartbeat, the splash-surface animation, and the beacon
+    // while the link and transmit path stay healthy. Every wait inside is
+    // budget-bounded and every refusal resolves to the same fail-safe park
+    // this function always ended in.
+    crate::ethernet::announce_and_park(&uart, splash)
 }
 
 /// Parks the core in `wfe` forever.

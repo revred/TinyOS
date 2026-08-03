@@ -104,6 +104,28 @@ impl LineBuilder {
         }
     }
 
+    /// Decimal, most significant digit first, no leading zeros.
+    fn push_dec(&mut self, value: u32) {
+        let mut digits = [0u8; 10];
+        let mut count = 0;
+        let mut rest = value;
+        loop {
+            digits[count] = b'0' + (rest % 10) as u8;
+            count += 1;
+            rest /= 10;
+            if rest == 0 {
+                break;
+            }
+        }
+        while count > 0 {
+            count -= 1;
+            if self.at < LINK_LINE_CAPACITY {
+                self.bytes[self.at] = digits[count];
+                self.at += 1;
+            }
+        }
+    }
+
     /// Lower-case hex, fixed width, most significant nibble first.
     fn push_hex(&mut self, value: u64, nibbles: usize) {
         let mut index = nibbles;
@@ -195,6 +217,31 @@ pub fn link_line(discovery: &Discovery, beacon: BeaconField) -> ([u8; LINK_LINE_
     }
     line.push("\n");
     (line.bytes, line.at)
+}
+
+/// Builds one `TOS64-BEAT/1` heartbeat line (`STORY-P1-09-05`): emitted every
+/// park period so a passive listener can find a powered board without any
+/// operator timing, and so a wrong UART clock becomes bytes at a findable
+/// baud instead of silence. Pure; pinned by the tests.
+pub fn heartbeat_line(seq: u32, beaconing: bool) -> ([u8; LINK_LINE_CAPACITY], usize) {
+    let mut line = LineBuilder::new();
+    line.push("TOS64-BEAT/1 seq=");
+    line.push_dec(seq);
+    line.push(" state=");
+    line.push(if beaconing { "beaconing" } else { "parked" });
+    line.push("\n");
+    (line.bytes, line.at)
+}
+
+/// Emits one heartbeat over the UART; `false` means the write refused and
+/// heartbeating must stop permanently — fail-safe over keep-trying, and the
+/// park itself is never disturbed.
+pub fn emit_heartbeat<M: Mmio>(uart: &crate::pl011::Pl011<M>, seq: u32, beaconing: bool) -> bool {
+    let (line, len) = heartbeat_line(seq, beaconing);
+    match core::str::from_utf8(&line[..len]) {
+        Ok(text) => uart.write_str(text).is_ok(),
+        Err(_) => false,
+    }
 }
 
 /// Whether a discovery outcome earns a transmit attempt: only a present GEM,
@@ -445,6 +492,56 @@ mod tests {
         );
     }
 
+    // TEST-P1-09-05-A clauses 1 and 3: the heartbeat is exact bytes and
+    // stops fail-safe on a refused write.
+
+    #[test]
+    fn the_heartbeat_line_is_exact_bytes_with_both_states_driven() {
+        let (bytes, len) = heartbeat_line(1, true);
+        assert_eq!(
+            core::str::from_utf8(&bytes[..len]).unwrap(),
+            "TOS64-BEAT/1 seq=1 state=beaconing\n"
+        );
+        let (bytes, len) = heartbeat_line(42, false);
+        assert_eq!(
+            core::str::from_utf8(&bytes[..len]).unwrap(),
+            "TOS64-BEAT/1 seq=42 state=parked\n"
+        );
+        let (a, len_a) = heartbeat_line(7, true);
+        let (b, len_b) = heartbeat_line(8, true);
+        assert_eq!(len_a, len_b);
+        let differing: Vec<usize> = (0..len_a).filter(|&i| a[i] != b[i]).collect();
+        assert_eq!(differing.len(), 1, "the sequence digit is the only variance");
+    }
+
+    #[test]
+    fn a_refused_uart_write_stops_the_heartbeat_permanently() {
+        use crate::pl011::{register, Pl011};
+        /// Always-ready wire, so the write succeeds.
+        struct ReadyWire;
+        impl Mmio for ReadyWire {
+            fn read_u32(&self, _offset: usize) -> u32 {
+                0
+            }
+            fn write_u32(&self, _offset: usize, _value: u32) {}
+        }
+        assert!(emit_heartbeat(&Pl011::new(ReadyWire), 1, false));
+        /// A wedged transmit FIFO: the flag register always reads full, so
+        /// `write_str` times out and the heartbeat must report stop.
+        struct WedgedWire;
+        impl Mmio for WedgedWire {
+            fn read_u32(&self, offset: usize) -> u32 {
+                if offset == register::FR {
+                    1 << 5 // TXFF: transmit FIFO full, forever
+                } else {
+                    0
+                }
+            }
+            fn write_u32(&self, _offset: usize, _value: u32) {}
+        }
+        assert!(!emit_heartbeat(&Pl011::new(WedgedWire), 2, true));
+    }
+
     #[test]
     fn an_unknown_phy_skips_the_beacon_by_construction() {
         let unknown = Discovery::Present {
@@ -526,12 +623,8 @@ mod glue {
         true
     }
 
-    /// Waits roughly one second (one counter-frequency's worth of ticks).
-    fn wait_one_period() -> bool {
-        wait_ticks(counter_frequency().max(1))
-    }
-
-    /// Bounded millisecond wait for `STORY-P1-09-04`'s hold and settle.
+    /// Bounded millisecond wait for `STORY-P1-09-04`'s hold and settle and
+    /// `STORY-P1-09-05`'s park tick.
     fn wait_millis(ms: u32) -> bool {
         wait_ticks((counter_frequency().max(1) / 1000).max(1) * u64::from(ms))
     }
@@ -556,10 +649,16 @@ mod glue {
     }
 
     /// The whole device half of 04A's sentence, then the park that keeps
-    /// announcing: discover, attempt the first beacon, report the one
-    /// `TOS64-LINK/1` line, then beacon once per period until a transmit
-    /// refuses — after which the board is simply parked, fail-safe.
-    pub fn announce_and_park(uart: &Pl011<VolatileMmio>) -> ! {
+    /// announcing on every channel the board has (`STORY-P1-09-05`):
+    /// discover, attempt the first beacon, report the one `TOS64-LINK/1`
+    /// line — then tick at ~10 Hz, animating the splash surface every tick
+    /// and emitting a serial heartbeat plus (if eligible) a beacon frame
+    /// every tenth. Each channel stops independently and fail-safe; when
+    /// every channel has stopped, the board is simply parked.
+    pub fn announce_and_park(
+        uart: &Pl011<VolatileMmio>,
+        splash: Option<crate::hdmi::FramebufferInfo>,
+    ) -> ! {
         // SAFETY: the constants are the recorded CPU-physical bases of the
         // PCIe2 controller block and the GEM window; both are naturally
         // aligned register files this core may access uncached.
@@ -592,22 +691,59 @@ mod glue {
             let _ = uart.write_str(text);
         }
 
-        if let (BeaconField::Running, Some((speed, full_duplex))) =
-            (beacon, beacon_eligible(&discovery))
-        {
-            let mut seq: u32 = 1;
-            loop {
-                if !wait_one_period() {
+        let mut beaconing = matches!(beacon, BeaconField::Running);
+        let speed_config = beacon_eligible(&discovery);
+        let mut heartbeating = true;
+        let mut animation = splash.map(|info| {
+            (crate::hdmi::Framebuffer { info }, crate::hdmi::Bounce::new(info.width, info.height))
+        });
+        let mut beat_seq: u32 = 1;
+        let mut frame_seq: u32 = 1;
+        let mut tick: u32 = 0;
+        loop {
+            if !wait_millis(100) {
+                // A stuck counter stops every periodic channel at once.
+                break;
+            }
+            tick = tick.wrapping_add(1);
+            if let Some((surface, bounce)) = animation.as_mut() {
+                let (old_x, old_y, size) = (bounce.x, bounce.y, bounce.size);
+                bounce.step(surface.info.width, surface.info.height);
+                crate::hdmi::fill_rect(surface, old_x, old_y, size, size, crate::hdmi::BACKGROUND);
+                crate::hdmi::fill_rect(
+                    surface,
+                    bounce.x,
+                    bounce.y,
+                    size,
+                    size,
+                    crate::hdmi::heartbeat_color(beaconing),
+                );
+            }
+            if tick.is_multiple_of(10) {
+                if beaconing {
+                    match speed_config {
+                        Some((speed, full_duplex)) => {
+                            let ring_dma = stage_frame(frame_seq);
+                            if gem::transmit_once(&gem_window, ring_dma, speed, full_duplex)
+                                .is_err()
+                            {
+                                // Fail-safe over keep-trying: one refusal
+                                // ends the beacon permanently.
+                                beaconing = false;
+                            } else {
+                                frame_seq = frame_seq.wrapping_add(1);
+                            }
+                        }
+                        None => beaconing = false,
+                    }
+                }
+                if heartbeating && !emit_heartbeat(uart, beat_seq, beaconing) {
+                    heartbeating = false;
+                }
+                beat_seq = beat_seq.wrapping_add(1);
+                if !beaconing && !heartbeating && animation.is_none() {
                     break;
                 }
-                let ring_dma = stage_frame(seq);
-                if gem::transmit_once(&gem_window, ring_dma, speed, full_duplex).is_err() {
-                    // Fail-safe over keep-trying: one refusal ends the
-                    // beacon; the board stays parked and diagnosable over
-                    // serial and splash.
-                    break;
-                }
-                seq = seq.wrapping_add(1);
             }
         }
         crate::boot::park()
