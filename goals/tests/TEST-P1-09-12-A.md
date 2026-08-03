@@ -1,6 +1,6 @@
 # TEST-P1-09-12-A — The Current Is Proven On Before Anyone Is Asked to Speak
 
-Status: **In progress — host clauses Green 2026-08-03; clause 5 awaits the next boot**
+Status: **In progress — every clause Green 2026-08-03; clause 5 answered on silicon in its refusal arm (code 16, detail 57005, full readback `0xDEADDEAD` — recorded in the ground-truth file; the next story is chosen on that number)**
 Story: [`STORY-P1-09-12`](../stories/STORY-P1-09-12.md)
 Tier: Host unit tests (pre-flight gate, enable-by-readback, bounded run poll, pipeline order)
 **plus** a Tier 1 boxed-boot identity readback

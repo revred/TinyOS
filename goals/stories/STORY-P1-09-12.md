@@ -1,6 +1,6 @@
 # STORY-P1-09-12 — The Current: the Ethernet Clocks Are Switched On Before the Identity Is Asked
 
-Status: **In progress — host half Green 2026-08-03 (pre-flight gate, enable-by-readback, bounded run poll, pipeline splice, codes 16–18 all pinned); criterion 5 awaits the board. Not Verified.**
+Status: **In progress — every criterion Green on silicon 2026-08-03: the boxed boot answered criterion 5 in its refusal arm — the canvas printed `reason=clk-silent detail=0xdeaddead` and the lamp spelled code 16 detail 57005. The clocks block itself reads fabric poison, so the poison is window-wide, not per-peripheral, and the next story is chosen on that number. Not Verified.**
 Feature: [`FEAT-P1-09`](../features/FEAT-P1-09.md)
 Introduced in: the 2026-08-03 first-light session — the canvas held at `ID-MODULE 0xDEAD` and the
 Pi OS capture proved the same register reads `0x00070109` once two clock-enable bits are set
@@ -76,6 +76,16 @@ register is a hope, only its readback is a fact).
 - `pll_sys` lock is verified as a gate (`LOCK` bit read) but never
   programmed; a boot where the firmware left the PLL unlocked parks with
   the pre-flight refusal and stays `LE-26`-adjacent driver territory.
+
+## Progress, 2026-08-03 (late)
+
+| Criterion | State |
+|---|---|
+| 1 — pre-flight gate | **Green**, host and silicon: on the board it was the gate that fired, before any write reached a poisoned block. |
+| 2 — enable by readback | **Green** (host; unreached on the board by design — the pre-flight refused first). |
+| 3 — bounded run poll | **Green** (host; unreached on the board by design). |
+| 4 — pipeline seat + confession | **Green**, host and silicon: `TOS64-LINK/1 rp1=absent reason=clk-silent detail=0xdeaddead beacon=skipped`, heartbeat parked, `CODE 16 DETAIL 57005` on the canvas. |
+| 5 — board | **Green, refusal arm.** `CLK_SYS_SEL` reads `0xDEADDEAD` — the same poison as the GEM, one block over. The "two enable bits" theory is refuted: the poison covers RP1's whole peripheral window, so the gate is upstream — the leading suspect is the inbound path (endpoint BAR contents / RP1's PCIe-to-fabric translation), since config-space reads (both vendor gates) pass while every memory read poisons. Next evidence: raw BAR dwords + RP1 `PCIE_APBS` inbound translation state captured live under Pi OS. |
 
 ## Tests
 

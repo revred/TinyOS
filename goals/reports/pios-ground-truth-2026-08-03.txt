@@ -1093,3 +1093,23 @@ reading of the evidence for STORY-P1-09-12:
   (bit11) with AUXSRC=0 and DIV_INT=1 (their power-on defaults per driver; verify by readback on our
   boot before writing). Expected rung on the board: read CLK_ETH_CTRL (expect bit11 clear, bit28
   clear), write enable, poll bit28, then read GEM_MID expecting 0x00070109 instead of 0xDEAD poison.
+
+===== BOARD VERDICT (TinyOS boxed boot, 2026-08-03 late — kernel 9672f517, STORY-P1-09-12 on board) =====
+canvas:  TOS64-LINK/1 RP1=ABSENT REASON=CLK-SILENT DETAIL=0xDEADDEAD BEACON=SKIPPED
+         TOS64-BEAT/1 SEQ=50,51,52... STATE=PARKED FB=REFUSED
+         CODE 16 DETAIL 57005
+lamp:    spelled the same sentence (code 16, detail 57005 = 0xDEAD)
+link:    laptop NIC never trained (beacon skipped, as reported)
+
+reading: CLK_SYS_SEL @ 0x1F_0001_8020 reads 0xDEADDEAD under TinyOS — the clocks block itself is
+poisoned, same as the GEM one block over. The per-peripheral clock-gating theory is REFUTED on
+silicon: the poison covers the whole RP1 peripheral window. Config-space reads pass (both vendor
+gates green on this same boot); every memory-space read poisons. The gate is therefore on the
+inbound memory path: leading suspects are (a) the endpoint BAR1 contents our enumeration wrote
+vs the bus address the bridge's outbound window emits, and (b) RP1's internal PCIe-to-fabric
+inbound translation (PCIE_APBS block) that Pi OS may program before peripherals become readable.
+Note from THIS file (Pi OS dmesg, lines ~299-309): at probe time BAR1 read [mem 0xffc00000-
+0xffffffff] and Linux REASSIGNED it to 0x1f00000000, and lspci prints Region 1 as [virtual] —
+the BAR register's raw dword does not hold the CPU address. Next capture owed (Pi OS role):
+raw config dwords 0x10/0x14/0x18 of 0000:01:00.0, the bridge's outbound window registers live,
+and the RP1 PCIE_APBS inbound translation registers, all while ethernet works.

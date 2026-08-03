@@ -62,7 +62,7 @@ class driver remain `EPIC-P3` / `EPIC-P1_5` territory, and the transport decisio
 | [`STORY-P1-09-09`](../stories/STORY-P1-09-09.md) | The window programmed, not presumed: a window-class refusal writes the capture's recorded mapping once and revalidates — belief from the readback alone, the second verdict final | In progress — host half Green 2026-08-03; criterion 4 awaits the board |
 | [`STORY-P1-09-10`](../stories/STORY-P1-09-10.md) | The introduction: bus numbers, forwarding window and memory decode programmed at bring-up size with both vendors verified first — refusals honest end-to-end as codes 14 and 15 | In progress — host half Green 2026-08-03; criterion 4 awaits the board |
 | [`STORY-P1-09-11`](../stories/STORY-P1-09-11.md) | The spelling: seven fixed decimal digit groups (code then sixteen decisive bits, ones first, zero as ten blinks) — the owner's readout design; supersedes the single-count pattern | In progress — host half Green 2026-08-03; criterion 4 awaits the board |
-| [`STORY-P1-09-12`](../stories/STORY-P1-09-12.md) | The current: the clocks block read before it is believed, both gateable Ethernet clocks enabled by readback-validated pinned writes, running polled under an attempt budget — codes 16–18 | In progress — host half Green 2026-08-03; criterion 5 awaits the board |
+| [`STORY-P1-09-12`](../stories/STORY-P1-09-12.md) | The current: the clocks block read before it is believed, both gateable Ethernet clocks enabled by readback-validated pinned writes, running polled under an attempt budget — codes 16–18 | In progress — every criterion Green on silicon 2026-08-03, criterion 5 in its refusal arm: the board spelled 16/57005, the whole window is poisoned, the next story owns the inbound path |
 
 ## Containment contract
 
