@@ -108,6 +108,45 @@ pub const RP1_GEM_OFFSET: u64 = 0x0010_0000;
 /// Size of the GEM register window, from `rp1.dtsi`'s `reg`.
 pub const RP1_GEM_SIZE: usize = 0x4000;
 
+// --- STORY-P1-07-08: the SoC status LED --------------------------------------
+//
+// Source of record: the on-silicon capture
+// `goals/reports/pios-ground-truth-2026-08-03.txt` — the first constant in
+// this file whose provenance is a measurement on this board rather than a
+// transcription: `rpi-gpiomem 107d517c00.gpiomem: window base 0x107d517c00
+// size 0x00000040`, and `/sys/kernel/debug/gpio` naming pin 9 of that block
+// `2712_STAT_LED`/`ACT`, output, active-low. Register layout within the
+// block: Linux `drivers/gpio/gpio-brcmstb.c` (retrieved 2026-08-03).
+
+/// CPU-physical base of the BCM2712's `gpio-brcmstb` block that carries the
+/// board's ACT status LED. On the SoC side of everything this project
+/// suspects: no PCIe gates, no RP1 window, no firmware negotiation.
+pub const STAT_GPIO_BASE: u64 = 0x0000_0010_7D51_7C00;
+
+/// Span of that block as the kernel maps it: two 0x20 banks.
+pub const STAT_GPIO_SIZE: usize = 0x40;
+
+// --- STORY-P1-07-09: the firmware's simple-framebuffer ----------------------
+//
+// Source of record: the on-silicon capture, second visit
+// (`pios-ground-truth-2026-08-03.txt`): dmesg `simple-framebuffer
+// 3f800000.framebuffer: framebuffer at 0x3f800000, 0x3f4800 bytes` /
+// `format=r5g6b5, mode=1920x1080x16, linelength=3840`, cross-checked
+// against `/sys/class/graphics/fb0` (1920,1080 / stride 3840 / 16 bpp).
+// Hardcoded-and-verified (`BND-03` — still no device-tree parser); the
+// painted screen is the verification.
+
+/// ARM-physical base of the framebuffer the firmware scans out.
+pub const SIMPLEFB_BASE: u64 = 0x3F80_0000;
+/// Total bytes of that buffer.
+pub const SIMPLEFB_SIZE: usize = 0x3F_4800;
+/// Pixels per row.
+pub const SIMPLEFB_WIDTH: u32 = 1920;
+/// Rows.
+pub const SIMPLEFB_HEIGHT: u32 = 1080;
+/// Bytes per row.
+pub const SIMPLEFB_STRIDE: u32 = 3840;
+
 /// The PCI-bus address at which the RP1's bus masters (the GEM's DMA included)
 /// see system RAM: `pcie@120000`'s `dma-ranges` maps CPU `0x0` at PCI
 /// `0x10_0000_0000`.
@@ -186,6 +225,18 @@ mod tests {
             assert!(base > u64::from(u32::MAX), "Pi 5 PCIe apertures are above 4 GiB");
             assert!(u64::from(base as u32) < MIN_RAM_SIZE, "truncation lands inside RAM, silently");
         }
+    }
+
+    // TEST-P1-07-08-A clause 1: the status-LED block, pinned against the
+    // on-silicon capture rather than a transcription — the window line names
+    // the base and the span.
+    #[test]
+    fn the_status_led_block_is_the_one_the_board_itself_reported() {
+        assert_eq!(STAT_GPIO_BASE, 0x0000_0010_7D51_7C00);
+        assert_eq!(STAT_GPIO_SIZE, 0x40);
+        // The same silent Pi 4 habit every other aperture's test pins.
+        assert!(STAT_GPIO_BASE > u64::from(u32::MAX), "Pi 5 MMIO is above 4 GiB");
+        assert!(u64::from(STAT_GPIO_BASE as u32) < MIN_RAM_SIZE, "truncation lands inside RAM, silently");
     }
 
     #[test]

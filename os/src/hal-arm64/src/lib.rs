@@ -24,6 +24,7 @@
 
 pub mod board;
 pub mod boot;
+pub mod canvas;
 pub mod esr;
 pub mod ethernet;
 pub mod exception_level;
@@ -33,5 +34,6 @@ pub mod hdmi;
 pub mod pcie;
 pub mod pl011;
 pub mod rp1_gpio;
+pub mod stat_led;
 pub mod timer;
 pub mod vectors;

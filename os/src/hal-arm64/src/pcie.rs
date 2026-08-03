@@ -74,6 +74,14 @@ pub enum LinkAbsent {
     /// The outbound window is smaller than RP1's peripheral space. Carries
     /// the decoded CPU limit.
     WindowSpan(u64),
+    /// The root port's own config header did not answer with the Broadcom
+    /// vendor id — nothing else it says can be believed. Carries the raw
+    /// vendor/device dword (`STORY-P1-09-10`).
+    RootVendor(u32),
+    /// Bus 1 device 0 did not answer with the Raspberry Pi vendor id — the
+    /// thing behind the link is not the RP1 this slice knows. Carries the
+    /// raw vendor/device dword (`STORY-P1-09-10`).
+    EndpointVendor(u32),
 }
 
 /// Outbound window 0, decoded from its five registers — a pure function of
@@ -143,15 +151,156 @@ pub const fn validate_window(window: &OutboundWindow) -> Result<(), LinkAbsent> 
 /// controller is pointless and reading the *window itself* is forbidden here.
 pub fn probe<M: Mmio>(rc: &M) -> Result<OutboundWindow, LinkAbsent> {
     link_gates(rc.read_u32(register::STATUS))?;
-    let window = OutboundWindow::decode(
+    let window = read_window(rc);
+    validate_window(&window)?;
+    Ok(window)
+}
+
+fn read_window<M: Mmio>(rc: &M) -> OutboundWindow {
+    OutboundWindow::decode(
         rc.read_u32(register::WIN0_LO),
         rc.read_u32(register::WIN0_HI),
         rc.read_u32(register::WIN0_BASE_LIMIT),
         rc.read_u32(register::WIN0_BASE_HI),
         rc.read_u32(register::WIN0_LIMIT_HI),
-    );
-    validate_window(&window)?;
+    )
+}
+
+/// The `WIN0` programming values (`STORY-P1-09-09`): the working system's
+/// own mapping, transcribed from the on-silicon capture
+/// (`pios-ground-truth-2026-08-03.txt`, dmesg
+/// `MEM 0x1f00000000..0x1ffffffffb -> 0x0000000000`) and pinned by decoding
+/// them back through [`OutboundWindow::decode`] in the tests. PCI address
+/// zero in both halves; CPU base `0x1F` gigabytes with base bits `[31:20]`
+/// zero (packed into `BASE_LIMIT[15:4]`), CPU limit `0x1F_FFFx_xxxx` (limit
+/// bits `[31:20]` all ones packed into `BASE_LIMIT[31:20]`).
+pub mod window_program {
+    /// `WIN0_LO` — PCI address low half: zero.
+    pub const LO: u32 = 0;
+    /// `WIN0_HI` — PCI address high half: zero.
+    pub const HI: u32 = 0;
+    /// `WIN0_BASE_LIMIT` — base `[31:20]` = 0 in bits `[15:4]`, limit
+    /// `[31:20]` = 0xFFF in bits `[31:20]`.
+    pub const BASE_LIMIT: u32 = 0xFFF0_0000;
+    /// `WIN0_BASE_HI` — CPU base bits `[39:32]`.
+    pub const BASE_HI: u32 = 0x1F;
+    /// `WIN0_LIMIT_HI` — CPU limit bits `[39:32]`.
+    pub const LIMIT_HI: u32 = 0x1F;
+}
+
+/// The enumeration constants (`STORY-P1-09-10` / `TEST-P1-09-10-A` clause
+/// 1): every value is the working system's, from the on-silicon capture's
+/// `lspci -vv` (`pios-ground-truth-2026-08-03.txt`), and the config-access
+/// mechanism is `rpi-6.12.y` `drivers/pci/controller/pcie-brcmstb.c`
+/// (retrieved 2026-08-03): the root port's config header is memory-mapped
+/// at the controller base; downstream config sets `EXT_CFG_INDEX` to the
+/// standard ECAM packing `bus << 20 | devfn << 12` and reads through the
+/// 4 KiB `EXT_CFG_DATA` window.
+pub mod config {
+    /// Root-port vendor/device dword: config header offset 0, at the base.
+    pub const RC_VENDOR: usize = 0x00;
+    /// Root-port command/status dword. The status half is write-1-to-clear
+    /// and belongs to nobody here — command writes mask it to zero.
+    pub const RC_COMMAND: usize = 0x04;
+    /// Root-port primary/secondary/subordinate bus numbers dword.
+    pub const RC_BUS_NUMBERS: usize = 0x18;
+    /// Root-port memory base/limit dword — what the bridge forwards.
+    pub const RC_MEM_WINDOW: usize = 0x20;
+    /// `PCIE_EXT_CFG_INDEX` — selects the downstream config target.
+    pub const EXT_CFG_INDEX: usize = 0x9000;
+    /// `PCIE_EXT_CFG_DATA` — the 4 KiB window the target's header shows in.
+    pub const EXT_CFG_DATA: usize = 0x8000;
+    /// The endpoint's vendor/device dword, through the data window.
+    pub const EP_VENDOR: usize = EXT_CFG_DATA;
+    /// The endpoint's command/status dword, same mask discipline.
+    pub const EP_COMMAND: usize = EXT_CFG_DATA + 0x04;
+    /// ECAM index for bus 1, device 0, function 0: `1 << 20`.
+    pub const RP1_INDEX: u32 = 1 << 20;
+    /// `primary=00, secondary=01, subordinate=01`, latency 0 — the lspci
+    /// bridge line, byte-packed.
+    pub const BUS_NUMBERS: u32 = 0x0001_0100;
+    /// `Memory behind bridge: 00000000-004fffff` — base `0x0000` and limit
+    /// `0x0040` halves ⇒ bus `0x0..=0x4fffff`.
+    pub const MEM_WINDOW: u32 = 0x0040_0000;
+    /// Command bits: memory decode + bus master, as both devices read
+    /// (`Mem+ BusMaster+`).
+    pub const COMMAND_ENABLE: u32 = 0x6;
+    /// The root port's vendor: Broadcom.
+    pub const BROADCOM_VENDOR: u16 = 0x14E4;
+    /// The endpoint's vendor: Raspberry Pi Ltd.
+    pub const RPI_VENDOR: u16 = 0x1DE4;
+}
+
+/// The introduction (`STORY-P1-09-10`): verifies who is answering before
+/// every write, programs the routing the working system carries, and
+/// refuses honestly when either vendor gate fails. Idempotent — safe on
+/// every re-probe pass.
+pub fn enumerate<M: Mmio>(rc: &M) -> Result<(), LinkAbsent> {
+    // TEST-P1-09-10-A clause 2: the root vendor gate comes before any
+    // write; a wrong answer leaves the controller untouched.
+    let root = rc.read_u32(config::RC_VENDOR);
+    if root as u16 != config::BROADCOM_VENDOR {
+        return Err(LinkAbsent::RootVendor(root));
+    }
+    rc.write_u32(config::RC_BUS_NUMBERS, config::BUS_NUMBERS);
+    rc.write_u32(config::RC_MEM_WINDOW, config::MEM_WINDOW);
+    let command = rc.read_u32(config::RC_COMMAND);
+    rc.write_u32(config::RC_COMMAND, (command & 0xFFFF) | config::COMMAND_ENABLE);
+    rc.write_u32(config::EXT_CFG_INDEX, config::RP1_INDEX);
+    // The endpoint gate: nothing of RP1's is written unless RP1 answered.
+    let endpoint = rc.read_u32(config::EP_VENDOR);
+    if endpoint as u16 != config::RPI_VENDOR {
+        return Err(LinkAbsent::EndpointVendor(endpoint));
+    }
+    let command = rc.read_u32(config::EP_COMMAND);
+    rc.write_u32(config::EP_COMMAND, (command & 0xFFFF) | config::COMMAND_ENABLE);
+    Ok(())
+}
+
+/// One full establishment pass: link gates, window (with the
+/// `STORY-P1-09-09` programming fallback), then the introduction. The
+/// window registers are controller-local, so their order relative to the
+/// enumeration is free; the *bus* traffic — the GEM identity read — happens
+/// only after all of this succeeds.
+pub fn establish<M: Mmio>(rc: &M) -> Result<OutboundWindow, LinkAbsent> {
+    let window = probe_or_program(rc)?;
+    enumerate(rc)?;
     Ok(window)
+}
+
+/// Whether a refusal is about the window's contents (programmable) rather
+/// than the link's existence (never written to — programming a window on a
+/// dead controller is a hopeful write into the dark).
+pub const fn window_class(absent: &LinkAbsent) -> bool {
+    matches!(
+        absent,
+        LinkAbsent::WindowBase(_) | LinkAbsent::WindowPci(_) | LinkAbsent::WindowSpan(_)
+    )
+}
+
+/// One probe pass with the programming fallback (`STORY-P1-09-09`): probe;
+/// on a window-class refusal, write the recorded mapping exactly once and
+/// validate again. The second verdict is final either way — belief comes
+/// from the re-read, never from the write. Link-class refusals return
+/// without a single write.
+pub fn probe_or_program<M: Mmio>(rc: &M) -> Result<OutboundWindow, LinkAbsent> {
+    match probe(rc) {
+        Ok(window) => Ok(window),
+        Err(absent) if window_class(&absent) => {
+            // TEST-P1-09-09-A clause 2: exactly these five, in this order,
+            // once. The link gates above already passed on this pass.
+            rc.write_u32(register::WIN0_LO, window_program::LO);
+            rc.write_u32(register::WIN0_HI, window_program::HI);
+            rc.write_u32(register::WIN0_BASE_LIMIT, window_program::BASE_LIMIT);
+            rc.write_u32(register::WIN0_BASE_HI, window_program::BASE_HI);
+            rc.write_u32(register::WIN0_LIMIT_HI, window_program::LIMIT_HI);
+            // TEST-P1-09-09-A clause 3: the re-read is the verdict.
+            let window = read_window(rc);
+            validate_window(&window)?;
+            Ok(window)
+        }
+        Err(absent) => Err(absent),
+    }
 }
 
 #[cfg(test)]
@@ -255,6 +404,233 @@ mod tests {
         // Limit inside the first megabyte: base and limit both at MB 0.
         rc.window[2] = 0x0000_0000;
         assert_eq!(probe(&rc), Err(LinkAbsent::WindowSpan(0x0000_001F_000F_FFFF)));
+    }
+
+    // TEST-P1-09-09-A clause 1: the programmed mapping is the capture's,
+    // pinned by decoding it back through the already-pinned decoder.
+
+    #[test]
+    fn the_programming_values_decode_to_the_captured_working_mapping() {
+        let window = OutboundWindow::decode(
+            window_program::LO,
+            window_program::HI,
+            window_program::BASE_LIMIT,
+            window_program::BASE_HI,
+            window_program::LIMIT_HI,
+        );
+        assert_eq!(window.cpu_base, board::RP1_WINDOW_BASE);
+        assert_eq!(window.pci_base, 0);
+        assert!(window.cpu_limit >= board::RP1_WINDOW_BASE + (board::RP1_WINDOW_MIN_SPAN - 1));
+        // The dmesg line's whole range: 0x1f00000000..=0x1fffffffff at MB
+        // granularity (the decoder names limits inclusively).
+        assert_eq!(window.cpu_limit, 0x0000_001F_FFFF_FFFF);
+        assert_eq!(validate_window(&window), Ok(()));
+    }
+
+    /// A controller that answers healthy link gates but a garbage window,
+    /// records every write, and — once programmed — answers the programmed
+    /// values back (`accepts` true) or keeps answering garbage.
+    struct ProgrammableRc {
+        accepts: bool,
+        programmed: RefCell<Vec<(usize, u32)>>,
+    }
+
+    impl ProgrammableRc {
+        fn new(accepts: bool) -> Self {
+            ProgrammableRc { accepts, programmed: RefCell::new(Vec::new()) }
+        }
+    }
+
+    impl Mmio for ProgrammableRc {
+        fn read_u32(&self, offset: usize) -> u32 {
+            let programmed = self.programmed.borrow();
+            let answered = |register: usize| {
+                programmed
+                    .iter()
+                    .rev()
+                    .find(|(offset, _)| *offset == register)
+                    .map(|(_, value)| *value)
+            };
+            match offset {
+                register::STATUS => status::PORT_IS_RC | status::PHY_LINK_UP | status::DL_ACTIVE,
+                register::WIN0_LO | register::WIN0_HI => {
+                    if self.accepts { answered(offset).unwrap_or(0) } else { 0 }
+                }
+                register::WIN0_BASE_LIMIT | register::WIN0_BASE_HI | register::WIN0_LIMIT_HI => {
+                    if self.accepts {
+                        // Garbage until programmed; the programmed value after.
+                        answered(offset).unwrap_or(0)
+                    } else {
+                        0
+                    }
+                }
+                other => panic!("unexpected read {other:#x}"),
+            }
+        }
+
+        fn write_u32(&self, offset: usize, value: u32) {
+            self.programmed.borrow_mut().push((offset, value));
+        }
+    }
+
+    // TEST-P1-09-09-A clause 2: only window-class refusals program, exactly
+    // once, exactly these five registers, in order.
+
+    #[test]
+    fn a_window_refusal_programs_the_five_registers_once_and_believes_the_reread() {
+        let rc = ProgrammableRc::new(true);
+        let window = probe_or_program(&rc).expect("an accepting controller validates");
+        assert_eq!(window.cpu_base, board::RP1_WINDOW_BASE);
+        assert_eq!(
+            *rc.programmed.borrow(),
+            vec![
+                (register::WIN0_LO, window_program::LO),
+                (register::WIN0_HI, window_program::HI),
+                (register::WIN0_BASE_LIMIT, window_program::BASE_LIMIT),
+                (register::WIN0_BASE_HI, window_program::BASE_HI),
+                (register::WIN0_LIMIT_HI, window_program::LIMIT_HI),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_link_class_refusal_never_writes_anything() {
+        let mut rc = ScriptedRc::healthy();
+        rc.status_word = 0; // PortNotRc — ScriptedRc panics on any write.
+        assert_eq!(probe_or_program(&rc), Err(LinkAbsent::PortNotRc(0)));
+        let mut rc = ScriptedRc::healthy();
+        rc.status_word = status::PORT_IS_RC; // PhyDown.
+        assert_eq!(
+            probe_or_program(&rc),
+            Err(LinkAbsent::PhyDown(status::PORT_IS_RC))
+        );
+    }
+
+    // TEST-P1-09-09-A clause 3: the second verdict is final.
+
+    #[test]
+    fn a_window_that_still_refuses_after_programming_is_reported_not_rewritten() {
+        let rc = ProgrammableRc::new(false);
+        assert_eq!(probe_or_program(&rc), Err(LinkAbsent::WindowBase(0)));
+        assert_eq!(rc.programmed.borrow().len(), 5, "one burst, never a second");
+    }
+
+    #[test]
+    fn a_healthy_window_is_validated_without_a_single_write() {
+        let rc = ScriptedRc::healthy();
+        probe_or_program(&rc).expect("healthy readback probes present");
+        // ScriptedRc panics on write, so arriving here is the assertion.
+    }
+
+    // TEST-P1-09-10-A clause 1: every enumeration value is the capture's.
+
+    #[test]
+    fn the_enumeration_values_are_the_lspci_lines_pinned() {
+        // "Bus: primary=00, secondary=01, subordinate=01, sec-latency=0".
+        assert_eq!(config::BUS_NUMBERS.to_le_bytes(), [0x00, 0x01, 0x01, 0x00]);
+        // "Memory behind bridge: 00000000-004fffff": base half 0x0000,
+        // limit half 0x0040 — limit names its megabyte inclusively.
+        assert_eq!(config::MEM_WINDOW & 0xFFFF, 0x0000);
+        assert_eq!((config::MEM_WINDOW >> 16) & 0xFFF0, 0x0040);
+        let limit_top = u64::from((config::MEM_WINDOW >> 16) & 0xFFF0) << 16 | 0xF_FFFF;
+        assert_eq!(limit_top, 0x004F_FFFF, "forwards exactly the 5 MiB the capture shows");
+        // ECAM: bus 1, device 0, function 0.
+        assert_eq!(config::RP1_INDEX, 1 << 20);
+        // "Control: ... Mem+ BusMaster+" on both devices.
+        assert_eq!(config::COMMAND_ENABLE, 0b110);
+        // Both access registers live inside the mapped controller window.
+        const {
+            assert!(config::EXT_CFG_INDEX < board::PCIE2_SIZE);
+            assert!(config::EP_COMMAND < board::PCIE2_SIZE);
+        }
+    }
+
+    /// Records the introduction's traffic; scripts both vendors and hostile
+    /// write-1-to-clear status halves in both command registers.
+    struct EnumerableRc {
+        endpoint_vendor: u32,
+        log: RefCell<Vec<(char, usize, u32)>>,
+    }
+
+    impl EnumerableRc {
+        fn new(endpoint_vendor: u32) -> Self {
+            EnumerableRc { endpoint_vendor, log: RefCell::new(Vec::new()) }
+        }
+
+        fn writes(&self) -> Vec<(usize, u32)> {
+            self.log
+                .borrow()
+                .iter()
+                .filter(|(kind, ..)| *kind == 'w')
+                .map(|(_, offset, value)| (*offset, *value))
+                .collect()
+        }
+    }
+
+    impl Mmio for EnumerableRc {
+        fn read_u32(&self, offset: usize) -> u32 {
+            self.log.borrow_mut().push(('r', offset, 0));
+            match offset {
+                config::RC_VENDOR => 0x2712_14E4,
+                config::RC_COMMAND => 0xABCD_0000, // hostile W1C status half
+                config::EP_VENDOR => self.endpoint_vendor,
+                config::EP_COMMAND => 0xF00F_0400,
+                other => panic!("unexpected read {other:#x}"),
+            }
+        }
+
+        fn write_u32(&self, offset: usize, value: u32) {
+            self.log.borrow_mut().push(('w', offset, value));
+        }
+    }
+
+    // TEST-P1-09-10-A clause 2: exact, ordered, masked.
+
+    #[test]
+    fn the_introduction_is_exact_ordered_and_masks_the_status_half() {
+        let rc = EnumerableRc::new(0x0001_1DE4);
+        enumerate(&rc).expect("both vendors answer");
+        assert_eq!(
+            rc.writes(),
+            vec![
+                (config::RC_BUS_NUMBERS, config::BUS_NUMBERS),
+                (config::RC_MEM_WINDOW, config::MEM_WINDOW),
+                // Status half zeroed: 0xABCD would clear W1C bits if echoed.
+                (config::RC_COMMAND, 0x0000_0006),
+                (config::EXT_CFG_INDEX, config::RP1_INDEX),
+                // Endpoint command keeps its own low half (0x0400) plus ours.
+                (config::EP_COMMAND, 0x0000_0406),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_wrong_root_vendor_refuses_with_zero_writes() {
+        struct WrongRoot;
+        impl Mmio for WrongRoot {
+            fn read_u32(&self, offset: usize) -> u32 {
+                assert_eq!(offset, config::RC_VENDOR, "only the gate may be read");
+                0xFFFF_FFFF
+            }
+            fn write_u32(&self, offset: usize, _value: u32) {
+                panic!("wrote {offset:#x} past a failed root gate");
+            }
+        }
+        assert_eq!(enumerate(&WrongRoot), Err(LinkAbsent::RootVendor(0xFFFF_FFFF)));
+    }
+
+    // TEST-P1-09-10-A clause 2, endpoint half: bridge setup happened, but
+    // nothing of the stranger's is written.
+    #[test]
+    fn a_wrong_endpoint_vendor_refuses_before_any_endpoint_write() {
+        let rc = EnumerableRc::new(0xFFFF_FFFF);
+        assert_eq!(enumerate(&rc), Err(LinkAbsent::EndpointVendor(0xFFFF_FFFF)));
+        let writes = rc.writes();
+        assert_eq!(writes.len(), 4, "bridge setup plus the index, nothing further");
+        assert!(
+            !writes.iter().any(|(offset, _)| *offset == config::EP_COMMAND),
+            "no write belongs to a stranger"
+        );
     }
 
     // Encoding pins: the decoder is the transcription, so it gets the same

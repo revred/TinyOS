@@ -1,6 +1,6 @@
 # FEAT-P1-07 — Raspberry Pi 5 Hardware Tier: First Measured Evidence
 
-Status: **Specified — seven Stories: `-01`, `-02`, `-05` and `-07` In progress (host halves Green; their board criteria await a physical capture), `-03`, `-04` and `-06` Specified; `-07` is the owner-ordered boot splash (2026-08-03, the scope decision the seventh-Story note anticipated — display UX, subordinate to the serial evidence); this Feature exists to close `LE-09`, and `LE-09` closes on `STORY-P1-07-06`'s Report and on nothing earlier**
+Status: **Specified — nine Stories: `-01`, `-02`, `-05`, `-07`, `-08` and `-09` In progress (host halves Green; board criteria await a physical capture — except `-08`, proven on silicon 2026-08-03), `-03`, `-04` and `-06` Specified; `-07` is the owner-ordered boot splash (2026-08-03 — display UX, subordinate to the serial evidence); `-08` is the owner-ordered ACT-LED execution proof (2026-08-03 evening, after the ground-truth session showed the SoC-side LED is the one observable behind no suspect peripheral); this Feature exists to close `LE-09`, and `LE-09` closes on `STORY-P1-07-06`'s Report and on nothing earlier**
 Epic: [`EPIC-P1`](../epics/EPIC-P1.md)
 Introduced in: [`session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md`](../../session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md), accepted with its §7 decisions in [`session/hand-2026-07-28/19-feat-p1-07-acceptance-and-spine.md`](../../session/hand-2026-07-28/19-feat-p1-07-acceptance-and-spine.md)
 
@@ -34,6 +34,8 @@ The one thing that looks like scope creep and is not: **`STORY-P1-07-03`'s MMU**
 | [`STORY-P1-07-05`](../stories/STORY-P1-07-05.md) | Host-side run path: SD image build, serial capture, UART pass/fail driving exit codes | In progress — host half Green, criteria 2 and 3 need a board |
 | [`STORY-P1-07-06`](../stories/STORY-P1-07-06.md) | `fixture_measure` on the board, batched-iteration measurement, the first hardware Report | Specified |
 | [`STORY-P1-07-07`](../stories/STORY-P1-07-07.md) | The boot splash: "TinyOS" on HDMI via the firmware mailbox framebuffer, after the verdict, bounded, hostile-input-validated — UX, never evidence | In progress — host half Green, criteria 4 and 5 need the board |
+| [`STORY-P1-07-08`](../stories/STORY-P1-07-08.md) | The ACT LED: forced on at entry, 1 Hz in the park loop — execution as a naked-eye fact through the one device behind no suspect peripheral; an instrument, never evidence | In progress — every criterion Green on silicon 2026-08-03 |
+| [`STORY-P1-07-09`](../stories/STORY-P1-07-09.md) | The firmware's canvas: the captured 1920×1080 RGB565 simple-framebuffer painted through the existing Surface seam — the report as on-screen text; mailbox path untouched beside it | In progress — host half Green, criterion 4 needs a board |
 
 **Order matters and is not negotiable.** `-02` before `-03` and `-04`, for the same reason Handover 03 spent two paragraphs on: debugging an MMU configuration on a board that cannot report a translation fault is the failure shape the carve-out existed to avoid.
 

@@ -235,6 +235,18 @@ pub extern "C" fn entry(x0: u64, x1: u64, x2: u64, x3: u64) -> ! {
 
     let handoff = Handoff { x0, x1, x2, x3, current_el };
 
+    // TEST-P1-07-08-A clause 3: the lamp lights before the UART is
+    // configured. Execution announces itself through the one device behind
+    // no suspect peripheral, consuming nothing the firmware handed over —
+    // the write is unconditional and state-agnostic.
+    // SAFETY: `STAT_GPIO_BASE` is the BCM2712 `gpio-brcmstb` block the board
+    // itself reported on silicon (`pios-ground-truth-2026-08-03.txt`); cores
+    // 1-3 are parked in `_start`, so this is the only writer.
+    let stat_gpio =
+        unsafe { crate::pl011::VolatileMmio::new(crate::board::STAT_GPIO_BASE) };
+    crate::stat_led::make_output(&stat_gpio);
+    crate::stat_led::drive(&stat_gpio, true);
+
     // SAFETY: `DEBUG_UART_BASE` is the BCM2712 `uart10` window transcribed in
     // `crate::board`, and cores 1-3 are parked in `_start`, so nothing else on
     // this machine is programming it.

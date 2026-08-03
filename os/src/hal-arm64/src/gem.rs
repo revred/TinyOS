@@ -208,6 +208,13 @@ impl<M: Mmio> MdioPort<M> {
         Err(MdioError::Timeout)
     }
 
+    /// Test-only: wraps a device with none of the enable writes, for doubles
+    /// that must prove they are never touched at all.
+    #[cfg(test)]
+    pub(crate) fn wrap_untouched_for_test(device: M) -> Self {
+        MdioPort { device }
+    }
+
     /// Disables the management port and returns the device, so the transmit
     /// path receives it back explicitly rather than through shared state.
     pub fn finish(self) -> M {
