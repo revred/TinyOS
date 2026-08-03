@@ -32,5 +32,6 @@ pub mod gem;
 pub mod hdmi;
 pub mod pcie;
 pub mod pl011;
+pub mod rp1_gpio;
 pub mod timer;
 pub mod vectors;

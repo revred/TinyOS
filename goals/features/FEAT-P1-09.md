@@ -54,6 +54,7 @@ class driver remain `EPIC-P3` / `EPIC-P1_5` territory, and the transport decisio
 | [`STORY-P1-09-01`](../stories/STORY-P1-09-01.md) | The kept link: RP1 presence proven by validated identity readback, absence reported honestly | In progress — host half Green 2026-08-03; criterion 4 awaits a board capture |
 | [`STORY-P1-09-02`](../stories/STORY-P1-09-02.md) | The PHY answers: management-port identification and latched link state — the device sees the cable | In progress — host half Green 2026-08-03; criterion 4 awaits a board capture |
 | [`STORY-P1-09-03`](../stories/STORY-P1-09-03.md) | The beacon: one pinned broadcast frame, transmit-only, receive left disabled | In progress — host half Green 2026-08-03; criterion 4 awaits a board capture |
+| [`STORY-P1-09-04`](../stories/STORY-P1-09-04.md) | The release: PHY reset on RP1 GPIO 32 driven low-then-high before the scan (`LE-68`'s closure path) | In progress — host half Green 2026-08-03; criterion 4 awaits a board link watch |
 
 ## Containment contract
 

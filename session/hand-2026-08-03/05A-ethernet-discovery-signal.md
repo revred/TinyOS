@@ -138,3 +138,30 @@ channels dark for three *independent* reasons — splash (unproven mailbox
 path), Ethernet (`LE-68`), serial (unverified wiring). Owner called it:
 back to the drawing board. The one test that splits the space, still undone,
 is the sixty-second adapter loopback.
+
+## Same evening, continued — `LE-68`'s answer found and implemented
+
+The owner said "lets go", the two commits were pushed (**CI green**, run
+`30821909147` watched to completion per the `LE-64` rule), and the drawing
+board gave up the answer in under an hour: `bcm2712-rpi-5-b.dts` carries
+`phy-reset-gpios = <&rp1_gpio 32 GPIO_ACTIVE_LOW>` with
+`phy-reset-duration = <5>` — the PHY sits behind an **active-low reset on RP1
+GPIO 32** that only an OS driver ever releases. The dead-flat wire was never
+a mystery; it was a pin.
+
+Delivered as **[`STORY-P1-09-04`](../../goals/stories/STORY-P1-09-04.md)**
+(host half Green same evening; 176 hal-arm64 tests): new `rp1_gpio.rs` with
+the bank-1 transcriptions (`io_bank1`/`sys_rio1`/`pads_bank1` at one `0x4000`
+stride, GPIO 32 = pin 4, RIO funcsel 5, atomic set/clear aliases, pad
+output-disable bit 7) pinned the `board.rs` way, and a glitch-ordered release
+— pad enable → level low + direction out through RIO → funcsel hands RIO the
+pin (first driven value *is* the assertion) → 5 ms hold → high → settle —
+run exactly once between GEM identity and the MDIO scan. A stuck counter
+aborts with the line still asserted and reports `phy=unreleased`; a pipeline
+that never reaches identity never touches the GPIO. `LE-68` stays open until
+the board's link watch shows a training transition — that is the criterion.
+
+Image rebuilt: **109,276 bytes, sha256 `0f8cf11b…a23550ac`**. The card was
+back in the Pi by then, so **the staged card still carries the pre-release
+image (`e77aeb88…`)** — it must be re-staged with `0f8cf11b…` before the next
+board attempt, or the wire will be exactly as dead as the record above.

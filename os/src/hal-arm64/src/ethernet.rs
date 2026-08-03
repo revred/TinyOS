@@ -35,7 +35,16 @@ pub enum Discovery {
 /// devices: the PCIe2 controller and the GEM window. The GEM device is not
 /// touched unless the controller's gates pass — the tests assert that with a
 /// device double that panics on any access.
-pub fn discover<R: Mmio, G: Mmio>(root_complex: &R, gem_window: G) -> Discovery {
+///
+/// `release_phy` is `STORY-P1-09-04`'s reset release, run exactly once,
+/// strictly after the GEM identity validates and strictly before the
+/// management port opens; `false` means the release aborted (stuck counter)
+/// and the scan is skipped — a PHY still held in reset answers nobody.
+pub fn discover<R: Mmio, G: Mmio>(
+    root_complex: &R,
+    gem_window: G,
+    release_phy: impl FnOnce() -> bool,
+) -> Discovery {
     if let Err(absent) = pcie::probe(root_complex) {
         return Discovery::LinkAbsent(absent);
     }
@@ -43,6 +52,13 @@ pub fn discover<R: Mmio, G: Mmio>(root_complex: &R, gem_window: G) -> Discovery 
         Ok(identity) => identity,
         Err(refused) => return Discovery::IdentityRefused(refused),
     };
+    if !release_phy() {
+        return Discovery::Present {
+            revision: identity.revision,
+            phy: PhyOutcome::ReleaseStuck,
+            link: None,
+        };
+    }
     let port = MdioPort::enable(gem_window);
     let phy = gem::scan_for_phy(&port);
     let link = match phy {
@@ -149,6 +165,7 @@ pub fn link_line(discovery: &Discovery, beacon: BeaconField) -> ([u8; LINK_LINE_
                 }
                 PhyOutcome::Absent => line.push(" phy=absent"),
                 PhyOutcome::PortWedged => line.push(" phy=wedged"),
+                PhyOutcome::ReleaseStuck => line.push(" phy=unreleased"),
             }
             match link {
                 Some(LinkState::Up { speed, full_duplex }) => {
@@ -230,9 +247,9 @@ mod tests {
     // never read.
 
     #[test]
-    fn a_dead_link_never_touches_the_gem_window() {
+    fn a_dead_link_never_touches_the_gem_window_or_the_gpio() {
         assert_eq!(
-            discover(&DeadRc, UntouchableGem),
+            discover(&DeadRc, UntouchableGem, || panic!("release ran behind a failed gate")),
             Discovery::LinkAbsent(LinkAbsent::PortNotRc(0))
         );
     }
@@ -298,7 +315,12 @@ mod tests {
 
     #[test]
     fn the_full_pipeline_reports_identity_phy_and_link() {
-        let discovery = discover(&HealthyRc, PipelineGem::new());
+        let released = Cell::new(0u32);
+        let discovery = discover(&HealthyRc, PipelineGem::new(), || {
+            released.set(released.get() + 1);
+            true
+        });
+        assert_eq!(released.get(), 1, "the release runs exactly once");
         assert_eq!(
             discovery,
             Discovery::Present {
@@ -323,8 +345,35 @@ mod tests {
             }
         }
         assert_eq!(
-            discover(&HealthyRc, FloatingGem),
+            discover(&HealthyRc, FloatingGem, || panic!("release ran after a refused identity")),
             Discovery::IdentityRefused(gem::IdentityError::FloatingBus)
+        );
+    }
+
+    // TEST-P1-09-04-A clause 4: the release sits between identity and the
+    // scan, and an aborted release skips the scan honestly.
+
+    #[test]
+    fn an_aborted_release_skips_the_scan_and_reports_unreleased() {
+        struct IdentityOnlyGem;
+        impl Mmio for IdentityOnlyGem {
+            fn read_u32(&self, offset: usize) -> u32 {
+                assert_eq!(offset, gem::register::MID, "the scan must not run unreleased");
+                0x0007_0109
+            }
+            fn write_u32(&self, offset: usize, _value: u32) {
+                panic!("wrote {offset:#x} after an aborted release");
+            }
+        }
+        let discovery = discover(&HealthyRc, IdentityOnlyGem, || false);
+        assert_eq!(
+            discovery,
+            Discovery::Present { revision: 0x0109, phy: PhyOutcome::ReleaseStuck, link: None }
+        );
+        assert_eq!(beacon_eligible(&discovery), None);
+        assert_eq!(
+            line_text(&discovery, BeaconField::Skipped),
+            "TOS64-LINK/1 rp1=present id=0x0109 phy=unreleased link=unread beacon=skipped\n"
         );
     }
 
@@ -463,19 +512,28 @@ mod glue {
         value
     }
 
-    /// Waits roughly one second; returns `false` if the counter never
+    /// Waits `ticks` counter ticks; returns `false` if the counter never
     /// advanced far enough within the spin bound (a stuck counter).
-    fn wait_one_period() -> bool {
+    fn wait_ticks(ticks: u64) -> bool {
         let start = counter_ticks();
-        let period = counter_frequency().max(1);
         let mut spins = 0u32;
-        while counter_ticks().wrapping_sub(start) < period {
+        while counter_ticks().wrapping_sub(start) < ticks {
             spins += 1;
             if spins >= WAIT_SPINS_LIMIT {
                 return false;
             }
         }
         true
+    }
+
+    /// Waits roughly one second (one counter-frequency's worth of ticks).
+    fn wait_one_period() -> bool {
+        wait_ticks(counter_frequency().max(1))
+    }
+
+    /// Bounded millisecond wait for `STORY-P1-09-04`'s hold and settle.
+    fn wait_millis(ms: u32) -> bool {
+        wait_ticks((counter_frequency().max(1) / 1000).max(1) * u64::from(ms))
     }
 
     /// Writes the frame and ring for `seq` into the pinned memory and
@@ -510,8 +568,14 @@ mod glue {
         // gates confirm the firmware kept it mapped.
         let gem_window =
             unsafe { VolatileMmio::new(board::RP1_WINDOW_BASE + board::RP1_GEM_OFFSET) };
+        // SAFETY: as above — the window base itself, for the RP1 GPIO blocks
+        // (`STORY-P1-09-04`); dereferenced only behind the probe's gates,
+        // inside the span the window validation requires.
+        let rp1_window = unsafe { VolatileMmio::new(board::RP1_WINDOW_BASE) };
 
-        let discovery = discover(&root_complex, gem_window);
+        let discovery = discover(&root_complex, gem_window, || {
+            crate::rp1_gpio::release_phy_reset(&rp1_window, wait_millis).is_ok()
+        });
         let beacon = match beacon_eligible(&discovery) {
             Some((speed, full_duplex)) => {
                 let ring_dma = stage_frame(0);

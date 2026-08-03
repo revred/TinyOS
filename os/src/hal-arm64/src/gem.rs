@@ -278,6 +278,9 @@ pub enum PhyOutcome {
     Absent,
     /// The management port itself stopped answering mid-scan.
     PortWedged,
+    /// The reset release aborted (`STORY-P1-09-04`, stuck counter) and the
+    /// scan never ran — the PHY is still held in reset, deliberately.
+    ReleaseStuck,
 }
 
 /// Scans all 32 MDIO addresses in order and classifies the first responder.
