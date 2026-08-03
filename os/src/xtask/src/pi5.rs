@@ -623,12 +623,32 @@ impl ChannelChunks {
             let mut buffer = [0u8; 256];
             loop {
                 match reader.read(&mut buffer) {
-                    Ok(0) => break,
+                    // On a Windows COM handle an expired interval timeout
+                    // returns `Ok(0)`: "no data yet", never end-of-stream.
+                    // Treating it as EOF was the first physical adapter's
+                    // finding — the capture died "disconnected" while the
+                    // board was simply not powered yet. The pause keeps a
+                    // fast-returning handle from busy-spinning a core.
+                    Ok(0) => std::thread::sleep(Duration::from_millis(5)),
                     Ok(count) => {
                         if sender.send(buffer[..count].to_vec()).is_err() {
                             break;
                         }
                     }
+                    // Timeout-class errors are the same "nothing yet".
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            std::io::ErrorKind::TimedOut
+                                | std::io::ErrorKind::Interrupted
+                                | std::io::ErrorKind::WouldBlock
+                        ) =>
+                    {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    // Everything else is a genuine dead handle: unplugged
+                    // device, revoked access. Ending the thread drops the
+                    // sender, which the capture loop reports as Disconnected.
                     Err(_) => break,
                 }
             }
@@ -886,6 +906,68 @@ mod tests {
         let (bytes, end) = capture(&mut source, &clock, &POLICY);
         assert_eq!(end, CaptureEnd::ByteCapReached);
         assert_eq!(bytes.len(), POLICY.max_bytes);
+    }
+
+    /// A scripted `Read` implementor for driving the reader thread itself —
+    /// the seam the first physical adapter proved untested: Windows COM reads
+    /// return `Ok(0)` on an expired interval timeout, which is "no data yet",
+    /// never end-of-stream.
+    struct ScriptedRead {
+        events: VecDeque<ScriptedReadEvent>,
+    }
+
+    enum ScriptedReadEvent {
+        Zero,
+        Fail(std::io::ErrorKind),
+        Data(Vec<u8>),
+    }
+
+    impl Read for ScriptedRead {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            match self.events.pop_front() {
+                Some(ScriptedReadEvent::Zero) => Ok(0),
+                Some(ScriptedReadEvent::Fail(kind)) => Err(std::io::Error::from(kind)),
+                Some(ScriptedReadEvent::Data(bytes)) => {
+                    buffer[..bytes.len()].copy_from_slice(&bytes);
+                    Ok(bytes.len())
+                }
+                // Script exhausted: a genuine fatal end.
+                None => Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe)),
+            }
+        }
+    }
+
+    #[test]
+    fn a_zero_byte_read_is_a_timeout_not_a_disconnect() {
+        // The first physical run died here: the board was silent (unpowered),
+        // the COM read timed out with Ok(0), and the reader treated that as
+        // EOF — "disconnected after 0 bytes" before any power-cycle window.
+        let reader = ScriptedRead {
+            events: VecDeque::from([
+                ScriptedReadEvent::Zero,
+                ScriptedReadEvent::Zero,
+                ScriptedReadEvent::Data(b"TOS64-BOOT/1 ".to_vec()),
+            ]),
+        };
+        let mut source = ChannelChunks::spawn(reader, Duration::from_millis(2_000));
+        assert_eq!(source.next_chunk(), Chunk::Bytes(b"TOS64-BOOT/1 ".to_vec()));
+    }
+
+    #[test]
+    fn timeout_class_errors_keep_the_reader_alive_and_fatal_ones_end_it() {
+        let reader = ScriptedRead {
+            events: VecDeque::from([
+                ScriptedReadEvent::Fail(std::io::ErrorKind::TimedOut),
+                ScriptedReadEvent::Fail(std::io::ErrorKind::Interrupted),
+                ScriptedReadEvent::Fail(std::io::ErrorKind::WouldBlock),
+                ScriptedReadEvent::Data(b"ok".to_vec()),
+                ScriptedReadEvent::Fail(std::io::ErrorKind::PermissionDenied),
+            ]),
+        };
+        let mut source = ChannelChunks::spawn(reader, Duration::from_millis(2_000));
+        assert_eq!(source.next_chunk(), Chunk::Bytes(b"ok".to_vec()));
+        // The fatal error ends the stream — as a disconnect, exactly once.
+        assert_eq!(source.next_chunk(), Chunk::Disconnected);
     }
 
     #[test]
