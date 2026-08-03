@@ -135,11 +135,7 @@ pub fn draw_text<S: Surface>(
                 let color = if lit { fg } else { bg };
                 for dy in 0..scale {
                     for dx in 0..scale {
-                        surface.put(
-                            left + column * scale + dx,
-                            y + row as u32 * scale + dy,
-                            color,
-                        );
+                        surface.put(left + column * scale + dx, y + row as u32 * scale + dy, color);
                     }
                 }
             }

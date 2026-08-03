@@ -236,7 +236,10 @@ mod tests {
         assert_eq!(STAT_GPIO_SIZE, 0x40);
         // The same silent Pi 4 habit every other aperture's test pins.
         assert!(STAT_GPIO_BASE > u64::from(u32::MAX), "Pi 5 MMIO is above 4 GiB");
-        assert!(u64::from(STAT_GPIO_BASE as u32) < MIN_RAM_SIZE, "truncation lands inside RAM, silently");
+        assert!(
+            u64::from(STAT_GPIO_BASE as u32) < MIN_RAM_SIZE,
+            "truncation lands inside RAM, silently"
+        );
     }
 
     #[test]

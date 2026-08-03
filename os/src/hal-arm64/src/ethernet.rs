@@ -300,10 +300,7 @@ pub const fn watch_from(discovery: &Discovery) -> Option<u8> {
 ///
 /// Fail-safe: a wedged management port ends the watch permanently — `watch`
 /// is taken to `None` and no later tick retries against it.
-pub fn watch_step<M: Mmio>(
-    watch: &mut Option<u8>,
-    port: &MdioPort<M>,
-) -> Option<(Speed, bool)> {
+pub fn watch_step<M: Mmio>(watch: &mut Option<u8>, port: &MdioPort<M>) -> Option<(Speed, bool)> {
     let address = (*watch)?;
     match gem::read_link(port, address) {
         Ok(LinkState::Up { speed, full_duplex }) => {
@@ -485,11 +482,7 @@ pub fn sentence_lamp_at(sentence: &Sentence, tick: u32) -> bool {
             };
         }
         t -= span;
-        let gap = if index == SENTENCE_GROUPS - 1 {
-            SENTENCE_GAP_TICKS
-        } else {
-            GROUP_GAP_TICKS
-        };
+        let gap = if index == SENTENCE_GROUPS - 1 { SENTENCE_GAP_TICKS } else { GROUP_GAP_TICKS };
         if t < gap {
             return false;
         }
@@ -964,9 +957,8 @@ mod tests {
     fn a_late_data_link_is_caught_with_the_release_still_run_exactly_once() {
         // Any number of refused passes: window and GPIO untouchable.
         for _ in 0..5 {
-            let refused = discover(&DlDownRc, UntouchableGem, || {
-                panic!("release behind a failed gate")
-            });
+            let refused =
+                discover(&DlDownRc, UntouchableGem, || panic!("release behind a failed gate"));
             assert_eq!(refused, Discovery::LinkAbsent(LinkAbsent::LinkDown(0x90)));
             assert!(reprobe_due(&refused));
             assert_eq!(blink_code(&refused), Some(3), "the lamp keeps counting 3");
@@ -1192,10 +1184,7 @@ mod tests {
     fn every_refusal_selects_its_named_sixteen_bits() {
         use gem::IdentityError;
         assert_eq!(blink_detail(&Discovery::IdentityRefused(IdentityError::WrongModule(2))), 2);
-        assert_eq!(
-            blink_detail(&Discovery::IdentityRefused(IdentityError::FloatingBus)),
-            0xFFFF
-        );
+        assert_eq!(blink_detail(&Discovery::IdentityRefused(IdentityError::FloatingBus)), 0xFFFF);
         assert_eq!(blink_detail(&Discovery::IdentityRefused(IdentityError::AllZeros)), 0);
         assert_eq!(blink_detail(&Discovery::LinkAbsent(LinkAbsent::LinkDown(0x90))), 0x90);
         assert_eq!(

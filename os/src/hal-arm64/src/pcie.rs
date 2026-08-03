@@ -454,7 +454,11 @@ mod tests {
             match offset {
                 register::STATUS => status::PORT_IS_RC | status::PHY_LINK_UP | status::DL_ACTIVE,
                 register::WIN0_LO | register::WIN0_HI => {
-                    if self.accepts { answered(offset).unwrap_or(0) } else { 0 }
+                    if self.accepts {
+                        answered(offset).unwrap_or(0)
+                    } else {
+                        0
+                    }
                 }
                 register::WIN0_BASE_LIMIT | register::WIN0_BASE_HI | register::WIN0_LIMIT_HI => {
                     if self.accepts {
@@ -500,10 +504,7 @@ mod tests {
         assert_eq!(probe_or_program(&rc), Err(LinkAbsent::PortNotRc(0)));
         let mut rc = ScriptedRc::healthy();
         rc.status_word = status::PORT_IS_RC; // PhyDown.
-        assert_eq!(
-            probe_or_program(&rc),
-            Err(LinkAbsent::PhyDown(status::PORT_IS_RC))
-        );
+        assert_eq!(probe_or_program(&rc), Err(LinkAbsent::PhyDown(status::PORT_IS_RC)));
     }
 
     // TEST-P1-09-09-A clause 3: the second verdict is final.

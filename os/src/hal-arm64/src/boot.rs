@@ -242,8 +242,7 @@ pub extern "C" fn entry(x0: u64, x1: u64, x2: u64, x3: u64) -> ! {
     // SAFETY: `STAT_GPIO_BASE` is the BCM2712 `gpio-brcmstb` block the board
     // itself reported on silicon (`pios-ground-truth-2026-08-03.txt`); cores
     // 1-3 are parked in `_start`, so this is the only writer.
-    let stat_gpio =
-        unsafe { crate::pl011::VolatileMmio::new(crate::board::STAT_GPIO_BASE) };
+    let stat_gpio = unsafe { crate::pl011::VolatileMmio::new(crate::board::STAT_GPIO_BASE) };
     crate::stat_led::make_output(&stat_gpio);
     crate::stat_led::drive(&stat_gpio, true);
 
