@@ -108,6 +108,15 @@ pub const RP1_GEM_OFFSET: u64 = 0x0010_0000;
 /// Size of the GEM register window, from `rp1.dtsi`'s `reg`.
 pub const RP1_GEM_SIZE: usize = 0x4000;
 
+/// Offset of RP1's clock generator block inside the window: `rp1.dtsi`
+/// `clocks@18000` — RP1 bus `0x4001_8000`, so CPU
+/// [`RP1_WINDOW_BASE`]` + 0x1_8000` (`STORY-P1-09-12`; confirmed by the
+/// live capture in `pios-ground-truth-2026-08-03.txt`).
+pub const RP1_CLOCKS_OFFSET: u64 = 0x0001_8000;
+
+/// Size of the clocks register window, from `rp1.dtsi`'s `reg`.
+pub const RP1_CLOCKS_SIZE: usize = 0x10038;
+
 // --- STORY-P1-07-08: the SoC status LED --------------------------------------
 //
 // Source of record: the on-silicon capture

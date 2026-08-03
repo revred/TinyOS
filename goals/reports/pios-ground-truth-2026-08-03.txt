@@ -995,3 +995,101 @@ bits_per_pixel: 16
 [    0.271961] simple-framebuffer 3f800000.framebuffer: framebuffer at 0x3f800000, 0x3f4800 bytes
 [    0.271967] simple-framebuffer 3f800000.framebuffer: format=r5g6b5, mode=1920x1080x16, linelength=3840
 [    0.273973] simple-framebuffer 3f800000.framebuffer: fb0: simplefb registered!
+
+===== rp1 clock driver facts (source: raspberrypi/linux rpi-6.12.y drivers/clk/clk-rp1.c, fetched 2026-08-03 late session) =====
+clk_eth (RP1_CLK_ETH):
+  ctrl_reg    CLK_ETH_CTRL     0x00064
+  div_int_reg CLK_ETH_DIV_INT  0x00068
+  sel_reg     CLK_ETH_SEL      0x00070
+  div_int_max DIV_INT_8BIT_MAX 0xff
+  max_freq    125 MHz
+  parents: pll_sys_sec, pll_sys, pll_video_sec, clksrc_gp0-5 (0 std parents, 9 aux parents)
+
+clock ctrl field layout (common):
+  CLK_CTRL_ENABLE       BIT(11)
+  CLK_CTRL_AUXSRC_MASK  0x000003e0 (shift 5)
+  CLK_CTRL_SRC_SHIFT    0
+  CLK_DIV_FRAC_BITS     16
+  sel_reg is one-hot readback of selected parent; sel==0 means source comes from CTRL src field
+  no magic/password constant in write path (unlike RP2040-style 0x5A pattern); plain MMIO writes
+
+pll_sys register block:
+  PLL_SYS_CS         0x08000   (lock bit: PLL_CS_LOCK BIT(31), lock timeout 100ms)
+  PLL_SYS_PWR        0x08004
+  PLL_SYS_FBDIV_INT  0x08008   (driver default fbdiv_int=20, frac=0)
+  PLL_SYS_FBDIV_FRAC 0x0800c
+  PLL_SYS_PRIM       0x08010
+  PLL_SYS_SEC        0x08014   (feeds clk_eth; PLL_SEC_DIV_MASK 0x00001f00, shift 8, valid div 8..19)
+
+consistency note (to VERIFY against on-board clk_summary, not assert):
+  xosc 50 MHz x fbdiv 20 = 1000 MHz pll_sys core; sec div 8 -> 125 MHz clk_eth
+
+===== rp1 clock driver facts, part 2 (same source) + rp1.dtsi facts =====
+rp1.dtsi (rpi-6.12.y):
+  clocks node: clocks@18000, reg = <0xc0 0x40018000 0x0 0x10038>, compatible raspberrypi,rp1-clocks
+    -> CPU address = RP1_WINDOW_BASE + 0x18000 = 0x1F_0001_8000
+  ethernet node: compatible "raspberrypi,rp1-gem","cdns,macb", reg <0xc0 0x40100000 0x0 0x4000>
+    clock-names: pclk=RP1_CLK_SYS, hclk=RP1_CLK_SYS, tsu_clk=RP1_CLK_ETH_TSU, tx_clk=RP1_CLK_ETH
+    phy-mode = "rgmii-id"
+    NO resets property; rp1.dtsi has NO reset controller node at all -> 0xDEAD is clock/gating, not a reset line
+  xosc: clock-frequency = 50000000 (50 MHz)
+
+clk_sys (RP1_CLK_SYS) — pclk/hclk of GEM:
+  CLK_SYS_CTRL 0x00014, CLK_SYS_DIV_INT 0x00018, CLK_SYS_SEL 0x00020
+  parents: xosc, -, pll_sys (3 std parents, clk_src_mask 0x3), max 200 MHz
+  flags = CLK_IS_CRITICAL, driver comment: "Always enabled in hardware"
+  => the GEM register-bus clock should already be running; 0xDEAD needs another explanation
+     (candidate: per-block gate / auxsrc off state — verify by diffing live RP1 clock regs under Pi OS)
+
+clk_eth_tsu (RP1_CLK_ETH_TSU):
+  CLK_ETH_TSU_CTRL 0x00134, CLK_ETH_TSU_DIV_INT 0x00138, CLK_ETH_TSU_SEL 0x00140
+  parents: xosc, pll_video_sec, clksrc_gp0..5 (0 std, 8 aux), div_int_max 0xff, max 50 MHz
+
+===== LIVE RP1 clock + GEM registers under working Pi OS ethernet (captured 2026-08-03 ~23:15, mmap C probe /tmp/rp1rd.c on Pi; dd read() on /dev/mem gives EFAULT for MMIO — mmap required) =====
+eth0 state at capture: UP, LOWER_UP, 169.254.133.66/16 + fe80::375c:1a61:f858:2034/64
+(NM profile switched to ipv4.method=link-local this session — DHCP failure was cycling the link every ~45s)
+
+clocks block @ 0x1f00018000:
+0x1f00018000 GPCLK_OE_CTRL      = 0x00000000
+0x1f00018014 CLK_SYS_CTRL       = 0x00000002   src=2 (pll_sys); NO enable bit — hw-critical, as driver says
+0x1f00018018 CLK_SYS_DIV_INT    = 0x00000001   200 MHz / 1
+0x1f00018020 CLK_SYS_SEL        = 0x00000004   one-hot readback: parent 2 (pll_sys)
+0x1f00018064 CLK_ETH_CTRL       = 0x10000800   bit11 ENABLE + bit28 running-status; AUXSRC=0 (pll_sys_sec)
+0x1f00018068 CLK_ETH_DIV_INT    = 0x00000001   125 MHz / 1
+0x1f00018070 CLK_ETH_SEL        = 0x00000001   one-hot: aux parent 0
+0x1f00018134 CLK_ETH_TSU_CTRL   = 0x10000800   bit11 ENABLE + bit28 running-status; AUXSRC=0 (xosc)
+0x1f00018138 CLK_ETH_TSU_DIV_INT= 0x00000001   50 MHz / 1
+0x1f00018140 CLK_ETH_TSU_SEL    = 0x00000001   one-hot: aux parent 0
+
+pll_sys block @ 0x1f00020000:
+0x1f00020000 PLL_SYS_CS         = 0x80000001   bit31 LOCK + refdiv=1
+0x1f00020004 PLL_SYS_PWR        = 0x00000004
+0x1f00020008 PLL_SYS_FBDIV_INT  = 0x00000014   = 20 -> 50 MHz x 20 = 1000 MHz VCO
+0x1f0002000c PLL_SYS_FBDIV_FRAC = 0x00000000
+0x1f00020010 PLL_SYS_PRIM       = 0x00051010   postdiv 5,1 -> 200 MHz pll_sys
+0x1f00020014 PLL_SYS_SEC        = 0x80000800   sec div=8 -> 125 MHz pll_sys_sec
+
+GEM block @ 0x1f00100000 (same bus path TinyOS uses; reads clean under Pi OS):
+0x1f001000fc GEM_MID            = 0x00070109   <-- the register TinyOS reads as 0xDEADxxxx; matches dmesg GEM rev
+0x1f00100000 GEM_NCR            = 0x0010001c
+0x1f00100004 GEM_NCFGR          = 0x0156044a
+0x1f00100008 GEM_NSR            = 0x00000006
+
+clk_summary (path is /sys/kernel/debug/clk/clk_summary — note extra /clk/), eth-relevant rows (enable/prepare counts, rate):
+ xosc                 7 7 0   50000000  Y
+ clk_eth_tsu          1 1 0   50000000  Y  consumer: 1f00100000.ethernet tsu_clk
+ pll_sys_core         3 3 0 1000000000  Y
+ pll_sys_sec          1 1 0  125000000  Y
+ clk_eth              1 1 0  125000000  Y  consumer: 1f00100000.ethernet tx_clk
+ pll_sys              2 2 0  200000000  Y
+ clk_sys              4 4 0  200000000  Y  consumers: 1f00188000.dma cfgr-clk, 1f00100000.ethernet hclk+pclk
+ pll_sys_pri_ph       1 1 0  100000000  Y
+(full 94-line clk_summary in session scratchpad clk_summary_full.txt)
+
+reading of the evidence for STORY-P1-09-12:
+  pll_sys tree is firmware-locked before Linux touches it (clk_sys is hw-critical and the RP1 fabric
+  runs on it) — the bring-up TinyOS owes is NOT a PLL bring-up. The delta between a dead GEM and a
+  live one is two register writes in the clocks block: CLK_ETH_CTRL and CLK_ETH_TSU_CTRL, ENABLE
+  (bit11) with AUXSRC=0 and DIV_INT=1 (their power-on defaults per driver; verify by readback on our
+  boot before writing). Expected rung on the board: read CLK_ETH_CTRL (expect bit11 clear, bit28
+  clear), write enable, poll bit28, then read GEM_MID expecting 0x00070109 instead of 0xDEAD poison.
