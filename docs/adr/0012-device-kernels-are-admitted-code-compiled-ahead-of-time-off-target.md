@@ -31,7 +31,11 @@ device-code carve-out. "It only runs on the GPU" is an aggravating circumstance,
 
 **2. Kernels are compiled ahead of time, off target** (the mandate's shape A). A build host — CI or
 a deployment-signing station — runs TileLang, TVM, `nvcc`, `hipcc`, or any other toolchain it
-likes. What reaches a TinyOS device is a **signed, immutable kernel artifact**: precompiled device
+likes. **Narrowed 2026-08-03 by [`ADR 0014`](0014-the-tinytile-stack-contains-no-python-anywhere.md):
+no part of TinyTile's toolchain may be Python, so TileLang and TVM are out; the off-target compiler
+is Rust-native, and a non-Python vendor assembler may still be a back-end step. See the amendment
+section at the foot of this ADR.** What reaches a TinyOS device is a **signed, immutable kernel
+artifact**: precompiled device
 binaries plus a declarative manifest (target requirements, executable hash, buffer schema, memory
 ceilings, workgroup limits, dtypes, CPU fallback, provenance). The artifact is admitted through the
 same gate chain as any PE64/TXE code — `RCG-07` (signature), `RCG-10` (immutability), `RCG-12`
@@ -92,3 +96,27 @@ admission, never an unbounded retry against a deadline.
   GEMM/GEMV work that motivates the layer. It survives as clause 4's bounded fallback.
 - **Ruling that device code is outside the charter.** Rejected as the least defensible position in
   the table: it would make the least containable processor on the board the least regulated one.
+
+## Amended 2026-08-03 by [`ADR 0014`](0014-the-tinytile-stack-contains-no-python-anywhere.md) — clause 2's build host is no longer unconstrained
+
+**Nothing above is withdrawn.** Clauses 1, 3, 4 and 5 stand exactly as written, and clause 3's
+device-side rule — no Python, no TVM, no vendor compiler, no translation on target — was already the
+strictest half of this ADR.
+
+What changed is clause 2's *permissiveness about the build host*. It said the off-target toolchain
+could be "TileLang, TVM, `nvcc`, `hipcc`, or any other toolchain it likes", and TileLang is a Python
+DSL on TVM — so that sentence placed a Python runtime and TVM's compiler infrastructure inside the
+path that produces and signs kernel artifacts. The owner constraint of 2026-08-03 reaches past the
+device boundary to the whole stack, and `ADR 0014` closes it:
+
+- **TinyTile's off-target compiler is Rust-native.** A non-Python vendor assembler (`nvcc`, `ptxas`,
+  `hipcc`) may still be invoked as a back-end step; TileLang and TVM may not.
+- **Python remains welcome as a *consumer*** calling in through the C ABI. That is outside the
+  stack and is explicitly permitted.
+- **"Easily consume TileLang or CUDA" survives** in two forms — a Rust-native front end that parses
+  and lowers that source, or ingestion of third-party precompiled artifacts as data through this
+  ADR's unchanged gate chain. `ADR 0014` clause 4.
+
+The consequence this ADR should have priced and could not: `EPIC-P6B`'s off-target toolchain Feature
+stops being a contract around someone else's compiler and becomes a compiler of its own. That cost
+belongs to `ADR 0014`, and is recorded there.

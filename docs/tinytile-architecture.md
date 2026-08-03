@@ -45,25 +45,31 @@ sits between the two.
         └───────────────────────┴────────────────────────┴────────────────────────┘
 ```
 
-Four owner-settled constraints bind every section below: entirely Rust exposing a C ABI;
+Five owner-settled constraints bind every section below: entirely Rust exposing a C ABI;
 native-fast (no marshalling layer, no interpreter tax on the hot path); easily consumes TileLang or
-CUDA code — *at the toolchain boundary, per `ADR 0012` clause 3*; and this is a planned
-destination, not a thought experiment.
+CUDA code — *at the toolchain boundary, per `ADR 0012` clause 3*; this is a planned destination, not
+a thought experiment; and — added 2026-08-03, [`ADR 0014`](adr/0014-the-tinytile-stack-contains-no-python-anywhere.md) —
+**no Python anywhere in the stack, on target or off it**, while **Python calling in through the C ABI
+is explicitly permitted**. A consumer is not a component.
 
 ## 2. The tile programming model, in Rust `no_std` terms
 
 What is borrowed from TileLang is its **programming model**, not its machinery: tile-level
 abstraction (the unit of reasoning is a tile of a tensor, not a thread), explicit memory scopes
 (global / shared / fragment), explicit pipeline stages, and a small set of composable primitives
-with layout inference underneath. TVM, Python, `nvcc`, and the `@tilelang.jit` decorator stay on
-the build host, always.
+with layout inference underneath. **`ADR 0014` sharpened where that machinery may live:** TVM,
+Python and the `@tilelang.jit` decorator are now excluded from the build host too, not merely from
+the device — TinyTile's off-target compiler is Rust-native. A non-Python vendor assembler (`nvcc`,
+`ptxas`, `hipcc`) may still be a back-end step off target.
 
 The model therefore lives in **two places with an artifact between them**:
 
-- **Off target** (CI or a signing station): the full authoring surface. TileLang or CUDA source,
-  vendor toolchains, layout inference, shape/dtype specialization, autotuning — anything the build
-  host likes. Its output is a Tiny Kernel Artifact (§4), and that is the *only* thing that crosses
-  toward a device.
+- **Off target** (CI or a signing station): the full authoring surface — layout inference,
+  shape/dtype specialization, autotuning — in **TinyTile's own Rust toolchain** (`ADR 0014`). Its
+  input is TileLang-shaped or CUDA source parsed by a Rust front end, or third-party precompiled
+  device code ingested as data; its output is a Tiny Kernel Artifact (§4), and that is the *only*
+  thing that crosses toward a device. **Not** "anything the build host likes": a Python runtime in
+  the artifact-producing and signing path is precisely what `ADR 0014` removes.
 - **On target**: no source, no IR on the hot path, no inference of anything. The runtime sees a
   kernel as its **declared interface**: a buffer schema, launch-geometry limits, memory-scope
   ceilings, an execution budget, and one or more admitted executable variants. The memory scopes

@@ -18,12 +18,13 @@ owns *workloads*. **Nothing owns *kernels*** — how a tile-level computation is
 scheduled onto a device queue, executed, and accounted for. TinyTile is that layer, and it sits
 between the two.
 
-## The four owner-settled constraints (not open for re-litigation)
+## The five owner-settled constraints (not open for re-litigation)
 
 1. **Entirely Rust, exposing a C ABI.**
 2. **Native-fast** — no marshalling layer, no interpreter tax on the hot path.
 3. **Easily consumes TileLang or CUDA code** (design inspiration: `tilelang.com`).
 4. **This is to be done** — a planned destination, not a thought experiment.
+5. **No Python anywhere in the TinyTile stack** (added 2026-08-03, [`ADR 0014`](../../docs/adr/0014-the-tinytile-stack-contains-no-python-anywhere.md)) — on target *or* off it, including CI and signing stations. **Python calling *into* TinyTile through the C ABI is explicitly permitted**: a consumer is not a component. This narrows [`ADR 0012`](../../docs/adr/0012-device-kernels-are-admitted-code-compiled-ahead-of-time-off-target.md) clause 2, which had left the build host free to run TileLang and TVM.
 
 ## What already exists and is built on, not re-opened
 
@@ -118,7 +119,7 @@ subsystem does not exist is initialised as stated open debt in `open-debt.tsv` (
 |---|---|---|
 | `FEAT-P6B-01` | **Tiny Compute ABI + CPU reference backend.** The C ABI surface (`extern "C"`, caller-owned buffers with explicit capacities, integer error codes, no panic across the boundary, versioned from v1) and a `no_std` CPU backend that makes every TKA executable somewhere. Landable earliest; needs no device. | `FEAT-P0-03` substrate |
 | `FEAT-P6B-02` | **Tiny Kernel Artifact format + admission path.** Manifest schema, signing, the full gate chain for device code, hostile-artifact parsing tests. | nothing |
-| `FEAT-P6B-03` | **Off-target toolchain contract.** How CI/signing hosts run TileLang/`nvcc` and emit TKAs; an `xtask`-style driver or documented external contract. Zero Python on target. | `-02` |
+| `FEAT-P6B-03` | **Off-target tile compiler (Rust-native).** Per `ADR 0014`: TinyTile's own Rust toolchain emits TKAs — no Python, so no TileLang and no TVM; a non-Python vendor assembler may be a back-end step. Must state which of `ADR 0014` clause 4's paths it delivers first: **(b) ingesting third-party precompiled artifacts as data is the smaller increment**, (a) a Rust front end parsing TileLang-shaped/CUDA source is the substantial one. |
 | `FEAT-P6B-04` | **Queue, fence, admission and telemetry runtime.** Dispatch under budgets, poll/cancel/reset, UMM seam, RT non-interference argument and its adversarial tests. | `-01`, `-02` |
 | `FEAT-P6B-05` | **HBP compute broker** (Stage 1). Linux-hosted C2 broker; remote accelerator behind the same C ABI. | `-01` – `-04`, HBP |
 | `FEAT-P6B-06` | **Native Orin backend** (Stage 2). Narrow `nvgpu`-informed submission subset in `-sys` crates; `ADR 0013` qualification for any zero-copy config. | `-04`, hardware evidence, driver finding |
@@ -158,7 +159,9 @@ native). `G-AI-9` defines the reporting axes; quality-adjusted, never marketing 
 - The `ADR 0013` question answered for the Orin: a DMA-containment qualification record, or a
   recorded statement of why one cannot yet exist.
 - Zero Python, TVM, or vendor-compiler bytes on any TinyOS device, demonstrated by the same
-  negative-footprint evidence style `LZ-09` requires.
+  negative-footprint evidence style `LZ-09` requires — **and, per `ADR 0014`, zero Python in the
+  toolchain either**: no CI job, `xtask` subcommand or signing step that produces or gates a kernel
+  artifact may invoke a Python runtime. A Python *caller* over the C ABI is outside this criterion.
 
 ## Explicitly out of scope
 
