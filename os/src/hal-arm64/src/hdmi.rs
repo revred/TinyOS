@@ -26,11 +26,88 @@ pub const BACKGROUND: u32 = 0x0010_2040;
 /// Splash foreground — white, identical in RGB and BGR.
 pub const FOREGROUND: u32 = 0xFFFF_FFFF;
 
-/// The requested mode. 720p is the most universally scanned-out mode; the
-/// firmware may answer with what the display actually accepted, and the
-/// *answer* is what gets validated and drawn into.
-const REQUEST_WIDTH: u32 = 1280;
-const REQUEST_HEIGHT: u32 = 720;
+/// Fallback mode when the display's native size cannot be learned (headless,
+/// unknown EDID, or a hostile answer): 720p, the most universally scanned-out
+/// mode. When the query succeeds, the framebuffer is requested at the
+/// display's own native size and the splash scales and centres to it.
+pub const FALLBACK_WIDTH: u32 = 1280;
+/// See [`FALLBACK_WIDTH`].
+pub const FALLBACK_HEIGHT: u32 = 720;
+
+/// Number of `u32` words in the native-size query message.
+pub const QUERY_WORDS: usize = 8;
+
+/// The one-tag "get physical display size" query (`0x0004_0003`), asked
+/// before the framebuffer request so the splash adopts the panel's native
+/// resolution instead of forcing 720p onto a 4K display.
+#[repr(C, align(16))]
+pub struct SizeQuery {
+    words: [u32; QUERY_WORDS],
+}
+
+impl SizeQuery {
+    /// Builds the pinned query.
+    #[must_use]
+    pub const fn new() -> Self {
+        let mut words = [0u32; QUERY_WORDS];
+        words[0] = (QUERY_WORDS * 4) as u32;
+        words[1] = 0; // process request
+        words[2] = 0x0004_0003; // get physical (display) size
+        words[3] = 8;
+        words[4] = 0;
+        // words[5], words[6]: response w/h; words[7]: end tag.
+        Self { words }
+    }
+
+    /// The raw words, for host pinning and the board-side handshake.
+    #[must_use]
+    pub const fn words(&self) -> &[u32; QUERY_WORDS] {
+        &self.words
+    }
+
+    /// Mutable words: the mailbox response is written in place.
+    pub fn words_mut(&mut self) -> &mut [u32; QUERY_WORDS] {
+        &mut self.words
+    }
+}
+
+impl Default for SizeQuery {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Validates a native-size answer — hostile input like every firmware
+/// response; the caller routes any rejection through [`choose_mode`]'s
+/// fallback rather than aborting the splash.
+pub fn parse_display_size(words: &[u32; QUERY_WORDS]) -> Result<(u32, u32), FramebufferError> {
+    if words[1] != RESPONSE_BIT {
+        return Err(FramebufferError::ResponseCode(words[1]));
+    }
+    if words[4] & RESPONSE_BIT == 0 {
+        return Err(FramebufferError::MissingTag(0x0004_0003));
+    }
+    Ok((words[5], words[6]))
+}
+
+/// The mode the framebuffer is requested at: the display's native size when
+/// the answer is sane, the fallback otherwise. "Sane" is bounded on both
+/// ends — a zero (headless/unknown) or absurd dimension, or one too small to
+/// carry the text at scale 1, falls back rather than being negotiated with.
+#[must_use]
+pub fn choose_mode(native: Result<(u32, u32), FramebufferError>) -> (u32, u32) {
+    match native {
+        Ok((width, height))
+            if width >= TEXT_COLUMNS
+                && height >= GLYPH_ROWS * 2
+                && width <= MAX_DIMENSION
+                && height <= MAX_DIMENSION =>
+        {
+            (width, height)
+        }
+        _ => (FALLBACK_WIDTH, FALLBACK_HEIGHT),
+    }
+}
 
 /// Upper sanity bound on either screen dimension from a hostile descriptor.
 const MAX_DIMENSION: u32 = 4096;
@@ -44,10 +121,11 @@ pub struct PropertyMessage {
 }
 
 impl PropertyMessage {
-    /// Builds the pinned framebuffer request: physical/virtual 1280×720,
+    /// Builds the pinned framebuffer request at the chosen mode (the
+    /// display's native size, or the fallback): physical/virtual size,
     /// depth 32, allocate at 4096 alignment, get pitch.
     #[must_use]
-    pub const fn framebuffer_request() -> Self {
+    pub const fn framebuffer_request(width: u32, height: u32) -> Self {
         let mut words = [0u32; REQUEST_WORDS];
         words[0] = (REQUEST_WORDS * 4) as u32;
         words[1] = 0; // process request
@@ -55,14 +133,14 @@ impl PropertyMessage {
         words[2] = 0x0004_8003;
         words[3] = 8;
         words[4] = 0;
-        words[5] = REQUEST_WIDTH;
-        words[6] = REQUEST_HEIGHT;
+        words[5] = width;
+        words[6] = height;
         // Set virtual (buffer) size.
         words[7] = 0x0004_8004;
         words[8] = 8;
         words[9] = 0;
-        words[10] = REQUEST_WIDTH;
-        words[11] = REQUEST_HEIGHT;
+        words[10] = width;
+        words[11] = height;
         // Set depth.
         words[12] = 0x0004_8005;
         words[13] = 4;
@@ -386,15 +464,10 @@ mod board {
         }
     }
 
-    /// Asks the firmware for a framebuffer and paints the splash into it.
-    ///
-    /// Every failure returns silently: the caller is post-verdict boot code
-    /// whose next act is `park()`, and a dark screen is the accepted fallback
-    /// (`TEST-P1-07-07-A` clause 4). Never called before the verdict.
-    pub fn show_splash() {
-        let mut message = PropertyMessage::framebuffer_request();
-        let buffer_address = message.words().as_ptr() as usize as u32;
-
+    /// One bounded mailbox exchange: writes the (16-byte-aligned) message
+    /// address to the property channel and waits for the matching response.
+    /// `false` on any timeout — the caller falls back or gives up silently.
+    fn exchange(buffer_address: u32) -> bool {
         // Wait for write-FIFO space, bounded.
         let mut poll = BoundedPoll::new(POLL_BUDGET);
         loop {
@@ -407,7 +480,7 @@ mod board {
             match poll.step(!full) {
                 PollOutcome::Ready => break,
                 PollOutcome::Continue => continue,
-                PollOutcome::TimedOut => return,
+                PollOutcome::TimedOut => return false,
             }
         }
 
@@ -431,19 +504,49 @@ mod board {
             match poll.step(!empty) {
                 PollOutcome::Ready => {}
                 PollOutcome::Continue => continue,
-                PollOutcome::TimedOut => return,
+                PollOutcome::TimedOut => return false,
             }
             // SAFETY: as above.
             let value = unsafe { core::ptr::read_volatile(MAILBOX_READ as *const u32) };
             if value & 0xF == CHANNEL_PROPERTY && value & !0xF == buffer_address & !0xF {
-                break;
+                return true;
             }
             // A response for another channel: keep draining inside the same
             // budget rather than trusting the firmware to be well-behaved.
             poll = BoundedPoll::new(POLL_BUDGET);
         }
+    }
+
+    /// Asks the display's native size, then asks for a framebuffer at that
+    /// mode (fallback 720p), then paints the splash into it — adapting and
+    /// centring to whatever the panel actually is.
+    ///
+    /// Every failure returns silently: the caller is post-verdict boot code
+    /// whose next act is `park()`, and a dark screen is the accepted fallback
+    /// (`TEST-P1-07-07-A` clause 4). Never called before the verdict.
+    pub fn show_splash() {
+        // Phase 1: the native-size query. A failed exchange or hostile
+        // answer degrades to the fallback mode, never to an abort — the
+        // splash owes the operator its best effort.
+        let mut query = SizeQuery::new();
+        let query_address = query.words().as_ptr() as usize as u32;
+        let native = if exchange(query_address) {
+            parse_display_size(query.words_mut())
+        } else {
+            Err(FramebufferError::Timeout)
+        };
+        let (width, height) = choose_mode(native);
+
+        // Phase 2: the framebuffer request at the chosen mode.
+        let mut message = PropertyMessage::framebuffer_request(width, height);
+        let buffer_address = message.words().as_ptr() as usize as u32;
+        if !exchange(buffer_address) {
+            return;
+        }
 
         // The firmware wrote the response into our buffer; validate whole.
+        // The *answer's* geometry is what gets drawn into — the firmware may
+        // have granted something other than what was asked.
         let Ok(info) = parse_response(message.words_mut()) else {
             return;
         };
@@ -466,7 +569,7 @@ mod tests {
 
     #[test]
     fn the_framebuffer_request_layout_is_pinned_word_for_word() {
-        let message = PropertyMessage::framebuffer_request();
+        let message = PropertyMessage::framebuffer_request(1280, 720);
         let words = message.words();
         let expected: [u32; REQUEST_WORDS] = [
             (REQUEST_WORDS * 4) as u32, // total buffer size in bytes
@@ -501,13 +604,75 @@ mod tests {
         assert_eq!(words[..], expected[..]);
         assert_eq!(REQUEST_WORDS % 4, 0, "buffer stays a 16-byte multiple");
         assert_eq!(core::mem::align_of::<PropertyMessage>(), 16);
+        // The request carries whatever mode was chosen — 4K native, for one.
+        let native = PropertyMessage::framebuffer_request(3840, 2160);
+        assert_eq!(native.words()[5], 3840);
+        assert_eq!(native.words()[6], 2160);
+        assert_eq!(native.words()[10], 3840);
+        assert_eq!(native.words()[11], 2160);
+    }
+
+    #[test]
+    fn the_display_size_query_layout_is_pinned_word_for_word() {
+        let message = SizeQuery::new();
+        let expected: [u32; QUERY_WORDS] = [
+            (QUERY_WORDS * 4) as u32,
+            0x0000_0000,
+            0x0004_0003, // get physical (display) size
+            8,
+            0,
+            0,
+            0,
+            0x0000_0000, // end tag
+        ];
+        assert_eq!(message.words()[..], expected[..]);
+        assert_eq!(QUERY_WORDS % 4, 0, "16-byte multiple");
+        assert_eq!(core::mem::align_of::<SizeQuery>(), 16);
+    }
+
+    #[test]
+    fn the_native_size_answer_is_hostile_input_with_a_fallback() {
+        // A sane native answer is adopted.
+        let mut words: [u32; QUERY_WORDS] =
+            [(QUERY_WORDS * 4) as u32, 0x8000_0000, 0x0004_0003, 8, 0x8000_0008, 1920, 1080, 0];
+        assert_eq!(parse_display_size(&words), Ok((1920, 1080)));
+        assert_eq!(choose_mode(parse_display_size(&words)), (1920, 1080));
+
+        // Unanswered tag: typed rejection, and the fallback mode is chosen.
+        words[4] = 8;
+        assert_eq!(parse_display_size(&words), Err(FramebufferError::MissingTag(0x0004_0003)));
+        assert_eq!(choose_mode(parse_display_size(&words)), (FALLBACK_WIDTH, FALLBACK_HEIGHT));
+
+        // Wrong response code.
+        words[4] = 0x8000_0008;
+        words[1] = 0x8000_0001;
+        assert_eq!(parse_display_size(&words), Err(FramebufferError::ResponseCode(0x8000_0001)));
+
+        // Zero (headless / unknown EDID) and absurd sizes both fall back.
+        assert_eq!(choose_mode(Ok((0, 0))), (FALLBACK_WIDTH, FALLBACK_HEIGHT));
+        assert_eq!(choose_mode(Ok((100_000, 1080))), (FALLBACK_WIDTH, FALLBACK_HEIGHT));
+        assert_eq!(choose_mode(Ok((8, 8))), (FALLBACK_WIDTH, FALLBACK_HEIGHT));
+    }
+
+    #[test]
+    fn the_splash_adapts_and_centres_at_common_native_resolutions() {
+        for (w, h) in [(1920, 1080), (3840, 2160), (1024, 600)] {
+            let mut surface = MockSurface::new(w, h);
+            render_splash(&mut surface);
+            assert_eq!(surface.out_of_bounds, 0, "{w}x{h}");
+            let scale = splash_scale(w, h);
+            let x0 = (w - TEXT_COLUMNS * scale) / 2;
+            let y0 = (h - GLYPH_ROWS * scale) / 2;
+            assert_eq!(surface.at(x0, y0), FOREGROUND, "{w}x{h}: T bar at centred origin");
+            assert_eq!(surface.at(0, 0), BACKGROUND, "{w}x{h}: corner background");
+        }
     }
 
     // --- clause 2: the response is hostile input ----------------------------
 
     /// A well-formed firmware response for the pinned request shape.
     fn good_response() -> [u32; REQUEST_WORDS] {
-        let mut words = *PropertyMessage::framebuffer_request().words();
+        let mut words = *PropertyMessage::framebuffer_request(1280, 720).words();
         words[1] = 0x8000_0000; // success
                                 // set physical size answered in place (tag value words at 5,6).
         words[4] = 0x8000_0008;

@@ -35,10 +35,14 @@ The discipline that keeps this from corrupting the Feature:
 
 ## Acceptance criteria
 
-1. **The property message is host-pinned.** The request buffer (physical/virtual
-   size 1280×720, depth 32, allocate at 4096 alignment, get pitch, end tag) is
-   built by a pure function whose exact word layout host tests pin, 16-byte
-   aligned by construction.
+1. **The property messages are host-pinned.** Both the native-size query
+   (get-physical-display-size) and the framebuffer request (physical/virtual
+   size at the chosen mode, depth 32, allocate at 4096 alignment, get pitch,
+   end tag) are built by pure functions whose exact word layouts host tests
+   pin, 16-byte aligned by construction. The chosen mode is the display's
+   native resolution when its (hostile-validated) answer is sane, 1280×720 as
+   fallback — the splash adapts to the panel and centres on it (owner
+   direction, 2026-08-03).
 2. **The response is validated as hostile input, whole.** A typed rejection per
    arm — wrong response code, missing tag, zero/implausible base or size,
    depth mismatch, pitch/width inconsistency, dimensions beyond bounds — each

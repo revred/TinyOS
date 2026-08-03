@@ -27,11 +27,15 @@ gets painted, and the protocol cannot tell the difference.
 
 ### 1. The property message is exact bytes
 
-**Given** the splash's framebuffer request,
-**then** its word layout (header, set-physical-size 1280×720, set-virtual-size,
-set-depth 32, allocate-buffer alignment 4096, get-pitch, end tag) is produced by a
-pure function and pinned word-for-word by a host test, with 16-byte alignment
-guaranteed by the type, not by luck.
+**Given** the splash's two property messages,
+**then** the native-size query and the framebuffer request (header,
+set-physical-size at the chosen mode, set-virtual-size, set-depth 32,
+allocate-buffer alignment 4096, get-pitch, end tag) are produced by pure
+functions and pinned word-for-word by host tests, with 16-byte alignment
+guaranteed by the types, not by luck. The chosen mode is the display's native
+size when the query's hostile-validated answer is sane (bounded both ends),
+1280×720 otherwise — adaptation and centring are proven at 1920×1080,
+3840×2160 and 1024×600 in clause 3.
 
 ### 2. The firmware's response is hostile input (`BND-02`, `PD-12`, `RCG-01`)
 
