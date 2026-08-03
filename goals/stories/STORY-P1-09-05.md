@@ -49,8 +49,10 @@ Feature) — the park itself is never disturbed.
 ## Acceptance criteria
 
 1. **The heartbeat line is exact bytes.** `TOS64-BEAT/1 seq=<dec>
-   state=<beaconing|parked>\n`, built pure, pinned by host tests, sequence
-   the only variance.
+   state=<beaconing|parked> fb=<granted|refused>\n`, built pure, pinned by
+   host tests, sequence the only variance — `fb=` reporting whether the
+   firmware granted the splash's framebuffer exchange (06A's Question-1
+   discriminator).
 2. **Placement and restraint.** Exactly one `TOS64-LINK/1` line still; the
    heartbeat begins only after it; the pinned protocol lines are byte-
    identical with the heartbeat code present; a failed UART write ends the

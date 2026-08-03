@@ -28,9 +28,12 @@ clock produces bytes at a findable baud instead of silence.
 ### 1. The heartbeat is exact bytes (`BND-03`)
 
 **Given** the heartbeat builder,
-**then** `TOS64-BEAT/1 seq=<dec> state=<beaconing|parked>\n` is a pure
-function pinned word-for-word, sequence the only variance, both state words
-driven.
+**then** `TOS64-BEAT/1 seq=<dec> state=<beaconing|parked>
+fb=<granted|refused>\n` is a pure function pinned word-for-word, sequence
+the only variance, every field's words driven. The `fb=` field is 06A's
+Question-1 discriminator: it reports whether the firmware granted the
+splash's framebuffer exchange, splitting a refusing mailbox path from wrong
+plug conditions with no monitor involved.
 
 ### 2. Placement after everything it must never perturb (`BND-17`)
 

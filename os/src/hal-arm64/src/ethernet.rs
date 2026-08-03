@@ -222,13 +222,22 @@ pub fn link_line(discovery: &Discovery, beacon: BeaconField) -> ([u8; LINK_LINE_
 /// Builds one `TOS64-BEAT/1` heartbeat line (`STORY-P1-09-05`): emitted every
 /// park period so a passive listener can find a powered board without any
 /// operator timing, and so a wrong UART clock becomes bytes at a findable
-/// baud instead of silence. Pure; pinned by the tests.
-pub fn heartbeat_line(seq: u32, beaconing: bool) -> ([u8; LINK_LINE_CAPACITY], usize) {
+/// baud instead of silence. `fb_granted` reports whether the splash's
+/// firmware framebuffer exchange succeeded — the field 06A's Question 1
+/// needs: it splits "firmware refused the mailbox path" from "wrong plug
+/// conditions" with no monitor involved. Pure; pinned by the tests.
+pub fn heartbeat_line(
+    seq: u32,
+    beaconing: bool,
+    fb_granted: bool,
+) -> ([u8; LINK_LINE_CAPACITY], usize) {
     let mut line = LineBuilder::new();
     line.push("TOS64-BEAT/1 seq=");
     line.push_dec(seq);
     line.push(" state=");
     line.push(if beaconing { "beaconing" } else { "parked" });
+    line.push(" fb=");
+    line.push(if fb_granted { "granted" } else { "refused" });
     line.push("\n");
     (line.bytes, line.at)
 }
@@ -236,8 +245,13 @@ pub fn heartbeat_line(seq: u32, beaconing: bool) -> ([u8; LINK_LINE_CAPACITY], u
 /// Emits one heartbeat over the UART; `false` means the write refused and
 /// heartbeating must stop permanently — fail-safe over keep-trying, and the
 /// park itself is never disturbed.
-pub fn emit_heartbeat<M: Mmio>(uart: &crate::pl011::Pl011<M>, seq: u32, beaconing: bool) -> bool {
-    let (line, len) = heartbeat_line(seq, beaconing);
+pub fn emit_heartbeat<M: Mmio>(
+    uart: &crate::pl011::Pl011<M>,
+    seq: u32,
+    beaconing: bool,
+    fb_granted: bool,
+) -> bool {
+    let (line, len) = heartbeat_line(seq, beaconing, fb_granted);
     match core::str::from_utf8(&line[..len]) {
         Ok(text) => uart.write_str(text).is_ok(),
         Err(_) => false,
@@ -496,19 +510,19 @@ mod tests {
     // stops fail-safe on a refused write.
 
     #[test]
-    fn the_heartbeat_line_is_exact_bytes_with_both_states_driven() {
-        let (bytes, len) = heartbeat_line(1, true);
+    fn the_heartbeat_line_is_exact_bytes_with_every_field_driven() {
+        let (bytes, len) = heartbeat_line(1, true, true);
         assert_eq!(
             core::str::from_utf8(&bytes[..len]).unwrap(),
-            "TOS64-BEAT/1 seq=1 state=beaconing\n"
+            "TOS64-BEAT/1 seq=1 state=beaconing fb=granted\n"
         );
-        let (bytes, len) = heartbeat_line(42, false);
+        let (bytes, len) = heartbeat_line(42, false, false);
         assert_eq!(
             core::str::from_utf8(&bytes[..len]).unwrap(),
-            "TOS64-BEAT/1 seq=42 state=parked\n"
+            "TOS64-BEAT/1 seq=42 state=parked fb=refused\n"
         );
-        let (a, len_a) = heartbeat_line(7, true);
-        let (b, len_b) = heartbeat_line(8, true);
+        let (a, len_a) = heartbeat_line(7, true, false);
+        let (b, len_b) = heartbeat_line(8, true, false);
         assert_eq!(len_a, len_b);
         let differing: Vec<usize> = (0..len_a).filter(|&i| a[i] != b[i]).collect();
         assert_eq!(differing.len(), 1, "the sequence digit is the only variance");
@@ -525,7 +539,7 @@ mod tests {
             }
             fn write_u32(&self, _offset: usize, _value: u32) {}
         }
-        assert!(emit_heartbeat(&Pl011::new(ReadyWire), 1, false));
+        assert!(emit_heartbeat(&Pl011::new(ReadyWire), 1, false, true));
         /// A wedged transmit FIFO: the flag register always reads full, so
         /// `write_str` times out and the heartbeat must report stop.
         struct WedgedWire;
@@ -539,7 +553,7 @@ mod tests {
             }
             fn write_u32(&self, _offset: usize, _value: u32) {}
         }
-        assert!(!emit_heartbeat(&Pl011::new(WedgedWire), 2, true));
+        assert!(!emit_heartbeat(&Pl011::new(WedgedWire), 2, true, false));
     }
 
     #[test]
@@ -694,6 +708,7 @@ mod glue {
         let mut beaconing = matches!(beacon, BeaconField::Running);
         let speed_config = beacon_eligible(&discovery);
         let mut heartbeating = true;
+        let fb_granted = splash.is_some();
         let mut animation = splash.map(|info| {
             (crate::hdmi::Framebuffer { info }, crate::hdmi::Bounce::new(info.width, info.height))
         });
@@ -737,7 +752,7 @@ mod glue {
                         None => beaconing = false,
                     }
                 }
-                if heartbeating && !emit_heartbeat(uart, beat_seq, beaconing) {
+                if heartbeating && !emit_heartbeat(uart, beat_seq, beaconing, fb_granted) {
                     heartbeating = false;
                 }
                 beat_seq = beat_seq.wrapping_add(1);
