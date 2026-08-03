@@ -1113,3 +1113,53 @@ Note from THIS file (Pi OS dmesg, lines ~299-309): at probe time BAR1 read [mem 
 the BAR register's raw dword does not hold the CPU address. Next capture owed (Pi OS role):
 raw config dwords 0x10/0x14/0x18 of 0000:01:00.0, the bridge's outbound window registers live,
 and the RP1 PCIE_APBS inbound translation registers, all while ethernet works.
+
+===== INBOUND-PATH CAPTURE (Pi OS live, ethernet working, 2026-08-03 ~23:59 — the H1 conviction) =====
+dts (bcm2712.dtsi, rpi-6.12.y) pcie2 = pcie@1000120000, reg <0x10 0x00120000 0x0 0x9310>:
+  ranges = <0x02000000 0x00 0x00000000 0x1f 0x00000000 0x00 0xfffffffc ...>
+    -> CPU 0x1F_0000_0000 translates to PCI BUS ADDRESS 0x0000_0000 (full 4 GiB window)
+  dma-ranges include <0x43000000 0x10 0x0 0x00 0x0 0x10 0x0> (inbound PCI 0x10_0000_0000 -> RAM 0,
+    matching board.rs RP1_DMA_RAM_BASE) and a peripheral alias <0x02000000 0x0 0x0 0x1f 0x0 0x0 0x400000>
+
+endpoint 0002:01:00.0 (RP1) raw config, setpci:
+  COMMAND = 0x0406  (IO- MEM+ BusMaster+ INTx-disable)
+  BAR0 (0x10) = 0x00410000   <- bus address 0x410000 (16 KiB block)
+  BAR1 (0x14) = 0x00000000   <- BUS ADDRESS ZERO: the 4 MiB peripheral window
+  BAR2 (0x18) = 0x00400000   <- bus 0x400000 (64 KiB block)
+  header dwords 0x00-0x1f: e41d 0100 / 0604 1000 / 0000 0002 / 0000 0000 / BAR0 / BAR1(0) / BAR2 / 0
+
+bridge 0002:00:00.0 raw config, setpci:
+  PRIMARY/SECONDARY/SUBORDINATE = 00/01/01
+  mem base/limit dword @0x20 = 0x00400000  -> forwards bus 0x0000_0000..0x004F_FFFF
+  prefetch @0x24 = 0x0001fff1  -> disabled (base>limit)
+
+PCIE2 controller regs live (mmap probe @ 0x10_0012_0000):
+  WIN0_LO   (0x400c) = 0x00000000   <- PCI-side target base low  = 0
+  WIN0_HI   (0x4010) = 0x00000000   <- PCI-side target base high = 0
+  WIN0_BASE_LIMIT (0x4070) = 0xfff00000
+  WIN0_BASE_HI    (0x4080) = 0x0000001f
+  WIN0_LIMIT_HI   (0x4084) = 0x0000001f
+  => IDENTICAL to TinyOS's window_program constants (LO=0, HI=0, 0xFFF0_0000, 0x1F, 0x1F)
+
+RP1 BAR0 block head (endpoint controller / PCIE_APBS candidate, CPU 0x1f00410000):
+  +0x00: fffff000 000000ff 00000000 00000000
+  +0x10: fffff000 000000ff 00000001 00000000
+  +0x20: fffff000 000000ff 00000002 00000000
+  +0x30: fffff000 000000ff 00000003 00000000
+  (four 16-byte entries, index in the third word — capture kept for a future TinyOS-side diff;
+   not needed if the BAR fix clears the poison)
+
+VERDICT — H1 CONVICTED, mechanism fully specified:
+  Working chain under Pi OS: CPU 0x1f_0000_0000+off -> (WIN0, target 0) -> PCI 0x0+off
+    -> BAR1 (=0) claims -> RP1 fabric 0x4000_0000+off. Every register in that chain is now
+    captured raw, and every one of them EXCEPT the three endpoint BARs is already written
+    byte-identically by TinyOS's establish(). TinyOS never programs the endpoint BARs;
+    pcie.rs's own WindowPci doc comment records the assumption "the firmware assigns RP1's
+    peripheral BAR" — refuted: Linux assigns it (dmesg probe found BAR1 unset at boot).
+  THE FIX (STORY-P1-09-13): via the existing EXT_CFG_INDEX config path, size-probe then
+    assign the three BARs — write all-ones, read the size mask (dmesg-confirmed 0xffc00000
+    for BAR1's 4 MiB), then write the capture-pinned addresses BAR0=0x00410000,
+    BAR1=0x00000000, BAR2=0x00400000, then readback-believe each. COMMAND memory-enable is
+    already written after (order: BARs before COMMAND_ENABLE, per spec). Refusal codes 19+.
+    Note BAR1's happy readback is 0x00000000 — belief must come from the size-probe mask,
+    not from the zero readback alone.
