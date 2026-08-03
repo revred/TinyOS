@@ -106,3 +106,35 @@ future bidirectional link closes.
 Session hygiene: no concurrent commits landed mid-session; `work/tools/sdprep`
 stays deliberately untracked (02A's pending-ADR state); the running soak's log
 (`goals/reports/_soak-p0-03-01.log`) was left out of the commit.
+
+## Board attempt, same evening — negative evidence, recorded
+
+The owner staged the card, cabled the Pi 5 peer-to-peer to the laptop's
+Realtek GbE port, and powered it. Observed, with the host as instrument:
+
+- **Power LED green, steady** — firmware ran, no error blink pattern.
+- **Ethernet PHY dead flat**: the laptop NIC stayed `Disconnected / 0 bps`
+  through ~2.5 minutes of watching and across **three power cycles** (one at
+  4 Hz polling) — not even a transient training blip. This is the first real
+  evidence against `STORY-P1-09-02`'s recorded belief that the PHY comes up
+  on hardware defaults: the BCM54213PE is most likely unpowered or held in
+  reset until software releases it (as Linux's driver does). Registered as
+  `LE-68`.
+- **Fourth silent serial capture** (`runs/1785764707-boot`, 0 bytes, exit 3)
+  on the adapter now enumerated as COM5 (USB VID 3679). The loopback test
+  (`TEST-P1-07-01-A` clause 1) was set up but **not executed** — the session
+  ended before the TX–RX bridge was made. The adapter remains unverified and
+  the triage order unchanged: loopback first, connector muxing second.
+- **No HDMI signal** across a power cycle with a monitor pre-connected —
+  *conditions unconfirmed* (which micro-HDMI port and monitor-input state
+  were not established), so this neither confirms nor refutes the splash;
+  `STORY-P1-07-07`'s board criterion stays exactly as open as it was. Worth
+  noting: no firmware diagnostic screen appeared either, which on a Pi 5 is
+  more consistent with a successful handoff into the image than with a boot
+  failure.
+
+Net: the board very likely boots and parks green with all three output
+channels dark for three *independent* reasons — splash (unproven mailbox
+path), Ethernet (`LE-68`), serial (unverified wiring). Owner called it:
+back to the drawing board. The one test that splits the space, still undone,
+is the sixty-second adapter loopback.

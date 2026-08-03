@@ -55,7 +55,7 @@ for `STORY-P1-09-03` to consume; nothing is transmitted here.
 | 1 — clause-22 framing exact bits | **Green.** `gem::mdio_read_word` pinned, field masking included. |
 | 2 — identity before belief | **Green.** Scan classifies Known (revision steppings included), Unknown (reported, believed for nothing), Absent, and PortWedged; the seam double refuses any register outside the named set. |
 | 3 — latched-twice link and speed resolution | **Green.** Second read believed; 1000/100/10 × duplex resolved downward from partner ability; down and unresolved are honest outcomes; line shapes pinned. |
-| 4 — board, cable in and out | **Blocked on hardware.** Additionally carries this Story's named risk: PHY power/reset provisioning is believed firmware-default until a capture says otherwise. |
+| 4 — board, cable in and out | **Blocked, and the named risk is now evidenced (`LE-68`).** First physical attempt (2026-08-03 evening): the laptop NIC saw a dead-flat PHY across three power cycles with the power LED steady green — the PHY is most likely unpowered/held in reset until software releases it. The release step is `LE-68`'s recorded work, owed before this criterion can pass; serial remained unverified (fourth silent capture, loopback not yet executed). |
 
 ## Tests
 
