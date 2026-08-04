@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TinyOS Handovers — 4 August 2026</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #5a5a5a;
+    --border: #d8d8d8;
+    --code-bg: #f2f2f2;
+    --accent: #0b5fff;
+    --tag-bg: #eef2ff;
+    --card-bg: #fafafa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --fg: #e8e8e8;
+      --muted: #a0a0a0;
+      --border: #333740;
+      --code-bg: #1e2126;
+      --accent: #6fa8ff;
+      --tag-bg: #1c2333;
+      --card-bg: #191c21;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.6;
+  }
+  h1 { font-size: 1.7rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.25rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+  .status {
+    display: inline-block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--tag-bg);
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    margin-bottom: 1.5rem;
+  }
+  code {
+    background: var(--code-bg);
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  a { color: var(--accent); }
+  .muted { color: var(--muted); }
+  .entries { list-style: none; padding-left: 0; }
+  .entry {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 0.9rem;
+  }
+  .entry .num {
+    display: inline-block;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin-right: 0.4rem;
+  }
+  .entry a { font-weight: 600; font-size: 1.02rem; text-decoration: none; }
+  .entry a:hover { text-decoration: underline; }
+  .entry p { margin: 0.4rem 0 0; color: var(--muted); font-size: 0.92rem; }
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+
+<h1>TinyOS &mdash; Handovers for 4 August 2026</h1>
+<p class="muted">This page indexes every handover produced on this date, in order. Per the <a href="../README.md">session naming convention</a>, all handovers from a single calendar date live in this one folder. Previous session: <a href="../hand-2026-08-03/index.html">3 August 2026</a>.</p>
+<span class="status">The wire trained &middot; identity 0x0109 on silicon &middot; the beat line speaks &middot; one register family from a beaconing board</span>
+
+<h2>Handovers</h2>
+<ol class="entries">
+  <li class="entry">
+    <span class="num">01A</span><a href="01A-covernote-boot-first-the-inbound-window.md">Cover note: the inbound window is the last silent path &mdash; and its capture already ran, so the next session opens at the story</a>
+    <p>The small hours extended 09A's night into three more silicon verdicts. <code>STORY-P1-09-13</code> (the BARs nobody wrote) killed the <code>0xDEADDEAD</code> poison: <code>RP1=PRESENT ID=0x0109 PHY=0x600D84A2</code> on the canvas, and <strong>the wire trained to gigabit at 01:27:03 and again at 01:40:58 &mdash; the first Ethernet links TinyOS has ever negotiated</strong>. The beat line then said <code>PARKED</code> and nothing else, exposing three park states that all printed one word; <code>STORY-P1-09-14</code> gave each its own (<code>watch=alive/dead/none</code>, <code>stopped reason=&hellip;</code>), and its first boot read <code>STATE=STOPPED REASON=TIMEOUT</code> &mdash; one word clearing the watch and MDIO paths and convicting the transmit's DMA. The convicting capture ran the same night: the RC's inbound windows (<code>RC_BAR1&ndash;3</code> + the <code>UBUS</code> remap pairs, offsets <code>0x402c&ndash;0x4040</code>/<code>0x40ac&ndash;0x40c0</code>) are programmed by Linux, unprogrammed by us, and fully decoded in the ground-truth file &mdash; twelve dwords, the beacon's descriptor fetches riding window 2 (PCI <code>0x10_0000_0000</code> &rarr; RAM <code>0</code>, 64&nbsp;GiB). <strong>Next session: write <code>STORY-P1-09-15</code> from those numbers, boot, and expect <code>state=beaconing</code></strong> &mdash; at which point <code>FEAT-P1-09</code>'s exit is one packet capture away and Ti64Dink unblocks. Spine 89/73, 238 tests, codes 1&ndash;20, CI green through <code>031962a</code>.</p>
+  </li>
+</ol>
+
+<footer>
+Generated at session close, 2026-08-04. The deep operational context (SSH runbook, card roles, probe source, transcription drills, contingency trees) lives in <a href="../hand-2026-08-03/09A-window-poisoned-inbound-path-indicted.md">hand-2026-08-03/09A</a>.
+</footer>
+
+</body>
+</html>
