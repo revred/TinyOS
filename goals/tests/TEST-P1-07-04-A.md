@@ -78,6 +78,39 @@ Two questions that share one set of registers.
 - **No measurement.** `STORY-P1-07-06` measures; this Story chooses the ruler.
 - **`LE-09` stays open. `LE-15` closes here; `LE-24` does not** — it closes on `STORY-P1-07-06`'s batched shape.
 
+### Amended 2026-08-04, at implementation — how the clauses meet this bench
+
+Recorded rather than silently absorbed. Nothing above is weakened; the channel and two
+mechanics are pinned down:
+
+1. **The evidence channel is the canvas** (`LE-47`: five zero-byte serial captures, loopback
+   owner-declared infeasible). Clause 1's ratio evidence is the live `TOS64-TICK/1` line —
+   `count=`, the declared `tval=540000` (10 ms at the expected 54 MHz, reported and not the
+   pass condition), and `rmin=`/`rmax=` in per-mille over the last eight intervals — repainted
+   every second by the park loop, so the owner transcribes an *accumulated* verdict, not one
+   sample. Clauses 2, 4 and 5 land as the boot-time `TOS64-CONF/1` line (conformance outcome
+   with its span, the raw `CNTFRQ_EL0` beside the `cpus=` judgement); clause 3 as
+   `TOS64-PMU/1` (the `PMCCNTR_EL0` advance across a generic-timer-measured ~10 ms window,
+   the cross-counter `rate=` in MHz, and the `source=` decision). A refused GIC or timer
+   enable pins the tick row to `TOS64-TICK/1 refused=<register> readback=<hex>` — a dead tick
+   is a diagnosis, never a hang.
+2. **The one resumable vector.** Slot 5 (`cur_el_spx/irq`) is the single entry in the table
+   with a save/restore/`eret` path; the other fifteen keep `STORY-P1-07-02`'s fail-closed
+   report. Clause 6 holds architecturally: exception entry sets `PSTATE.I` and the fault path
+   never clears it, so a tick cannot preempt fault reporting; the handler is one `IAR` read,
+   at most one interval record, one `TVAL` re-arm and one `EOIR` write — bounded,
+   allocation-free, loop-free.
+3. **The fallback is exercised on the host**, per clause 3's "tested rather than assumed":
+   `cycle_source_decision` is a pure function and its `cntvct-fallback` arm is a host test,
+   alongside the `EL2` half of the same clause — `MDCR_EL2` is now written to zero at the
+   drop, so "PMCCNTR reads zero" can no longer be caused by an unknowable trap configuration.
+
+### The board captures (to be quoted verbatim when the Tier 1 run happens)
+
+Pending. The transcribed `TOS64-TICK/1` (with its ratio bounds), `TOS64-CONF/1` (the run
+`LE-27` closes on) and `TOS64-PMU/1` (the run `LE-15` closes on) land here, via the
+ground-truth file's `===== BOARD VERDICT N =====` record first.
+
 ## Test type
 
 Host unit tests (`#[cfg(test)]` in `os/src/hal-arm64/src/`, `os/src/hal/src/time.rs` conformance) plus a Tier 1 hardware run.

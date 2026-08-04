@@ -161,6 +161,27 @@ pub const REFUSAL_Y: u32 = 176;
 /// at park, because serial has never produced a byte on this bench and the
 /// canvas is the proven text channel.
 pub const MMU_Y: u32 = 216;
+/// The `TOS64-CONF/1` conformance-on-silicon line (`STORY-P1-07-04`,
+/// `LE-27`) — painted once at park.
+pub const CONF_Y: u32 = 256;
+/// The `TOS64-PMU/1` counter-decision line (`STORY-P1-07-04`, `LE-15`) —
+/// painted once at park.
+pub const PMU_Y: u32 = 296;
+/// The live `TOS64-TICK/1` line (`STORY-P1-07-04` clause 1) — repainted
+/// every second, the ratio evidence accumulating on screen.
+pub const TICK_Y: u32 = 336;
+
+/// The once-rendered boot evidence lines the park loop paints beneath the
+/// live rows — carried as bytes (line endings already stripped) so the park
+/// loop needs no knowledge of what produced them.
+pub struct BootLines<'a> {
+    /// `TOS64-MMU/1` (`STORY-P1-07-03` clause 4).
+    pub mmu: &'a [u8],
+    /// `TOS64-CONF/1` (`STORY-P1-07-04` clauses 2 and 5).
+    pub conf: &'a [u8],
+    /// `TOS64-PMU/1` (`STORY-P1-07-04` clauses 3 and 4).
+    pub pmu: &'a [u8],
+}
 /// Body text scale (16×16 glyphs: 120 columns on the canvas).
 pub const BODY_SCALE: u32 = 2;
 
@@ -257,7 +278,10 @@ mod tests {
               TOS64-MMU/1 sctlr=0000000030D01805 off=920000 on=1800 \
               TOS64-FAULT/1 slot=5 esr= class=data-abort-el1 ec=0x25 il=32 \
               status=translation level=1 wnr=read isv=no size= s1ptw=no \
-              far= elr= spsr= vbar= readback= match=yes halted no-resume-path";
+              far= elr= spsr= vbar= readback= match=yes halted no-resume-path \
+              TOS64-TICK/1 count=1234 tval=540000 rmin=999 rmax=1001 refused=gicc-pmr \
+              TOS64-CONF/1 cntvct=pass span=118 cntfrq=54000000 cpus=54 stuck backwards \
+              TOS64-PMU/1 delta=24000000 rate=2400mhz source=pmccntr cntvct-fallback";
         for &byte in report_charset.iter() {
             let glyph = glyph_for(byte);
             assert_ne!(glyph, BLOCK, "byte {byte:#x} ({}) must have a real glyph", byte as char);
@@ -299,10 +323,10 @@ mod tests {
         // Compile-time claims, stated as such (the board.rs convention).
         const {
             assert!(TITLE_Y < REPORT_Y && REPORT_Y < STATUS_Y && STATUS_Y < REFUSAL_Y);
-            assert!(REFUSAL_Y < MMU_Y);
+            assert!(REFUSAL_Y < MMU_Y && MMU_Y < CONF_Y && CONF_Y < PMU_Y && PMU_Y < TICK_Y);
             // The title never collides with the report line.
             assert!(TITLE_Y + GLYPH_SIZE * TITLE_SCALE <= REPORT_Y);
-            assert!(MMU_Y + GLYPH_SIZE * BODY_SCALE < board::SIMPLEFB_HEIGHT);
+            assert!(TICK_Y + GLYPH_SIZE * BODY_SCALE < board::SIMPLEFB_HEIGHT);
             // 120 body columns fit the canvas width at the margin.
             assert!(MARGIN_X + 120 * GLYPH_SIZE * BODY_SCALE <= board::SIMPLEFB_WIDTH + MARGIN_X);
         }

@@ -1321,7 +1321,8 @@ mod glue {
     pub fn announce_and_park(
         uart: &Pl011<VolatileMmio>,
         splash: Option<crate::hdmi::FramebufferInfo>,
-        mmu_line: &[u8],
+        boot_lines: &crate::canvas::BootLines<'_>,
+        tick_refused: Option<&[u8]>,
     ) -> ! {
         // SAFETY: the constants are the recorded CPU-physical bases of the
         // PCIe2 controller block and the GEM window; both are naturally
@@ -1376,10 +1377,36 @@ mod glue {
             &line[..len.saturating_sub(1)],
             crate::canvas::TEXT,
         );
-        // `STORY-P1-07-03`: the cache-evidence line, painted once — it never
-        // changes after boot, and the canvas is the channel the owner
-        // transcribes into the ground-truth file.
-        crate::canvas::draw_line(&mut console, crate::canvas::MMU_Y, mmu_line, crate::canvas::TEXT);
+        // `STORY-P1-07-03`/`-04`: the boot evidence lines, painted once —
+        // they never change after boot, and the canvas is the channel the
+        // owner transcribes into the ground-truth file. The tick row is
+        // painted below: live if the tick runs, pinned to its refusal if not.
+        crate::canvas::draw_line(
+            &mut console,
+            crate::canvas::MMU_Y,
+            boot_lines.mmu,
+            crate::canvas::TEXT,
+        );
+        crate::canvas::draw_line(
+            &mut console,
+            crate::canvas::CONF_Y,
+            boot_lines.conf,
+            crate::canvas::TEXT,
+        );
+        crate::canvas::draw_line(
+            &mut console,
+            crate::canvas::PMU_Y,
+            boot_lines.pmu,
+            crate::canvas::TEXT,
+        );
+        if let Some(refused) = tick_refused {
+            crate::canvas::draw_line(
+                &mut console,
+                crate::canvas::TICK_Y,
+                refused,
+                crate::canvas::ALERT,
+            );
+        }
 
         let mut beaconing = matches!(beacon, BeaconField::Running);
         // `STORY-P1-09-14`: the park verdict's memory — a stopped transmit
@@ -1501,6 +1528,19 @@ mod glue {
                         }
                         None => beaconing = false,
                     }
+                }
+                // `STORY-P1-07-04` clause 1: the ratio evidence accumulates
+                // on screen once a second — unless the tick was refused, in
+                // which case its row stays pinned to the refusal painted
+                // above and this repaint is skipped.
+                if tick_refused.is_none() {
+                    let (tick_text, tick_len) = crate::tick::status_line();
+                    crate::canvas::draw_line(
+                        &mut console,
+                        crate::canvas::TICK_Y,
+                        &tick_text[..tick_len.saturating_sub(1)],
+                        crate::canvas::TEXT,
+                    );
                 }
                 let park = park_state(beaconing, stopped, watch.is_some(), watch_dead);
                 // `STORY-P1-07-09`: the live status and any refusal, as text.

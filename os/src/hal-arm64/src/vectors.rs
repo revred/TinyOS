@@ -84,7 +84,8 @@ pub enum EntrySource {
 pub enum EntryKind {
     /// Synchronous — the aborts, traps and `BRK`s this Story decodes.
     Synchronous,
-    /// IRQ. Masked throughout this Feature; no GIC exists.
+    /// IRQ. Routed since `STORY-P1-07-04`: the `EL1h` slot resumes through
+    /// the tick handler; every other IRQ slot stays fail-closed.
     Irq,
     /// FIQ. Masked throughout this Feature.
     Fiq,
@@ -113,6 +114,13 @@ pub enum Routing {
     /// the set of faults that are terminal for the whole system; it does not
     /// widen the set that is silent, which stays empty.
     FailClosedDefault,
+    /// The tick handler (`STORY-P1-07-04`): acknowledge the GIC, record the
+    /// interval, re-arm the timer, retire the claim, **and return** — the
+    /// only routing in this table with a resume path. Bounded and
+    /// allocation-free (`SEC-20`); a tick arriving during fault reporting
+    /// cannot preempt it, because exception entry sets `PSTATE.I` and the
+    /// fault path never clears it.
+    Tick,
 }
 
 /// The routing of all sixteen slots — the host-side model of the assembly
@@ -152,6 +160,11 @@ impl VectorSlot {
     /// slot this Story decodes.
     pub const SYNCHRONOUS_EL1H: VectorSlot =
         VectorSlot { source: EntrySource::CurrentElSpx, kind: EntryKind::Synchronous };
+
+    /// The IRQ slot interrupts taken at `EL1h` arrive through — the one slot
+    /// `STORY-P1-07-04` routes to the tick, and the only one that resumes.
+    pub const IRQ_EL1H: VectorSlot =
+        VectorSlot { source: EntrySource::CurrentElSpx, kind: EntryKind::Irq };
 
     /// This slot's index, `0..16`.
     pub const fn index(self) -> usize {
@@ -223,12 +236,12 @@ impl VectorTable {
 
     /// The table this crate's assembly actually installs.
     ///
-    /// One decoded entry and fifteen fail-closed ones. The fifteen are not
-    /// filler: an `IRQ` cannot fire (`DAIF` stays masked and no GIC is
-    /// programmed), an `EL0` entry cannot fire (there is no `EL0`), and an
-    /// AArch32 entry cannot fire (nothing here is AArch32) — but "cannot fire"
-    /// is a claim about the rest of the system, and this table is what holds
-    /// when that claim turns out to be wrong.
+    /// One decoded entry, one tick entry (`STORY-P1-07-04`), and fourteen
+    /// fail-closed ones. The fourteen are not filler: an `EL0` entry cannot
+    /// fire (there is no `EL0`), an AArch32 entry cannot fire (nothing here
+    /// is AArch32), and an `SP_EL0` entry cannot fire (`eret` selected
+    /// `EL1h`) — but "cannot fire" is a claim about the rest of the system,
+    /// and this table is what holds when that claim turns out to be wrong.
     pub const fn installed() -> VectorTable {
         let mut table = VectorTable::empty();
         let mut index = 0;
@@ -237,6 +250,7 @@ impl VectorTable {
             index += 1;
         }
         table.routed[VectorSlot::SYNCHRONOUS_EL1H.index()] = Some(Routing::Decoded);
+        table.routed[VectorSlot::IRQ_EL1H.index()] = Some(Routing::Tick);
         table
     }
 
@@ -381,10 +395,12 @@ mod tests {
         let decoded =
             VectorSlot { source: EntrySource::CurrentElSpx, kind: EntryKind::Synchronous };
         assert_eq!(table.routing(decoded), Some(Routing::Decoded));
+        // `STORY-P1-07-04`: the EL1h IRQ slot is the one resumable routing.
+        assert_eq!(table.routing(VectorSlot::IRQ_EL1H), Some(Routing::Tick));
 
         for slot in VectorSlot::ALL {
             let routing = table.routing(slot).expect("every slot is routed");
-            if slot == decoded {
+            if slot == decoded || slot == VectorSlot::IRQ_EL1H {
                 continue;
             }
             assert_eq!(
@@ -397,21 +413,27 @@ mod tests {
 
     #[test]
     fn exactly_one_slot_is_decoded_so_the_silent_set_stays_empty() {
-        // Clause 1's second paragraph, as arithmetic: one decoded entry,
-        // fifteen fail-closed, zero unrouted. A Story that widened the decoded
-        // set without saying so would change this count.
+        // Clause 1's second paragraph, as arithmetic: one decoded entry, one
+        // tick entry (`STORY-P1-07-04` — the only resumable routing),
+        // fourteen fail-closed, zero unrouted. A Story that widened either
+        // set without saying so would change these counts.
         let table = VectorTable::installed();
         let decoded = VectorSlot::ALL
             .iter()
             .filter(|slot| table.routing(**slot) == Some(Routing::Decoded))
+            .count();
+        let tick = VectorSlot::ALL
+            .iter()
+            .filter(|slot| table.routing(**slot) == Some(Routing::Tick))
             .count();
         let default = VectorSlot::ALL
             .iter()
             .filter(|slot| table.routing(**slot) == Some(Routing::FailClosedDefault))
             .count();
         assert_eq!(decoded, 1);
-        assert_eq!(default, ENTRY_COUNT - 1);
-        assert_eq!(decoded + default, ENTRY_COUNT);
+        assert_eq!(tick, 1);
+        assert_eq!(default, ENTRY_COUNT - 2);
+        assert_eq!(decoded + tick + default, ENTRY_COUNT);
     }
 
     // Clause 1: the alignment requirement, and the reason it is not a run-time

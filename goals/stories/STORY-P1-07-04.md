@@ -1,6 +1,6 @@
 # STORY-P1-07-04 — GIC and Generic-Timer Tick, and the Counter Decision That Closes `LE-15`
 
-Status: **Specified — not started; gated on `STORY-P1-07-03` and on `TEST-P1-07-04-A` Red first**
+Status: **In progress — host-testable half Green 2026-08-04 (275 host tests in `hal-arm64`, from 259, Red first: GIC enable order and refusals against latching doubles, ratio arithmetic, the `LE-15` decision function with its fallback arm exercised, every report line pinned to exact bytes); acceptance criteria 1, 2, 3, 4 and 5 blocked on a board capture. The evidence channel is the canvas (`TOS64-TICK/1` live, `TOS64-CONF/1` and `TOS64-PMU/1` at boot) — serial has never produced a byte on this bench (`LE-47`). Not Verified.**
 Feature: [`FEAT-P1-07`](../features/FEAT-P1-07.md)
 Introduced in: [`session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md`](../../session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md) §4.2
 

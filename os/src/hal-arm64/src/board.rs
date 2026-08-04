@@ -165,6 +165,20 @@ pub const SIMPLEFB_STRIDE: u32 = 3840;
 /// makes it read the wrong 4 GiB of bus space, silently.
 pub const RP1_DMA_RAM_BASE: u64 = 0x0000_0010_0000_0000;
 
+/// The GIC-400 distributor (`STORY-P1-07-04`), from the BCM2712 device
+/// tree's `interrupt-controller@7fff9000` under the same `0x10_0000_0000`
+/// SoC window every other peripheral here lives in — inside the identity
+/// map's Device gigabyte, so no mapping change was needed to reach it.
+pub const GICD_BASE: u64 = 0x0000_0010_7FFF_9000;
+/// One 4 KiB distributor page.
+pub const GICD_SIZE: usize = 0x1000;
+
+/// The GIC-400 CPU interface, `interrupt-controller@7fff9000`'s second
+/// register block.
+pub const GICC_BASE: u64 = 0x0000_0010_7FFF_A000;
+/// The CPU-interface window: two pages (the second is the GICv2 alias page).
+pub const GICC_SIZE: usize = 0x2000;
+
 #[cfg(test)]
 mod tests {
     use super::*;

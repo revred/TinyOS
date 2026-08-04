@@ -189,7 +189,7 @@ pub fn build_identity_map(
     let fb_first = (board::SIMPLEFB_BASE >> 21) as usize;
     let fb_last = ((board::SIMPLEFB_BASE + board::SIMPLEFB_SIZE as u64 - 1) >> 21) as usize;
     for (entry, slot) in l2.iter_mut().enumerate().skip(1) {
-        let attribute = if entry >= fb_first && entry <= fb_last {
+        let attribute = if (fb_first..=fb_last).contains(&entry) {
             MemoryAttribute::NormalNonCacheable
         } else {
             MemoryAttribute::NormalWriteBack
@@ -306,16 +306,20 @@ pub fn report_line(
     (line, len)
 }
 
-fn push(line: &mut [u8; LINE_CAPACITY], len: &mut usize, bytes: &[u8]) {
+/// Appends `bytes` to a fixed report-line buffer, dropping overflow — a
+/// truncated line beats a wrapped one. Shared by every `TOS64-*` line
+/// builder in this crate that renders into a fixed array.
+pub(crate) fn push(line: &mut [u8], len: &mut usize, bytes: &[u8]) {
     for &byte in bytes {
-        if *len < LINE_CAPACITY {
+        if *len < line.len() {
             line[*len] = byte;
             *len += 1;
         }
     }
 }
 
-fn push_decimal(line: &mut [u8; LINE_CAPACITY], len: &mut usize, value: u64) {
+/// Appends `value` in decimal, via [`push`].
+pub(crate) fn push_decimal(line: &mut [u8], len: &mut usize, value: u64) {
     let mut digits = [0u8; 20];
     let mut count = 0;
     let mut rest = value;

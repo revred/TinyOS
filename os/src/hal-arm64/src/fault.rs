@@ -381,7 +381,38 @@ core::arch::global_asm!(
     "TINYOS_VECTOR_ENTRY 2",
     "TINYOS_VECTOR_ENTRY 3",
     "TINYOS_VECTOR_ENTRY 4",
-    "TINYOS_VECTOR_ENTRY 5",
+    // Slot 5 — cur_el_spx/irq, `STORY-P1-07-04`'s tick — is the ONE entry
+    // with a resume path, so it is the one entry that saves state: every
+    // AAPCS caller-saved register plus the link register, on the stack the
+    // interrupt arrived on. `ELR_EL1`/`SPSR_EL1` need no save because the
+    // handler is not re-entered: `PSTATE.I` is set on exception entry and
+    // stays set until the `eret`. 24 instructions, inside the 32 the stride
+    // allows — the `.org` for slot 6 is the assembler-enforced proof.
+    ".org tinyos_vector_table + 0x80 * 5",
+    "    sub  sp, sp, #0xA0",
+    "    stp  x0, x1, [sp, #0x00]",
+    "    stp  x2, x3, [sp, #0x10]",
+    "    stp  x4, x5, [sp, #0x20]",
+    "    stp  x6, x7, [sp, #0x30]",
+    "    stp  x8, x9, [sp, #0x40]",
+    "    stp  x10, x11, [sp, #0x50]",
+    "    stp  x12, x13, [sp, #0x60]",
+    "    stp  x14, x15, [sp, #0x70]",
+    "    stp  x16, x17, [sp, #0x80]",
+    "    stp  x18, x30, [sp, #0x90]",
+    "    bl   {irq}",
+    "    ldp  x0, x1, [sp, #0x00]",
+    "    ldp  x2, x3, [sp, #0x10]",
+    "    ldp  x4, x5, [sp, #0x20]",
+    "    ldp  x6, x7, [sp, #0x30]",
+    "    ldp  x8, x9, [sp, #0x40]",
+    "    ldp  x10, x11, [sp, #0x50]",
+    "    ldp  x12, x13, [sp, #0x60]",
+    "    ldp  x14, x15, [sp, #0x70]",
+    "    ldp  x16, x17, [sp, #0x80]",
+    "    ldp  x18, x30, [sp, #0x90]",
+    "    add  sp, sp, #0xA0",
+    "    eret",
     "TINYOS_VECTOR_ENTRY 6",
     "TINYOS_VECTOR_ENTRY 7",
     "TINYOS_VECTOR_ENTRY 8",
@@ -396,7 +427,40 @@ core::arch::global_asm!(
     // nothing else in this section can be placed inside it.
     ".org tinyos_vector_table + 0x800",
     entry = sym tinyos_arm64_exception_entry,
+    irq = sym tinyos_arm64_irq_entry,
 );
+
+/// Where slot 5 — and only slot 5 — lands: the tick
+/// ([`crate::vectors::Routing::Tick`], `STORY-P1-07-04`).
+///
+/// Bounded and allocation-free (`SEC-20`): one `GICC_IAR` read, at most one
+/// interval record + one `TVAL` write + one `EOIR` write, no loops. A claim
+/// of [`crate::gic::SPURIOUS_INTID`] is returned from without an `EOIR`, per
+/// the GIC architecture. An unexpected INTID is retired and counted, never
+/// fatal — the count reaches the report through the tick state.
+///
+/// **Unverified.** Never executed; see this module's documentation.
+#[cfg(target_arch = "aarch64")]
+#[no_mangle]
+pub extern "C" fn tinyos_arm64_irq_entry() {
+    // SAFETY: `GICC_BASE` is the BCM2712 GIC-400 CPU-interface window
+    // transcribed in `crate::board`; single core, and the fault path cannot
+    // preempt this (both run with `PSTATE.I` set).
+    let gicc = unsafe { crate::pl011::VolatileMmio::new(crate::board::GICC_BASE) };
+    let claimed = crate::gic::acknowledge(&gicc);
+    let intid = claimed & 0x3FF;
+    if intid == crate::gic::SPURIOUS_INTID {
+        return;
+    }
+    if intid == crate::gic::VIRTUAL_TIMER_INTID {
+        use crate::timer::VirtualCounter;
+        crate::tick::record_tick(crate::timer::SystemRegisters.count());
+        crate::timer::rearm_virtual_timer(crate::tick::TICK_INTERVAL_TICKS);
+    } else {
+        crate::tick::record_unexpected();
+    }
+    crate::gic::end_of_interrupt(&gicc, claimed);
+}
 
 /// Where every one of the sixteen vector entries lands.
 ///

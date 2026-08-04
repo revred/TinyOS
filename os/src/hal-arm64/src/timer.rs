@@ -176,10 +176,10 @@ pub const fn plausible_cycles_per_us(hertz: u64) -> Option<u32> {
 /// judgement about whether `CNTFRQ_EL0`'s *contents* can be trusted belongs to
 /// [`plausible_cycles_per_us`], not here.
 ///
-/// Nothing in this repository executes these two instructions yet: no AArch64
-/// target spec or boot path exists (pieces 1 and 2 of the `LE-09` slice, which
-/// the recorded decision sequences after `FEAT-P1-02`). They are compiled and
-/// reviewed, not verified, and `STORY-P1-01-03`'s Report says so.
+/// First executed on silicon by `STORY-P1-07-03`'s cache probe and
+/// `STORY-P1-07-04`'s conformance run — the run `LE-27` closes on. Until
+/// that capture is quoted in `TEST-P1-07-04-A`, they remain compiled and
+/// reviewed rather than verified, exactly as `STORY-P1-01-03`'s Report said.
 #[cfg(target_arch = "aarch64")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SystemRegisters;
@@ -225,6 +225,164 @@ impl CounterFrequency for SystemRegisters {
             );
         }
         value
+    }
+}
+
+/// The PMU cycle counter as a [`CycleSource`] — the recorded `LE-15`
+/// decision (`STORY-P1-07-04`, Handover 19 §7.5): `PMCCNTR_EL0` is the ARM64
+/// microbenchmark cycle source; [`Cntvct`] stays the `Timebase`/wall-clock
+/// source. Generic over the same register-seam pattern as [`Cntvct`], so the
+/// selection logic is host-testable before the register ever answers.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Pmccntr<R> {
+    counter: R,
+}
+
+impl<R> Pmccntr<R> {
+    /// The `cycle_source=` name this source reports in a measurement
+    /// envelope.
+    pub const NAME: &'static str = "pmccntr_el0";
+
+    /// Wraps a cycle-counter register seam.
+    pub const fn new(counter: R) -> Self {
+        Pmccntr { counter }
+    }
+}
+
+impl<R: VirtualCounter> CycleSource for Pmccntr<R> {
+    fn read_cycles(&self) -> u64 {
+        self.counter.count()
+    }
+}
+
+// --- aarch64 glue: the PMU and the virtual timer (`STORY-P1-07-04`) ----------
+
+/// The real `PMCCNTR_EL0` read. A separate zero-sized seam rather than a
+/// second method on [`SystemRegisters`], because this register — unlike the
+/// generic timer's — must be *enabled* first and may honestly read zero
+/// forever ([`enable_pmu_cycle_counter`], `TEST-P1-07-04-A` clause 3).
+#[cfg(target_arch = "aarch64")]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PmuRegisters;
+
+#[cfg(target_arch = "aarch64")]
+impl VirtualCounter for PmuRegisters {
+    fn count(&self) -> u64 {
+        let value: u64;
+        // SAFETY: `PMCCNTR_EL0` is readable at EL1 once `MDCR_EL2` traps are
+        // clear (the drop writes it to zero) — and if the implementation
+        // still refuses, the refusal is a *synchronous exception*, which
+        // reports through `STORY-P1-07-02`'s handler rather than hanging.
+        // The `isb` orders the read for the same reason `CNTVCT_EL0`'s does.
+        unsafe {
+            core::arch::asm!(
+                "isb",
+                "mrs {value}, pmccntr_el0",
+                value = out(reg) value,
+                options(nostack, preserves_flags),
+            );
+        }
+        value
+    }
+}
+
+/// Enables the PMU cycle counter: `PMCR_EL0.E` plus cycle-counter reset,
+/// `PMCCFILTR_EL0` cleared so EL1 is counted, `PMCNTENSET_EL0` bit 31.
+///
+/// No readback here on purpose — the *counter advancing* is the only
+/// readback that matters, and [`tick::cycle_source_decision`] judges exactly
+/// that ([`crate::tick`]).
+#[cfg(target_arch = "aarch64")]
+pub fn enable_pmu_cycle_counter() {
+    // SAFETY: all three registers are architected PMUv3 EL1-writable state;
+    // single core, sole writer; the `isb` makes the enable visible before
+    // the first read.
+    unsafe {
+        core::arch::asm!(
+            "mrs  {scratch}, pmcr_el0",
+            // E (enable) then C (cycle reset) — two `orr`s because 0b101 is
+            // not an encodable AArch64 logical immediate.
+            "orr  {scratch}, {scratch}, #0x1",
+            "orr  {scratch}, {scratch}, #0x4",
+            "msr  pmcr_el0, {scratch}",
+            "msr  pmccfiltr_el0, xzr",         // count at EL1, no filtering
+            "mov  {scratch}, #(1 << 31)",
+            "msr  pmcntenset_el0, {scratch}",
+            "isb",
+            scratch = out(reg) _,
+            options(nostack, preserves_flags),
+        );
+    }
+}
+
+/// What the PMU probe observed: the cycle-counter advance across a window
+/// whose width the generic timer measured.
+#[cfg(target_arch = "aarch64")]
+#[derive(Debug, Clone, Copy)]
+pub struct PmuProbe {
+    /// `PMCCNTR_EL0`'s advance across the window — zero convicts the PMU
+    /// and takes the recorded fallback, never the Story.
+    pub pmccntr_delta: u64,
+    /// The window's width in generic-timer ticks.
+    pub window_ticks: u64,
+}
+
+/// Enables the PMU and measures its counter against the generic timer for
+/// `window_ticks` (bounded busy wait). Clause 4's measurement: the rate is
+/// derived from the *other* counter, never quoted from the manual.
+#[cfg(target_arch = "aarch64")]
+#[must_use]
+pub fn probe_pmccntr(window_ticks: u64) -> PmuProbe {
+    enable_pmu_cycle_counter();
+    let timer = SystemRegisters;
+    let pmu = PmuRegisters;
+    let pmu_start = pmu.count();
+    let started = timer.count();
+    // Bounded: the loop ends when the window closes or the iteration bound
+    // trips (a stuck CNTVCT converts to a short window, not a hang).
+    let mut spins: u32 = 0;
+    while timer.count().wrapping_sub(started) < window_ticks && spins < 2_000_000_000 {
+        spins += 1;
+    }
+    let window = timer.count().wrapping_sub(started);
+    PmuProbe { pmccntr_delta: pmu.count().wrapping_sub(pmu_start), window_ticks: window }
+}
+
+/// Arms the EL1 virtual timer to fire in `interval` ticks and enables it,
+/// returning the `CNTV_CTL_EL0` readback (bit 0 must be set, bit 1 clear).
+#[cfg(target_arch = "aarch64")]
+pub fn start_virtual_timer(interval: u32) -> u64 {
+    let readback: u64;
+    // SAFETY: `CNTV_TVAL_EL0`/`CNTV_CTL_EL0` are EL1-writable generic-timer
+    // state; `CNTHCTL_EL2` was configured at the drop; single core.
+    unsafe {
+        core::arch::asm!(
+            "msr  cntv_tval_el0, {interval}",
+            "mov  {ctl}, #1",
+            "msr  cntv_ctl_el0, {ctl}",
+            "isb",
+            "mrs  {ctl}, cntv_ctl_el0",
+            interval = in(reg) u64::from(interval),
+            ctl = out(reg) readback,
+            options(nostack, preserves_flags),
+        );
+    }
+    readback
+}
+
+/// Re-arms the already-enabled virtual timer for the next interval — the one
+/// register write the tick handler performs on the timer.
+#[cfg(target_arch = "aarch64")]
+pub fn rearm_virtual_timer(interval: u32) {
+    // SAFETY: as in `start_virtual_timer`; writing `TVAL` restarts the
+    // countdown and drops the pending state, which is the acknowledgement
+    // the timer side of the interrupt requires.
+    unsafe {
+        core::arch::asm!(
+            "msr  cntv_tval_el0, {interval}",
+            interval = in(reg) u64::from(interval),
+            options(nostack, preserves_flags),
+        );
     }
 }
 

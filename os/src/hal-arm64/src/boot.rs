@@ -312,6 +312,11 @@ unsafe fn drop_to_el1() -> ! {
             "orr  x0, x0, #3",
             "msr  cnthctl_el2, x0",
             "msr  cntvoff_el2, xzr",
+            // No EL2 traps on the PMU: `MDCR_EL2`'s reset value is
+            // architecturally unknown, and an unknown trap configuration is
+            // exactly how `PMCCNTR_EL0` "reads zero at EL1" without anyone
+            // being able to say why (`STORY-P1-07-04` clause 3).
+            "msr  mdcr_el2, xzr",
             // SCTLR_EL1 to its reserved-one pattern with M, C, I and A clear:
             // MMU off, caches off, alignment checking off. `STORY-P1-07-03`
             // turns M, C and I on in `continue_at_el1` — after the vector
@@ -411,6 +416,82 @@ extern "C" fn continue_at_el1() -> ! {
         let _ = uart.write_str(text);
     }
 
+    // `STORY-P1-07-04`: the tick, the conformance run and the counter
+    // decision — strictly after the MMU (a counter read on uncached memory
+    // measures the memory system) and strictly before the verdict. Each
+    // enable is believed from a readback or refused by name; a refused tick
+    // leaves interrupts masked and the boot continues — a park loop without
+    // a tick is the pre-`-04` boot, which is a diagnosis, not a hang.
+    let tick_refusal: Option<([u8; crate::tick::LINE_CAPACITY], usize)> = {
+        // SAFETY: the GIC-400 windows transcribed in `crate::board`, inside
+        // the identity map's Device gigabyte; single core, sole programmer.
+        let gicd = unsafe { crate::pl011::VolatileMmio::new(crate::board::GICD_BASE) };
+        // SAFETY: as above.
+        let gicc = unsafe { crate::pl011::VolatileMmio::new(crate::board::GICC_BASE) };
+        match crate::gic::enable_tick_interrupt(&gicd, &gicc) {
+            Ok(()) => {
+                let ctl = crate::timer::start_virtual_timer(crate::tick::TICK_INTERVAL_TICKS);
+                if ctl & 0b11 == 0b01 {
+                    // Enabled, not masked: open the door. From here every
+                    // wait in the park loop is tick-interrupted, and slot 5
+                    // is the one vector with a resume path.
+                    // SAFETY: the vector table is installed and the tick
+                    // handler is bounded and allocation-free.
+                    unsafe {
+                        core::arch::asm!("msr daifclr, #2", options(nomem, nostack));
+                    }
+                    None
+                } else {
+                    // The timer control readback disagreed: same refused
+                    // shape, the `CNTV_CTL_EL0` readback as the conviction.
+                    Some(crate::tick::tick_refused_line(crate::gic::GicRefused::TimerNotHeld(
+                        ctl as u32,
+                    )))
+                }
+            }
+            Err(refused) => Some(crate::tick::tick_refused_line(refused)),
+        }
+    };
+    if let Some((line, len)) = &tick_refusal {
+        if let Ok(text) = core::str::from_utf8(&line[..*len]) {
+            let _ = uart.write_str(text);
+        }
+    }
+
+    // `LE-27` closes on this run and on nothing earlier: the shared
+    // conformance suite against the real `CNTVCT_EL0`, plus `CNTFRQ_EL0`'s
+    // honest-absence judgement beside its raw value.
+    let conformance = hal::time::conformance::check(
+        &crate::timer::Cntvct::new(crate::timer::SystemRegisters),
+        64,
+    );
+    let cntfrq_raw = {
+        use crate::timer::CounterFrequency;
+        crate::timer::SystemRegisters.hertz()
+    };
+    let timebase =
+        crate::timer::GenericTimerTimebase::from_register(&crate::timer::SystemRegisters);
+    let (conf_line, conf_line_len) = crate::tick::conformance_line(
+        conformance,
+        cntfrq_raw,
+        hal::time::Timebase::cycles_per_us(&timebase),
+    );
+    if let Ok(text) = core::str::from_utf8(&conf_line[..conf_line_len]) {
+        let _ = uart.write_str(text);
+    }
+
+    // The `LE-15` decision meets its registers: PMCCNTR measured against the
+    // generic timer across a ~10 ms window. A delta of zero takes the
+    // recorded fallback and narrows `LE-15`; it does not fail the boot.
+    let probe = crate::timer::probe_pmccntr(u64::from(crate::tick::TICK_INTERVAL_TICKS));
+    let (pmu_line, pmu_line_len) = crate::tick::pmu_line(
+        probe.pmccntr_delta,
+        crate::tick::measured_rate_mhz(probe.pmccntr_delta, probe.window_ticks, cntfrq_raw),
+    );
+    if let Ok(text) = core::str::from_utf8(&pmu_line[..pmu_line_len]) {
+        let _ = uart.write_str(text);
+    }
+
     // `fixture-mmu-fault` (`TEST-P1-07-03-A` clause 6): a deliberate load
     // from an address the map excludes on purpose. The boot ends in the
     // decoded `TOS64-FAULT/1` frame — `far=` must read 0x20_0000_0000 —
@@ -447,11 +528,18 @@ extern "C" fn continue_at_el1() -> ! {
     // the serial heartbeat, the splash-surface animation, and the beacon
     // while the link and transmit path stay healthy. Every wait inside is
     // budget-bounded and every refusal resolves to the same fail-safe park
-    // this function always ended in. The MMU line rides along so the canvas
-    // can carry `STORY-P1-07-03`'s evidence — serial has never produced a
-    // byte on this bench (`LE-47`), and the screen is the proven text
-    // channel.
-    crate::ethernet::announce_and_park(&uart, splash, &mmu_line[..mmu_line_len.saturating_sub(1)])
+    // this function always ended in. The boot evidence lines ride along so
+    // the canvas can carry `STORY-P1-07-03`'s and `-04`'s evidence — serial
+    // has never produced a byte on this bench (`LE-47`), and the screen is
+    // the proven text channel. A refused tick pins its refusal to the live
+    // row; otherwise the park loop repaints the accumulating ratio evidence.
+    let lines = crate::canvas::BootLines {
+        mmu: &mmu_line[..mmu_line_len.saturating_sub(1)],
+        conf: &conf_line[..conf_line_len.saturating_sub(1)],
+        pmu: &pmu_line[..pmu_line_len.saturating_sub(1)],
+    };
+    let tick_refused = tick_refusal.as_ref().map(|(line, len)| &line[..len.saturating_sub(1)]);
+    crate::ethernet::announce_and_park(&uart, splash, &lines, tick_refused)
 }
 
 /// Parks the core in `wfe` forever.
