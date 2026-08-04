@@ -53,6 +53,7 @@ pub mod preempt;
 pub mod spoor;
 pub mod spoor_journal;
 
+pub mod spoor_stream;
 pub mod spoor_wire;
 #[cfg(target_arch = "x86_64")]
 pub mod wcet;
