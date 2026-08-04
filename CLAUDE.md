@@ -42,7 +42,13 @@ Run these from `os/` — they are the machine-readable view of the project's sta
 cargo run -p xtask -- help                     # every subcommand
 cargo run -p xtask -- list-fixtures            # every QEMU fixture and its owning TEST-*
 cargo run -p xtask -- check-assurance-spine    # contracts, loose ends, status headers
+cargo run -p xtask -- check-boot-images        # every AArch64 image variant + clippy (LE-72)
 ```
+
+`check-boot-images` is not optional before pushing a change to `kernel`, `hal-arm64` or
+`pi5-image`: nothing else you run locally — not `cargo test`, not `fmt`, not host clippy —
+compiles those crates for the board, and three pushes have already gone out green locally
+and red on the runner because of it.
 
 Open defects live in [`goals/assurance/loose-ends.tsv`](goals/assurance/loose-ends.tsv)
 (`LE-*`), not in prose. Story and Feature status lives in the `Status:` header of each

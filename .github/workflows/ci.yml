@@ -57,22 +57,15 @@ jobs:
       #
       # `compiler_builtins` with `compiler-builtins-mem` is not optional: a
       # `build-std=core` alone leaves memcpy/memcmp undefined at link time.
-      - name: AArch64 target spec links the Pi 5 boot image (STORY-P1-07-01/-05)
-        run: >
-          cargo build -p pi5-image
-          --target targets/aarch64-tinyos.json
-          -Z build-std=core,compiler_builtins
-          -Z build-std-features=compiler-builtins-mem
-          -Z json-target-spec
-
-      - name: clippy on the AArch64 build (-D warnings)
-        run: >
-          cargo clippy -p hal-arm64
-          --target targets/aarch64-tinyos.json
-          -Z build-std=core,compiler_builtins
-          -Z build-std-features=compiler-builtins-mem
-          -Z json-target-spec
-          -- -D warnings
+      # ONE command, shared with the local gate, because LE-72 was raised
+      # exactly over the two drifting apart: the pre-push check an agent had
+      # adopted (`xtask pi5 --fixture=measure`) could not even produce the
+      # featureless image this job builds, so it was structurally incapable of
+      # catching what CI catches. `check-boot-images` builds every variant --
+      # featureless first, then each registered fixture -- and lints all three
+      # board crates. A session running it locally is running this step.
+      - name: Every AArch64 image variant builds and lints (STORY-P1-07-01/-05, LE-72)
+        run: cargo run -p xtask -- check-boot-images
 
   governance-fixture-smoke-test:
     name: TEST-P0-01-02-A — fixtures actually catch what they claim to

@@ -212,15 +212,18 @@ mod tests {
         // The whole point: UDP carries the identical records, so one decoder
         // reads a raw capture, a UDP datagram and a journal file alike.
         let mut spoor = [0u8; crate::spoor_wire::MAX_PAYLOAD];
-        let spoor_len = crate::spoor_wire::encode(7, &[0x1234_5678_9ABC_DEF0], &mut spoor)
-            .expect("a spoor frame encodes");
+        let spoor_len =
+            crate::spoor_wire::encode(7, 0x0BAD_CAFE, 0, &[0x1234_5678_9ABC_DEF0], &mut spoor)
+                .expect("a spoor frame encodes");
         let mut out = [0u8; 2048];
         let total = encode(&spoor[..spoor_len], &mut out).expect("fits");
         assert_eq!(&out[HEADER_LEN..total], &spoor[..spoor_len]);
-        assert_eq!(
-            crate::spoor_wire::decode_header(&out[HEADER_LEN..total]).expect("decodes"),
-            (7, 1)
-        );
+        let header = crate::spoor_wire::decode_header(&out[HEADER_LEN..total]).expect("decodes");
+        assert_eq!((header.seq, header.count), (7, 1));
+        // The wrapper is transparent to the epoch too: a host on the UDP path
+        // must be able to tell which boot it is reading, exactly as one on the
+        // raw path can.
+        assert_eq!(header.epoch, 0x0BAD_CAFE, "the wrapper carries the boot epoch unchanged");
     }
 
     #[test]

@@ -2,7 +2,9 @@
 
 Status: **draft / `FEAT-P1-10`. The on-wire format is implemented and host-tested
 (`kernel::spoor_wire`, `STORY-P1-10-01`); the board-side stamping and egress are
-`STORY-P1-10-02`. The inbound direction is specified in §7 and deliberately not built.**
+`STORY-P1-10-02`, proven on silicon 2026-08-04 (`BOARD VERDICT 10`). The boot epoch and
+the retained certificate (§4.1) are `STORY-P1-10-04`, host-Green with no board evidence
+yet. The inbound direction is specified in §7 and deliberately not built.**
 
 Owning Feature: [`FEAT-P1-10`](../goals/features/FEAT-P1-10.md) under
 [`EPIC-P1`](../goals/epics/EPIC-P1.md) — Determinism Proof.
@@ -40,7 +42,7 @@ So the wire carries **raw packed records**. The board's entire cost per spoor is
 
 1. one `u64` store into the journal ring (`SpoorJournal::append`, no branch beyond the wrap),
 2. a bulk copy of a contiguous run of `u64`s into the frame buffer at drain time,
-3. one descriptor kick per frame, amortised across up to 184 records.
+3. one descriptor kick per frame, amortised across up to 181 records.
 
 There is no formatting, no string handling, no per-record branching, and no allocation
 anywhere on that path. Decoding — categories, actors, actions, outcomes, human-readable
@@ -65,14 +67,21 @@ One Ethernet frame, EtherType `0x88B5` (IEEE 802 local experimental — the same
  ---- payload begins ----
      14     8  magic — "SPOORJ01" (spoor_journal::JOURNAL_MAGIC)
      22     8  seq — u64 LE, sequence number of the FIRST record in this frame
-     30     2  count — u16 LE, number of records (0..=184)
-     32     2  flags — u16 LE, reserved, written zero
-     34     4  padding — zero, so records begin 8-byte aligned
+     30     2  count — u16 LE, number of records (0..=181)
+     32     2  flags — u16 LE, bit 0 = RETAINED (§4.1), rest reserved
+     34     4  epoch — u32 LE, the boot that emitted this frame (§4.1); 0 = undeclared
      38   8*n  records — n × u64 LE, packed spoors, verbatim
 ```
 
-Payload length is exactly `24 + 8 * count`, bounded at 1496 bytes, so a full frame is 1510
+Payload length is exactly `24 + 8 * count`, bounded at 1472 bytes, so a full frame is 1486
 bytes on the wire — inside a standard MTU with no jumbo frames and no fragmentation.
+
+**The `epoch` field is where the reserved padding went.** The original format held four zero
+bytes at 34–38 explicitly *"so a future field does not have to move the records"*.
+`STORY-P1-10-04` is that future field: it spends the padding and moves nothing, so a stream
+captured before it existed still decodes record-for-record against a decoder built after it.
+That is the entire return on having reserved the space, and it is worth naming, because the
+alternative was a format version number and two parsers.
 
 **The magic is not new.** `SPOORJ01` and the packed-`u64` record layout are already what
 [`kernel::spoor_journal`](../os/src/kernel/src/spoor_journal.rs) declares as its on-disk
@@ -102,13 +111,86 @@ within the service life of the hardware.
 A stream that cannot say what it dropped quietly lies about what it saw. This format can
 always say.
 
+## 4.1 What a late listener cannot know, and the two things that fix it
+
+§4 makes loss countable. It does **not** make the stream joinable, and those are different
+properties. Two holes, both found by the owner reading `BOARD VERDICT 10`:
+
+**If frame 0 is lost, the boot rungs are gone forever.** `MmuEnabled`, `GicRouted`,
+`TickArmed` stamp exactly once, the drain clears the ring, and nothing re-sends them. A host
+that missed that frame learns from the gap *how many* records it lost and never *what they
+were* — and boot state is the least repeatable, most diagnostic part of the whole stream.
+`BOARD VERDICT 10` exists only because a capture happened to be running across a power
+cycle. Evidence by luck is not a channel property.
+
+**A listener joining late cannot tell which boot it joined.** At `seq=25138` nothing
+distinguishes "continuing normally" from "joined after a reboot I never saw". A sequence
+number is a position *within* a boot and cannot express which boot it is a position in. A
+host that assumed continuity across an unseen reboot would read a fresh stream as a
+continuation and report tens of thousands of losses that never happened — §4's accounting
+turned against itself.
+
+### The boot epoch
+
+Every frame carries a 32-bit `epoch`, fixed once at boot and identical on every frame that
+boot emits — drained or retained. A change of epoch is a reboot, and a host reads it as one
+rather than as loss.
+
+**What it honestly is: a change detector, not an identifier.** The board has no persistent
+store and no RTC. The epoch is derived from `CNTVCT_EL0` at kernel entry, so what varies
+between boots is how many counter ticks firmware spent before reaching the kernel — real
+variation, but the firmware's, not ours. A host can conclude *"this is a different boot"*
+with high probability; it can never conclude *"this is boot number N"* or *"I missed exactly
+two boots"*. `LE-74` records the limit and names what would remove it (the BCM2712 hardware
+RNG, or firmware-persisted state — each its own bring-up). Zero is reserved for **not
+declared**, so an unseeded board or an older image reads as an honest absence.
+
+### The retained boot certificate
+
+The boot prologue is held in a fixed buffer **outside the journal ring** and re-emitted every
+`ANNOUNCE_EVERY` park passes (five, so roughly every five seconds). Any listener, joining at
+any time, learns the boot state within a stated window.
+
+Three properties make it honest rather than merely convenient:
+
+- **Verbatim, not a summary.** The same packed `u64`s with the sequence numbers they were
+  originally sent under. A host that missed frame 0 and one that saw it decode identical
+  bytes. A re-stamp would carry fresh sequences and a fresh cost and would be a *different
+  event* wearing the same name.
+- **A consecutive run from `seq = 0`.** The certificate takes once-per-boot rungs while the
+  run from zero is unbroken and closes permanently at the first record that is not one. A
+  frame header carries one sequence and implies the rest follow consecutively, so a
+  certificate assembled from scattered records would make its own header lie.
+- **Marked on the wire.** `FLAG_RETAINED` is set, and a decoder must not apply `seq + count`
+  to such a frame. `spoor_wire::FrameHeader::expected_next` returns nothing for a retained
+  frame, so the phantom gap is *unreachable* rather than documented — the same posture as
+  bounding `count` before using it to index.
+
+**This is all egress.** No receive path, no new pinned buffer, no charter change, no
+widening of `LE-67`'s exposure: one small frame every few seconds on the transmit path
+`STORY-P1-10-02` already proved.
+
+### Why this comes before asking
+
+Two-way query/response (§7) is genuinely better than broadcasting hopefully, and it costs
+enabling GEM receive — the one thing `gem.rs` enforces against with a dedicated test, and the
+thing `LE-67` records as *the* containment story while there is no IOMMU. A retained,
+re-announced, epoch-tagged stream means a listener never *has* to ask. Establishing that
+first is what keeps the expensive answer an option rather than a necessity.
+
 ## 5. Why the frame is MTU-sized
 
 The first draft of this format carried 16 records per frame. That was sized for a diagnostic
 trickle, and it was wrong for the claim in §1: if the spoor stream is the system's observable
 behaviour, it is continuous and high-rate by nature and the frame must not be the limiting
-factor. 184 records per transmit amortises the descriptor kick across an order of magnitude
+factor. 181 records per transmit amortises the descriptor kick across an order of magnitude
 more events, using the *same single pinned buffer* `LE-67` constrains the design to.
+
+The number is 181 rather than 184 because the payload is sized by the **larger** of the two
+framings it travels in: raw `0x88B5` gives `14 + 24 + 181*8 = 1486`, and the IPv4/UDP wrapper
+(`kernel::udp_wire`, §9) gives `14 + 20 + 8 + 24 + 181*8 = 1514` — exactly a maximum Ethernet
+frame before the FCS. One constant keeps both inside an MTU, so fragmentation stays
+unreachable on either path rather than merely unused on one.
 
 ## 6. Attack surface — what is actually true
 
@@ -186,6 +268,17 @@ It must, in order of importance:
    the host must mirror it.
 3. **Never require elevation.** This is why the format sits on raw `0x88B5` while a capture
    still needs a privileged reader today; §9 records the open question.
+4. **Report a reboot as a reboot.** An epoch change resets the host's expectation instead of
+   producing a loss figure, and a retained frame is excluded from the arithmetic entirely.
+   A decoder that got either wrong would turn §4's honest accounting into the loudest lie the
+   tool can tell.
+5. **Say what it could not learn.** A window with no frame 0 and no certificate in it means
+   the boot state is unknown, and the tool says so rather than reporting the oldest record it
+   happened to see as though it were the beginning.
+
+Ti64Dink does all five. It also **checks the verbatim claim** when a capture holds both a
+live frame 0 and a certificate for the same epoch, comparing them record for record and
+reporting a disagreement as a defect rather than picking one.
 
 ## 9. Open questions
 
@@ -197,6 +290,13 @@ It must, in order of importance:
 - **Ring sizing and drain cadence.** `SPOOR_JOURNAL_CAPACITY` was chosen for a crash-dump
   ring. The right size for a streaming jitter buffer is a function of burst rate against
   drain period and has not been measured.
+- **Epoch entropy** (`LE-74`). The epoch distinguishes boots because firmware timing varies,
+  which is borrowed entropy. Two boots that reached the kernel on the same counter tick read
+  as one. A hardware RNG or persisted state would fix it; neither exists on this path yet,
+  and no document may describe the field as a boot count until one does.
+- **Announcement cadence.** `ANNOUNCE_EVERY = 5` is chosen, not measured — a trade between
+  wire share and how long a session tolerates not knowing which boot it is watching. The
+  same class of debt as ring sizing, and stated for the same reason.
 - **Completeness.** §1 claims the stream is the system's observable behaviour. Until the
   `dispatch`, `lock`, `wcet` and `actuation` call sites stamp on the AArch64 path, it is the
   *boot and park* behaviour only, and every Report must say so.

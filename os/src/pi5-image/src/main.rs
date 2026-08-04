@@ -28,7 +28,8 @@ use hal_arm64::boot as _;
 // the symbol `hal_arm64::boot` calls under the same feature.
 use kernel::fixture_measure_arm64 as _;
 
-/// Forces `kernel`'s spoor seam into the link (`STORY-P1-10-02`).
+/// Forces `kernel`'s spoor seam into the link (`STORY-P1-10-02`,
+/// `STORY-P1-10-04`).
 ///
 /// `hal-arm64`'s boot rungs call `tinyos_spoor_stamp`/`tinyos_spoor_drain` by
 /// symbol, because on AArch64 the dependency runs `kernel` → `hal-arm64` and
@@ -44,10 +45,26 @@ use kernel::fixture_measure_arm64 as _;
 ///
 /// `#[used]` rather than a plain `use`, because a mere import of a function
 /// item is not a reference the linker must honour.
+///
+/// **Every symbol the seam exports is named here, not a representative one.**
+/// The whole `kernel` rlib comes in as soon as one is referenced, so listing
+/// only `tinyos_spoor_stamp` would work — right up until someone moves the
+/// stream into a crate of its own and discovers which symbols were load-
+/// bearing by watching the link fail on the runner. That is exactly the
+/// discovery this static exists to have already made.
 #[cfg(target_arch = "aarch64")]
 #[used]
-static SPOOR_SEAM: (extern "C" fn(u16, u8, u32), unsafe extern "C" fn(*mut u8, usize) -> usize) =
-    (kernel::spoor_stream::tinyos_spoor_stamp, kernel::spoor_stream::tinyos_spoor_drain);
+static SPOOR_SEAM: (
+    extern "C" fn(u16, u8, u32),
+    unsafe extern "C" fn(*mut u8, usize) -> usize,
+    extern "C" fn(u64),
+    unsafe extern "C" fn(*mut u8, usize) -> usize,
+) = (
+    kernel::spoor_stream::tinyos_spoor_stamp,
+    kernel::spoor_stream::tinyos_spoor_drain,
+    kernel::spoor_stream::tinyos_spoor_seed_epoch,
+    kernel::spoor_stream::tinyos_spoor_announce,
+);
 
 /// A panic in this image has no reporting channel of its own — the UART may
 /// be the very thing that failed — so the fail-safe terminal state is the

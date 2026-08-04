@@ -1620,6 +1620,31 @@ mod glue {
                                 }
                             }
                         }
+                        // `STORY-P1-10-04`: the retained boot certificate,
+                        // re-announced on the kernel's own period. The boot
+                        // rungs stamp once and the drain above clears them, so
+                        // without this a listener that missed frame 0 learns
+                        // from the sequence gap how many records it lost and
+                        // never what they were — and boot state is the least
+                        // repeatable part of the whole stream.
+                        //
+                        // Asked every pass, answered on the period: the cadence
+                        // belongs to `kernel::spoor_stream` where a host test
+                        // holds it, so this loop carries no policy. It reuses
+                        // the same buffer and the same single pinned staging
+                        // region — no second grant, and `LE-67`'s containment
+                        // story is exactly as wide as it was.
+                        let announced = crate::spoor::announce(&mut payload);
+                        if announced > 0 {
+                            if let Some(ring_dma) = stage_spoor_payload(&payload[..announced]) {
+                                if let Err(refused) =
+                                    gem::transmit_once(&gem_window, ring_dma, speed, full_duplex)
+                                {
+                                    stopped = Some(refused);
+                                    beaconing = false;
+                                }
+                            }
+                        }
                     }
                 }
                 // `STORY-P1-07-06`: one transcript line per beat rides the

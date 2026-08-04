@@ -31,7 +31,7 @@ expected sequence is `seq + count` and any gap is an exact count of lost records
 1. **Records are byte-identical to what `Spoor::stamp` produced.** No formatting, no re-packing, no reordering anywhere on the board-side path.
 2. **A frame reuses `spoor_journal::JOURNAL_MAGIC` and its record layout**, so a capture and a journal file parse with one decoder.
 3. **The sequence counter is 64-bit and loss is exactly countable.** A 32-bit counter wraps in under an hour on a continuously streaming system, and a wrapped counter makes drop accounting a fiction rather than a measurement.
-4. **A frame fills a standard MTU and cannot exceed one.** 184 records per transmit, so the frame is not what limits a stream that is continuous by nature — and so fragmentation is unreachable rather than merely unused.
+4. **A frame fills a standard MTU and cannot exceed one.** 181 records per transmit (184 as first written; reduced when `udp_wire` made the UDP framing the larger of the two the payload must fit), so the frame is not what limits a stream that is continuous by nature — and so fragmentation is unreachable rather than merely unused.
 5. **Every malformed frame is refused, never partially parsed.** A wrong magic, a `count` above the format's bound, a `count` the frame is too short to carry, and a read past the end each return an error over fixed-width fields.
 6. **Nothing is written on refusal.** An encode that cannot fit its output leaves the buffer untouched rather than half-filled.
 

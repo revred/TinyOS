@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 mod assurance;
+mod boot_images;
 mod bound_provenance;
 mod dashboard;
 mod external_isolation;
@@ -497,6 +498,10 @@ const SUBCOMMANDS: &[Subcommand] = &[
         name: "check-spine-files",
         summary: "Fast: header, field count and id uniqueness on every hand-edited spine TSV",
     },
+    Subcommand {
+        name: "check-boot-images",
+        summary: "Build EVERY AArch64 image variant (featureless + each fixture) and clippy them",
+    },
     Subcommand { name: "check-crate-sizes", summary: "Enforce the 20,000-LOC crate ceiling" },
     Subcommand { name: "check-image-size", summary: "Enforce the system-image size ceiling" },
     Subcommand {
@@ -876,6 +881,23 @@ fn main() -> ExitCode {
                 }
             }
         }
+        // `LE-72`. The one gate in this table that compiles anything for the
+        // board, and the reason it is a gate rather than a build step: three
+        // pushes went out green-by-local-gates and red on the runner because
+        // nothing an agent runs by reflex builds `kernel` for AArch64.
+        "check-boot-images" => match check_boot_images() {
+            Ok(count) => {
+                println!(
+                    "boot-images-check: {count} AArch64 image variant(s) built and linted — \
+                     featureless first, then every registered fixture"
+                );
+                ExitCode::SUCCESS
+            }
+            Err(message) => {
+                eprintln!("xtask: boot image check failed: {message}");
+                ExitCode::FAILURE
+            }
+        },
         "check-assurance-spine" => {
             let result = os_root().and_then(|root| {
                 let repo_root = root.parent().ok_or_else(|| {
@@ -913,6 +935,17 @@ fn main() -> ExitCode {
                         summary.passing_report_count,
                         summary.dashboard_badge_count,
                         summary.external_manifest_count
+                    );
+                    // `LE-72`: this banner is what a session runs by reflex,
+                    // and nothing in it compiles anything for the board. The
+                    // pointer is here because a cross-target gate that is not
+                    // reachable from a habitual command is a gate that will
+                    // keep being skipped — which is exactly how three pushes
+                    // went out green locally and red on the runner.
+                    println!(
+                        "reminder: this gate compiles nothing for AArch64. Before pushing a \
+                         change to kernel, hal-arm64 or pi5-image, run \
+                         `cargo run -p xtask -- check-boot-images`."
                     );
                     ExitCode::SUCCESS
                 }
@@ -1222,6 +1255,80 @@ fn qemu_x86_64(
 }
 
 /// `STORY-P1-07-05`: builds the bootable AArch64 image, flattens it to a
+/// Builds every AArch64 image variant and lints them for the target (`LE-72`).
+///
+/// Returns how many variants were built. Every invocation is the same
+/// `-Z build-std` incantation `pi5_run` uses, against the same target spec, so
+/// this gate and the image-production path cannot drift into disagreeing about
+/// what "the AArch64 build" means.
+fn check_boot_images() -> Result<usize, String> {
+    let os_root = os_root()?;
+    let target_spec = os_root.join("targets").join("aarch64-tinyos.json");
+    let plan = boot_images::build_plan();
+
+    for build in &plan {
+        println!("boot-images: building {} for aarch64-tinyos", build.label);
+        let mut command = Command::new("cargo");
+        command
+            .current_dir(&os_root)
+            .arg("build")
+            .arg("-p")
+            .arg(pi5::IMAGE_PACKAGE)
+            .arg("--target")
+            .arg(&target_spec)
+            .arg("-Z")
+            .arg("json-target-spec")
+            .arg("-Z")
+            .arg("build-std=core,compiler_builtins")
+            .arg("-Z")
+            .arg("build-std-features=compiler-builtins-mem");
+        if let Some(feature) = build.feature {
+            command.arg("--features").arg(feature);
+        }
+        let status = command.status().map_err(|e| format!("failed to invoke cargo build: {e}"))?;
+        if !status.success() {
+            return Err(format!(
+                "the {} AArch64 image does not build — this is the failure CI would have \
+                 reported, caught locally instead",
+                build.label
+            ));
+        }
+    }
+
+    // Clippy across the whole board crate graph, not just `hal-arm64`: the
+    // crate that broke the link twice was `kernel`, and a lint gate that
+    // cannot see it is not a gate over it. One invocation per package because
+    // `--lib` applies to every `-p` in a single call, and only `kernel` wants
+    // it.
+    for target in boot_images::CLIPPY_TARGETS {
+        println!("boot-images: clippy {} for aarch64-tinyos", target.package);
+        let mut clippy = Command::new("cargo");
+        clippy.current_dir(&os_root).arg("clippy").arg("-p").arg(target.package);
+        if target.lib_only {
+            clippy.arg("--lib");
+        }
+        let status = clippy
+            .arg("--target")
+            .arg(&target_spec)
+            .arg("-Z")
+            .arg("json-target-spec")
+            .arg("-Z")
+            .arg("build-std=core,compiler_builtins")
+            .arg("-Z")
+            .arg("build-std-features=compiler-builtins-mem")
+            .arg("--")
+            .arg("-D")
+            .arg("warnings")
+            .status()
+            .map_err(|e| format!("failed to invoke cargo clippy: {e}"))?;
+        if !status.success() {
+            return Err(format!("clippy refused the AArch64 build of {}", target.package));
+        }
+    }
+
+    Ok(plan.len())
+}
+
 /// placeable `kernel8.img`, prints the SD-card placement, and — when `--port`
 /// is given — captures the debug UART and verdicts the run.
 ///

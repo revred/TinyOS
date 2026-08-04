@@ -36,6 +36,7 @@ park rungs at all.
 |---|---|---|
 | [`STORY-P1-10-01`](../stories/STORY-P1-10-01.md) | The on-wire format: raw packed `u64` records, MTU-filling frames, `u64` sequence for exact loss accounting, reusing the journal's own magic and record layout | In progress — host half Green 2026-08-04, 13 tests |
 | [`STORY-P1-10-02`](../stories/STORY-P1-10-02.md) | Boot and park stamping, and the park-loop drain that transmits frames | In progress — criteria 1, 2, 3 and 5 Green on silicon 2026-08-04 (`BOARD VERDICT 10`), criterion 4 evidenced negatively by `BOARD VERDICT 9`, criterion 6 (stated cost) not yet met |
+| [`STORY-P1-10-04`](../stories/STORY-P1-10-04.md) | The retained boot certificate and the boot epoch: a listener joining late learns which boot it joined, and learns the boot rungs it never saw | Specified — host half implemented test-first 2026-08-04; no board evidence |
 
 **Enumerated, deliberately not decomposed** (just-in-time rule): a C# `tos64-listen` host
 decoder growing into Ti64Dink (`FEAT-P2-10`), and the extension that wires the existing
@@ -69,4 +70,12 @@ to work.
 - **Unprivileged host capture.** Raw `0x88B5` needs a privileged reader on Windows. A UDP
   shim would remove that, buys the board nothing, and is recorded as an option rather than
   adopted.
+- **Epoch entropy** (`LE-74`). `STORY-P1-10-04`'s boot epoch distinguishes boots because
+  firmware timing varies between them, which is borrowed entropy. It is a change detector and
+  never a boot count, and no Report may describe it as one until a hardware RNG or persisted
+  state exists.
+- **Announcement cadence.** `ANNOUNCE_EVERY = 5` is chosen, not measured — the same class of
+  debt as ring sizing, and stated for the same reason.
 - **`LE-67`** applies unchanged: one pinned buffer, receive disabled, no device isolation.
+  `STORY-P1-10-04` adds no grant and no second buffer: the announcement rides the transmit
+  path `STORY-P1-10-02` already proved.

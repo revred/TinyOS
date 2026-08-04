@@ -410,6 +410,12 @@ extern "C" fn continue_at_el1() -> ! {
     // The UART surviving the switch *is* clause 5: if the device-region
     // attributes are wrong, this line is where the board goes silent.
     let cache_on_ticks = crate::mmu::measure_cache_probe();
+    // `STORY-P1-10-04`: the boot epoch, fixed before the first rung stamps so
+    // every frame this boot emits carries it. A listener that joins at
+    // `seq=25138` cannot otherwise tell "continuing normally" from "joined
+    // after a reboot I never saw" — a sequence number is a position *within* a
+    // boot and cannot say which boot it is a position in.
+    crate::spoor::seed_epoch();
     // `STORY-P1-10-02`: the first rung the board leaves a spoor for. The cost
     // field carries the cache-on probe, so a reader of the stream alone can
     // see the ratio that `TOS64-MMU/1` reports on the canvas.

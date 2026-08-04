@@ -29,7 +29,7 @@
 
 use crate::spoor::{Action, Actor, Category, Outcome, Spoor};
 use crate::spoor_journal::SpoorJournal;
-use crate::spoor_wire::{self, SpoorWireError, MAX_RECORDS};
+use crate::spoor_wire::{self, SpoorWireError, EPOCH_UNDECLARED, FLAG_RETAINED, MAX_RECORDS};
 
 /// A rung the boot or park path passes, as it crosses the `extern "C"` seam.
 ///
@@ -82,6 +82,31 @@ impl Rung {
         self as u16
     }
 
+    /// Whether this rung belongs to the **boot certificate**
+    /// (`STORY-P1-10-04`) — the birth certificate a late listener is
+    /// re-announced.
+    ///
+    /// True for the rungs that happen **once per boot** and establish
+    /// something a reader cannot recover any other way: a translation regime,
+    /// a route, an armed timer, a completed measurement. False for everything
+    /// that repeats, and that exclusion is what makes the certificate bounded
+    /// rather than merely small — a rung stamped every park pass could
+    /// otherwise fill a fixed buffer with the least interesting seconds of the
+    /// run and displace the boot.
+    ///
+    /// `BeaconTransmitted` is excluded despite reading like a boot event: it
+    /// stamps on every pass that transmits, so it is stream, not birth.
+    /// `FaultTaken` is excluded because a fault is not boot state and is
+    /// unbounded in count — and because a fault that happened once must not be
+    /// re-broadcast every few seconds as though it kept happening.
+    #[must_use]
+    pub const fn is_boot_certificate(self) -> bool {
+        match self {
+            Rung::MmuEnabled | Rung::GicRouted | Rung::TickArmed | Rung::FixtureMeasure => true,
+            Rung::BeaconTransmitted | Rung::ParkIteration | Rung::FaultTaken => false,
+        }
+    }
+
     /// The `(Category, Action)` this rung honestly is.
     ///
     /// Every boot rung is `Category::Boot` with `Action::Create`: each one
@@ -106,13 +131,47 @@ impl Rung {
     }
 }
 
-/// A journal, a sequence counter, and the drain that empties one into the
-/// other.
+/// Records the boot certificate holds (`STORY-P1-10-04`).
+///
+/// Sixteen: four times the once-per-boot rungs the vocabulary defines today,
+/// so the vocabulary can double twice before this number is the constraint,
+/// and 128 bytes against a `no_std` image either way. It is a **ceiling, not a
+/// target** — the certificate closes at the first record that is not a boot
+/// rung, which on every boot so far is well before this bound.
+pub const CERTIFICATE_CAPACITY: usize = 16;
+
+/// Calls to [`SpoorStream::announce`] between re-announcements.
+///
+/// The park loop calls once per beat (~1 s), so this is the **stated
+/// worst-case window** a listener waits before it learns the boot state:
+/// roughly five seconds. It is a constant here rather than a modulo in the
+/// park loop so a host test can read the bound the board promises, and so the
+/// promise is one number rather than a number and a loop's cadence multiplied
+/// together in a reader's head.
+///
+/// Five, because the cost is one small frame and the benefit is bounded
+/// ignorance. Nothing measured chose it and nothing measured could: the right
+/// value is a trade between wire share and how long a diagnostic session
+/// tolerates not knowing which boot it is watching.
+pub const ANNOUNCE_EVERY: usize = 5;
+
+/// A journal, a sequence counter, the drain that empties one into the other,
+/// and the birth certificate neither of them can lose.
 ///
 /// The journal is a **jitter buffer, not storage**. It overwrites its oldest
 /// entry when full, which is correct for a crash dump and wrong for a stream —
 /// so anything it overwrites between drains is loss, and the sequence counter
 /// is what makes that loss countable on the host rather than invisible.
+///
+/// # Why the certificate is not in the ring
+///
+/// The boot rungs stamp exactly once, the drain clears the ring, and nothing
+/// re-sends them. A host that missed that one frame learns from the sequence
+/// gap *how many* records it lost and never *what they were* — and boot state
+/// is the least repeatable, most diagnostic part of the whole stream. So the
+/// prologue is copied into a buffer the ring cannot reach and re-emitted on a
+/// bounded period. Verbatim, with its original sequence numbers: a re-stamp
+/// would be a different event wearing the same name.
 pub struct SpoorStream<const N: usize> {
     journal: SpoorJournal<N>,
     /// Sequence number the next stamped record will carry.
@@ -121,13 +180,59 @@ pub struct SpoorStream<const N: usize> {
     /// itself cannot report that it overwrote, so this counts what was
     /// *offered* and the difference is the loss.
     offered: usize,
+    /// The boot this stream belongs to, or [`EPOCH_UNDECLARED`].
+    epoch: u32,
+    /// The boot prologue, verbatim, in the order it was stamped.
+    certificate: [u64; CERTIFICATE_CAPACITY],
+    /// How much of `certificate` is written. Also the sequence number one past
+    /// the last retained record, because the run starts at zero.
+    certificate_len: usize,
+    /// Set by the first record that is not a boot rung, or by the buffer
+    /// filling. Once set the certificate never changes again — a birth
+    /// certificate is written once or it is not one.
+    certificate_closed: bool,
+    /// Calls to [`SpoorStream::announce`] remaining before the next one emits.
+    until_announce: usize,
 }
 
 impl<const N: usize> SpoorStream<N> {
     /// An empty stream. `const`, so it can initialise a `static`.
     #[must_use]
     pub const fn new() -> Self {
-        SpoorStream { journal: SpoorJournal::new(), next_seq: 0, offered: 0 }
+        SpoorStream {
+            journal: SpoorJournal::new(),
+            next_seq: 0,
+            offered: 0,
+            epoch: EPOCH_UNDECLARED,
+            certificate: [0; CERTIFICATE_CAPACITY],
+            certificate_len: 0,
+            certificate_closed: false,
+            until_announce: 0,
+        }
+    }
+
+    /// Fixes this stream's boot epoch from whatever per-boot sample the caller
+    /// has (`STORY-P1-10-04`).
+    ///
+    /// The board passes the generic counter at kernel entry. That value differs
+    /// between boots because firmware timing does, which makes it a **change
+    /// detector and not an identifier** — it cannot say *which* boot or *how
+    /// many* were missed, and `LE-74` records why nothing on this hardware can
+    /// yet. The folding below is not an attempt to manufacture entropy it does
+    /// not have; it only stops a long firmware wait from parking the whole
+    /// sample in bits this field cannot carry.
+    ///
+    /// A sample that folds to zero is stored as one, because zero is reserved
+    /// for [`EPOCH_UNDECLARED`] and a seeded stream must never look unseeded.
+    pub const fn seed_epoch(&mut self, sample: u64) {
+        let folded = (sample ^ (sample >> 32)) as u32;
+        self.epoch = if folded == EPOCH_UNDECLARED { 1 } else { folded };
+    }
+
+    /// This stream's boot epoch, [`EPOCH_UNDECLARED`] until seeded.
+    #[must_use]
+    pub const fn epoch(&self) -> u32 {
+        self.epoch
     }
 
     /// Stamps one rung. Never allocates, never blocks, never fails.
@@ -137,16 +242,32 @@ impl<const N: usize> SpoorStream<N> {
     /// free.
     pub fn stamp(&mut self, rung: Rung, outcome: Outcome, cost: u32) {
         let (category, action) = rung.taxonomy();
-        self.journal.append(Spoor::stamp(
-            category,
-            Actor::Kernel,
-            action,
-            outcome,
-            rung.to_bits(),
-            cost,
-        ));
+        let spoor = Spoor::stamp(category, Actor::Kernel, action, outcome, rung.to_bits(), cost);
+        self.retain(rung, spoor);
+        self.journal.append(spoor);
         self.next_seq = self.next_seq.wrapping_add(1);
         self.offered = self.offered.saturating_add(1);
+    }
+
+    /// Offers one stamped record to the boot certificate.
+    ///
+    /// The certificate is a **consecutive run beginning at sequence 0**, and
+    /// that is a correctness requirement rather than a simplification: a frame
+    /// header carries one sequence number and implies its records follow it
+    /// consecutively, so a certificate assembled from scattered records would
+    /// make its own header lie. The first record that is not a boot rung
+    /// therefore closes it permanently — the run cannot be resumed across a
+    /// hole without inventing one.
+    fn retain(&mut self, rung: Rung, spoor: Spoor) {
+        if self.certificate_closed {
+            return;
+        }
+        if !rung.is_boot_certificate() || self.certificate_len == CERTIFICATE_CAPACITY {
+            self.certificate_closed = true;
+            return;
+        }
+        self.certificate[self.certificate_len] = spoor.to_bits();
+        self.certificate_len += 1;
     }
 
     /// Records offered since the last drain — more than the journal holds
@@ -194,10 +315,63 @@ impl<const N: usize> SpoorStream<N> {
             *slot = spoor.to_bits();
         }
 
-        let len = spoor_wire::encode(first_seq, &records[..take], out)?;
+        let len = spoor_wire::encode(first_seq, self.epoch, 0, &records[..take], out)?;
         self.journal = SpoorJournal::new();
         self.offered = 0;
         Ok(Some(len))
+    }
+
+    /// Re-announces the boot certificate, at most once every
+    /// [`ANNOUNCE_EVERY`] calls (`STORY-P1-10-04`).
+    ///
+    /// Returns the payload length, or [`None`] when the announcement is not
+    /// due or there is nothing to announce. The period lives here rather than
+    /// in the park loop so the board holds no policy and a host test can read
+    /// the bound the board promises.
+    ///
+    /// The frame carries [`FLAG_RETAINED`] and the sequence numbers the
+    /// records originally went out under. A host must therefore **not** apply
+    /// `seq + count` to it — which is why the flag is a wire field and not a
+    /// convention: [`spoor_wire::FrameHeader::expected_next`] returns nothing
+    /// for a retained frame, so the phantom gap is unreachable rather than
+    /// merely documented.
+    ///
+    /// This does not touch the journal, the sequence counter or the drain's
+    /// loss accounting. An announcement is a copy of bytes that were already
+    /// sent; it can be lost like anything else on an unreliable broadcast link
+    /// and the next one comes.
+    ///
+    /// # Errors
+    ///
+    /// [`SpoorWireError::BufferTooSmall`] if `out` cannot hold the frame.
+    /// Nothing is consumed, so the next announcement is unaffected.
+    pub fn announce(&mut self, out: &mut [u8]) -> Result<Option<usize>, SpoorWireError> {
+        if self.until_announce > 0 {
+            self.until_announce -= 1;
+            return Ok(None);
+        }
+        self.until_announce = ANNOUNCE_EVERY - 1;
+        if self.certificate_len == 0 {
+            return Ok(None);
+        }
+        // Sequence 0: the certificate is a consecutive run from the first
+        // record this boot ever stamped, so the frame that carries it is
+        // byte-identical to the frame the original drain built.
+        let len = spoor_wire::encode(
+            0,
+            self.epoch,
+            FLAG_RETAINED,
+            &self.certificate[..self.certificate_len],
+            out,
+        )?;
+        Ok(Some(len))
+    }
+
+    /// Records the boot certificate holds — never more than
+    /// [`CERTIFICATE_CAPACITY`], and never fewer once the boot has passed.
+    #[must_use]
+    pub const fn certificate_len(&self) -> usize {
+        self.certificate_len
     }
 }
 
@@ -333,10 +507,57 @@ pub unsafe extern "C" fn tinyos_spoor_drain(out: *mut u8, cap: usize) -> usize {
     }
 }
 
+/// Fixes the board stream's boot epoch (`STORY-P1-10-04`).
+///
+/// Called once, as early in the boot as a per-boot sample exists. Calling it
+/// again would re-label every frame emitted after the call and is a caller
+/// error, not something this function can detect: two boots are indistinguish-
+/// able from one boot seeded twice, which is precisely the ambiguity the epoch
+/// exists to remove.
+///
+/// # Safety
+///
+/// Single core, non-reentrant. The caller must not be inside a drain or an
+/// announcement.
+#[no_mangle]
+pub extern "C" fn tinyos_spoor_seed_epoch(sample: u64) {
+    // SAFETY: as in `tinyos_spoor_stamp`.
+    let stream = unsafe { &mut *core::ptr::addr_of_mut!(BOARD_STREAM) };
+    stream.seed_epoch(sample);
+}
+
+/// Re-announces the board's boot certificate into `out`, returning the payload
+/// length, or `0` when the announcement is not due or there is nothing to
+/// announce (`STORY-P1-10-04`).
+///
+/// The park loop calls this every pass and the period is enforced here, so the
+/// board carries no policy: what it knows is "offer the wire a frame if there
+/// is one".
+///
+/// # Safety
+///
+/// `out` must be valid for `cap` bytes. Single core, non-reentrant.
+#[no_mangle]
+pub unsafe extern "C" fn tinyos_spoor_announce(out: *mut u8, cap: usize) -> usize {
+    if out.is_null() {
+        return 0;
+    }
+    // SAFETY: the caller's contract is that `out` is valid for `cap` bytes.
+    let buffer = unsafe { core::slice::from_raw_parts_mut(out, cap) };
+    // SAFETY: as in `tinyos_spoor_stamp`.
+    let stream = unsafe { &mut *core::ptr::addr_of_mut!(BOARD_STREAM) };
+    match stream.announce(buffer) {
+        Ok(Some(len)) => len,
+        // A refused announcement consumes nothing: the certificate is
+        // immutable and the next period offers it again.
+        Ok(None) | Err(_) => 0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::spoor_wire::{decode_header, record, MAX_PAYLOAD};
+    use crate::spoor_wire::{decode_header, record, HEADER_LEN, MAX_PAYLOAD};
 
     const CAPACITY: usize = 8;
 
@@ -438,13 +659,13 @@ mod tests {
         s.stamp(Rung::MmuEnabled, Outcome::Ok, 0);
         s.stamp(Rung::GicRouted, Outcome::Ok, 0);
         s.drain(&mut out).expect("encodes").expect("records");
-        let (first_seq, first_count) = decode_header(&out).expect("valid");
-        assert_eq!((first_seq, first_count), (0, 2));
+        let first = decode_header(&out).expect("valid");
+        assert_eq!((first.seq, first.count), (0, 2));
 
         s.stamp(Rung::TickArmed, Outcome::Ok, 0);
         s.drain(&mut out).expect("encodes").expect("records");
-        let (second_seq, _) = decode_header(&out).expect("valid");
-        assert_eq!(second_seq, first_seq + first_count as u64, "no gap where none was lost");
+        let second = decode_header(&out).expect("valid");
+        assert_eq!(Some(second.seq), first.expected_next(), "no gap where none was lost");
     }
 
     /// The honest-degradation clause. The ring is a jitter buffer; when it
@@ -458,8 +679,8 @@ mod tests {
         // One clean drain establishes where the host's expectation sits.
         s.stamp(Rung::MmuEnabled, Outcome::Ok, 0);
         s.drain(&mut out).expect("encodes").expect("records");
-        let (seq, count) = decode_header(&out).expect("valid");
-        let expected_next = seq + count as u64;
+        let expected_next =
+            decode_header(&out).expect("valid").expected_next().expect("a drained frame is stream");
 
         // Now overrun the ring: CAPACITY + 3 stamped, CAPACITY survive.
         for _ in 0..(CAPACITY + 3) {
@@ -468,10 +689,10 @@ mod tests {
         assert_eq!(s.offered(), CAPACITY + 3, "the stream knows what it was offered");
 
         s.drain(&mut out).expect("encodes").expect("records");
-        let (next_seq, next_count) = decode_header(&out).expect("valid");
-        assert_eq!(next_count, CAPACITY, "only what the ring held survives");
+        let next = decode_header(&out).expect("valid");
+        assert_eq!(next.count, CAPACITY, "only what the ring held survives");
         assert_eq!(
-            next_seq - expected_next,
+            next.seq - expected_next,
             3,
             "the three overwritten records are a countable gap, not a silence"
         );
@@ -536,5 +757,316 @@ mod tests {
         s.drain(&mut out).expect("encodes").expect("one record");
         let spoor = Spoor::decode(record(&out, 0).expect("present")).expect("decodes");
         assert_eq!(spoor.outcome(), Outcome::Failed);
+    }
+
+    // ---- the boot certificate and the epoch (`STORY-P1-10-04`) -----------
+
+    /// The three rungs every boot passes before the park loop, in the order
+    /// `hal-arm64`'s boot path passes them.
+    fn boot_prologue(s: &mut SpoorStream<CAPACITY>) {
+        s.stamp(Rung::MmuEnabled, Outcome::Ok, 183_974);
+        s.stamp(Rung::GicRouted, Outcome::Ok, 0);
+        s.stamp(Rung::TickArmed, Outcome::Ok, 1);
+    }
+
+    /// Announces regardless of period, for tests about *what* is announced
+    /// rather than *when*.
+    fn announce_now(s: &mut SpoorStream<CAPACITY>, out: &mut [u8]) -> usize {
+        for _ in 0..ANNOUNCE_EVERY {
+            if let Some(len) = s.announce(out).expect("encodes") {
+                return len;
+            }
+        }
+        panic!("no announcement inside a full period");
+    }
+
+    /// Clause 1 and clause 2: one boot, one epoch, on every frame it emits.
+    #[test]
+    fn every_frame_of_one_boot_carries_the_same_epoch() {
+        let mut s = stream();
+        s.seed_epoch(0x0000_1234_0000_5678);
+        boot_prologue(&mut s);
+        let mut out = [0u8; MAX_PAYLOAD];
+
+        s.drain(&mut out).expect("encodes").expect("records");
+        let drained = decode_header(&out).expect("valid").epoch;
+        announce_now(&mut s, &mut out);
+        let announced = decode_header(&out).expect("valid").epoch;
+
+        assert_eq!(drained, s.epoch(), "a drained frame carries the stream's epoch");
+        assert_eq!(announced, drained, "and so does the announcement");
+        assert_ne!(drained, EPOCH_UNDECLARED, "a seeded stream never looks unseeded");
+    }
+
+    /// Clause 1's reserved value. An unseeded stream is honestly unseeded
+    /// rather than claiming to be boot zero.
+    #[test]
+    fn an_unseeded_stream_declares_no_epoch() {
+        let mut s = stream();
+        assert_eq!(s.epoch(), EPOCH_UNDECLARED);
+        s.stamp(Rung::MmuEnabled, Outcome::Ok, 0);
+        let mut out = [0u8; MAX_PAYLOAD];
+        s.drain(&mut out).expect("encodes").expect("records");
+        assert_eq!(decode_header(&out).expect("valid").epoch, EPOCH_UNDECLARED);
+    }
+
+    /// A sample that folds to zero must not make a seeded board look unseeded
+    /// — the one input where the honest answer and the reserved value collide.
+    #[test]
+    fn a_sample_that_folds_to_zero_still_declares_an_epoch() {
+        let mut s = stream();
+        s.seed_epoch(0);
+        assert_ne!(s.epoch(), EPOCH_UNDECLARED, "zero in must not read as unseeded");
+        // The identical halves fold to zero too, and are the realistic case:
+        // a counter whose high word happens to equal its low word.
+        s.seed_epoch(0x0000_00AB_0000_00AB);
+        assert_ne!(s.epoch(), EPOCH_UNDECLARED);
+    }
+
+    /// A different boot must read as a different boot. This is the epoch's
+    /// entire job, and all it can honestly do — see `LE-74`.
+    #[test]
+    fn a_different_sample_is_a_different_boot() {
+        let mut first = stream();
+        first.seed_epoch(1_500_000_000);
+        let mut second = stream();
+        second.seed_epoch(1_500_004_400);
+        assert_ne!(first.epoch(), second.epoch(), "two boots are distinguishable");
+    }
+
+    /// Clause 3 — the reason this Story exists. The ring is a jitter buffer;
+    /// the certificate must outlive every wrap and every drain.
+    #[test]
+    fn the_boot_certificate_survives_every_drain_and_every_wrap() {
+        let mut s = stream();
+        s.seed_epoch(7);
+        boot_prologue(&mut s);
+        let mut out = [0u8; MAX_PAYLOAD];
+        s.drain(&mut out).expect("encodes").expect("the boot went out once");
+
+        // Now run the board for a long time: drain, overrun, drain again.
+        for _ in 0..20 {
+            for _ in 0..(CAPACITY + 5) {
+                s.stamp(Rung::ParkIteration, Outcome::Ok, 0);
+            }
+            s.drain(&mut out).expect("encodes");
+        }
+
+        let len = announce_now(&mut s, &mut out);
+        let header = decode_header(&out[..len]).expect("valid");
+        assert_eq!(header.count, 3, "the boot rungs are still announceable");
+        let rungs: [u16; 3] = core::array::from_fn(|i| {
+            Spoor::decode(record(&out, i).expect("present")).expect("decodes").target()
+        });
+        assert_eq!(
+            rungs,
+            [Rung::MmuEnabled.to_bits(), Rung::GicRouted.to_bits(), Rung::TickArmed.to_bits()],
+            "and they are the rungs the boot actually passed"
+        );
+    }
+
+    /// Clause 4 — verbatim, not a summary and not a re-stamp. A re-stamp would
+    /// carry fresh sequence numbers and be a *different event* wearing the
+    /// same name.
+    #[test]
+    fn the_announcement_is_byte_identical_to_the_frame_the_drain_sent() {
+        let mut s = stream();
+        s.seed_epoch(0xDEAD_BEEF);
+        boot_prologue(&mut s);
+
+        let mut drained = [0u8; MAX_PAYLOAD];
+        let drained_len = s.drain(&mut drained).expect("encodes").expect("records");
+
+        for _ in 0..50 {
+            s.stamp(Rung::ParkIteration, Outcome::Ok, 0);
+        }
+        let mut announced = [0u8; MAX_PAYLOAD];
+        let announced_len = announce_now(&mut s, &mut announced);
+
+        assert_eq!(drained_len, announced_len, "same frame, same length");
+        assert_eq!(
+            drained[HEADER_LEN..drained_len],
+            announced[HEADER_LEN..announced_len],
+            "record bytes are the ones already sent, not fresh stamps"
+        );
+        assert_eq!(
+            decode_header(&drained).expect("valid").seq,
+            decode_header(&announced).expect("valid").seq,
+            "carrying the sequence numbers they originally went out under"
+        );
+    }
+
+    /// Clause 5 — the flag is what keeps a host's own arithmetic honest, so
+    /// the test runs that arithmetic across drain, announce, drain.
+    #[test]
+    fn an_announcement_between_two_drains_produces_no_phantom_gap() {
+        let mut s = stream();
+        s.seed_epoch(3);
+        boot_prologue(&mut s);
+        let mut out = [0u8; MAX_PAYLOAD];
+
+        s.drain(&mut out).expect("encodes").expect("records");
+        let mut expected = decode_header(&out).expect("valid").expected_next().expect("stream");
+
+        announce_now(&mut s, &mut out);
+        let announcement = decode_header(&out).expect("valid");
+        assert!(announcement.is_retained(), "an announcement says what it is");
+        // Exactly what a host decoder does: a frame that says nothing about
+        // what comes next leaves the expectation where it was.
+        if let Some(next) = announcement.expected_next() {
+            expected = next;
+        }
+
+        s.stamp(Rung::ParkIteration, Outcome::Ok, 0);
+        s.drain(&mut out).expect("encodes").expect("records");
+        assert_eq!(
+            decode_header(&out).expect("valid").seq,
+            expected,
+            "the stream resumes where it left off, with no gap and no backwards jump"
+        );
+    }
+
+    /// Clause 5's other half: a drained frame must never be mistaken for an
+    /// announcement, or a host would stop counting real loss.
+    #[test]
+    fn a_drained_frame_is_never_marked_retained() {
+        let mut s = stream();
+        s.stamp(Rung::MmuEnabled, Outcome::Ok, 0);
+        let mut out = [0u8; MAX_PAYLOAD];
+        s.drain(&mut out).expect("encodes").expect("records");
+        assert!(!decode_header(&out).expect("valid").is_retained());
+    }
+
+    /// Clause 6 — write-once and bounded. A birth certificate the
+    /// ten-thousandth park iteration can overwrite is not one.
+    #[test]
+    fn no_amount_of_park_traffic_displaces_the_boot_certificate() {
+        let mut s = stream();
+        boot_prologue(&mut s);
+        let held = s.certificate_len();
+
+        for _ in 0..10_000 {
+            s.stamp(Rung::ParkIteration, Outcome::Ok, 0);
+            s.stamp(Rung::BeaconTransmitted, Outcome::Ok, 0);
+            s.stamp(Rung::FaultTaken, Outcome::Failed, 0);
+        }
+        assert_eq!(s.certificate_len(), held, "the certificate did not grow");
+
+        let mut out = [0u8; MAX_PAYLOAD];
+        announce_now(&mut s, &mut out);
+        let header = decode_header(&out).expect("valid");
+        assert_eq!(header.count, held, "and still announces exactly the boot");
+        assert_eq!(header.seq, 0, "from the first record this boot ever stamped");
+    }
+
+    /// Clause 6's bound, driven rather than asserted: even a boot that somehow
+    /// stamped nothing but certificate rungs cannot exceed the buffer.
+    #[test]
+    fn the_certificate_stops_at_its_capacity() {
+        let mut s = stream();
+        for _ in 0..(CERTIFICATE_CAPACITY * 4) {
+            s.stamp(Rung::MmuEnabled, Outcome::Ok, 0);
+        }
+        assert_eq!(s.certificate_len(), CERTIFICATE_CAPACITY, "bounded by the buffer, not by luck");
+    }
+
+    /// Clause 7 — the run is consecutive from zero, because the frame header
+    /// carries one sequence and implies the rest. A rung arriving after the
+    /// run breaks is not retained, however boot-like it is.
+    #[test]
+    fn the_certificate_closes_at_the_first_record_that_is_not_a_boot_rung() {
+        let mut s = stream();
+        s.stamp(Rung::MmuEnabled, Outcome::Ok, 0);
+        s.stamp(Rung::ParkIteration, Outcome::Ok, 0);
+        s.stamp(Rung::TickArmed, Outcome::Ok, 0);
+        assert_eq!(
+            s.certificate_len(),
+            1,
+            "the rung after the break is not retained, so no hole can open in the run"
+        );
+
+        let mut out = [0u8; MAX_PAYLOAD];
+        announce_now(&mut s, &mut out);
+        let header = decode_header(&out).expect("valid");
+        assert_eq!((header.seq, header.count), (0, 1), "and the header describes exactly it");
+    }
+
+    /// A boot with nothing retained announces nothing. Silence is not a frame,
+    /// here for the same reason it is not one in `drain`.
+    #[test]
+    fn a_stream_with_no_certificate_announces_nothing() {
+        let mut s = stream();
+        s.stamp(Rung::ParkIteration, Outcome::Ok, 0);
+        let mut out = [0u8; MAX_PAYLOAD];
+        for _ in 0..(ANNOUNCE_EVERY * 3) {
+            assert_eq!(s.announce(&mut out).expect("no error"), None);
+        }
+    }
+
+    /// Clause 8 — the period is a stated bound a host test can read, not a
+    /// cadence buried in the park loop.
+    #[test]
+    fn the_announcement_is_periodic_and_the_period_is_the_stated_one() {
+        let mut s = stream();
+        boot_prologue(&mut s);
+        let mut out = [0u8; MAX_PAYLOAD];
+
+        let mut emitted = 0;
+        for _ in 0..(ANNOUNCE_EVERY * 10) {
+            if s.announce(&mut out).expect("encodes").is_some() {
+                emitted += 1;
+            }
+        }
+        assert_eq!(emitted, 10, "exactly one announcement per {ANNOUNCE_EVERY} calls");
+        // A period of zero would be a flood rather than a re-announcement, and
+        // would underflow the countdown. Checked at compile time because it is
+        // a property of the constant, not of this run.
+        const { assert!(ANNOUNCE_EVERY >= 1) };
+    }
+
+    /// The announcement must not disturb the stream it rides beside: it is a
+    /// copy of bytes already sent, and the loss accounting is the drain's.
+    #[test]
+    fn announcing_consumes_nothing_from_the_stream() {
+        let mut s = stream();
+        boot_prologue(&mut s);
+        let mut out = [0u8; MAX_PAYLOAD];
+        for _ in 0..(ANNOUNCE_EVERY * 3) {
+            let _ = s.announce(&mut out).expect("encodes");
+        }
+        assert_eq!(s.next_sequence(), 3, "the sequence counter did not move");
+        let header_after =
+            s.drain(&mut out).expect("encodes").map(|_| decode_header(&out).expect("valid"));
+        assert_eq!(
+            header_after.map(|h| (h.seq, h.count)),
+            Some((0, 3)),
+            "and the journal still holds everything the drain never sent"
+        );
+    }
+
+    /// A buffer too small refuses without consuming: the certificate is
+    /// immutable, so the next period offers it again unchanged.
+    #[test]
+    fn a_refused_announcement_loses_nothing() {
+        let mut s = stream();
+        boot_prologue(&mut s);
+        let mut tiny = [0u8; 4];
+        assert_eq!(s.announce(&mut tiny), Err(SpoorWireError::BufferTooSmall));
+        let mut out = [0u8; MAX_PAYLOAD];
+        let len = announce_now(&mut s, &mut out);
+        assert_eq!(decode_header(&out[..len]).expect("valid").count, 3);
+    }
+
+    /// The certificate's membership rule, pinned. Anything that repeats is
+    /// stream and not birth, and getting this wrong fills a fixed buffer with
+    /// the least interesting seconds of the run.
+    #[test]
+    fn only_the_once_per_boot_rungs_belong_to_the_certificate() {
+        for rung in [Rung::MmuEnabled, Rung::GicRouted, Rung::TickArmed, Rung::FixtureMeasure] {
+            assert!(rung.is_boot_certificate(), "{rung:?} happens once and establishes state");
+        }
+        for rung in [Rung::BeaconTransmitted, Rung::ParkIteration, Rung::FaultTaken] {
+            assert!(!rung.is_boot_certificate(), "{rung:?} repeats, so it is stream not birth");
+        }
     }
 }

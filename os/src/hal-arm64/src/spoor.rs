@@ -63,6 +63,58 @@ extern "C" {
     fn tinyos_spoor_stamp(rung: u16, verdict: u8, cost: u32);
     /// `kernel::spoor_stream::tinyos_spoor_drain`.
     fn tinyos_spoor_drain(out: *mut u8, cap: usize) -> usize;
+    /// `kernel::spoor_stream::tinyos_spoor_seed_epoch`.
+    fn tinyos_spoor_seed_epoch(sample: u64);
+    /// `kernel::spoor_stream::tinyos_spoor_announce`.
+    fn tinyos_spoor_announce(out: *mut u8, cap: usize) -> usize;
+}
+
+/// Fixes this boot's epoch from the generic counter (`STORY-P1-10-04`).
+///
+/// Called once, before the first rung stamps, so every frame this boot emits
+/// carries it and a host reading any one of them can tell which boot it is
+/// watching.
+///
+/// **`CNTVCT_EL0` at kernel entry is the only per-boot value this board has.**
+/// There is no persistent store and no RTC, and the counter resets with the
+/// SoC — so what actually varies between boots is how many ticks firmware
+/// spent before reaching here, which does vary, but is the *firmware's*
+/// entropy and not ours. That makes the epoch a change detector rather than an
+/// identifier, and `LE-74` records the limit rather than letting a field named
+/// "epoch" imply a boot count it cannot support.
+///
+/// It is deliberately not mixed with anything that looks like a seed. Dressing
+/// a low-entropy sample up as a nonce would make the field read stronger than
+/// it is, which is the failure mode the whole project's ADR discipline exists
+/// to prevent.
+#[cfg(target_arch = "aarch64")]
+pub fn seed_epoch() {
+    let sample: u64;
+    // SAFETY: side-effect-free read of the always-readable virtual counter —
+    // the same register `crate::timer::SystemRegisters` reads, inlined here
+    // because this call site runs before any timer object exists.
+    unsafe {
+        core::arch::asm!("mrs {v}, CNTVCT_EL0", v = out(reg) sample,
+            options(nomem, nostack, preserves_flags));
+    }
+    // SAFETY: the symbol is provided by `kernel`, which `pi5-image` links; the
+    // call takes one scalar and the callee is single-core and non-reentrant.
+    unsafe { tinyos_spoor_seed_epoch(sample) }
+}
+
+/// Re-announces the boot certificate into `out`, returning the payload length
+/// or `0` when the announcement is not due (`STORY-P1-10-04`).
+///
+/// The park loop calls this every pass and the kernel decides when a frame
+/// comes out, so the period is one constant a host test can read rather than a
+/// cadence spread across a loop this crate owns.
+#[cfg(target_arch = "aarch64")]
+#[must_use]
+pub fn announce(out: &mut [u8]) -> usize {
+    // SAFETY: `out` is a live slice, so the pointer and length are valid; the
+    // callee is single-core and non-reentrant, which the park loop satisfies
+    // because it is the only caller.
+    unsafe { tinyos_spoor_announce(out.as_mut_ptr(), out.len()) }
 }
 
 /// Stamps one rung. Never fails, never blocks, and costs one call plus a
@@ -100,6 +152,17 @@ pub fn stamp(_rung: Rung, _verdict: Verdict, _cost: u32) {}
 #[cfg(not(target_arch = "aarch64"))]
 #[must_use]
 pub fn drain(_out: &mut [u8]) -> usize {
+    0
+}
+
+/// Host builds have no counter to seed from and no boot to identify.
+#[cfg(not(target_arch = "aarch64"))]
+pub fn seed_epoch() {}
+
+/// Host builds announce nothing.
+#[cfg(not(target_arch = "aarch64"))]
+#[must_use]
+pub fn announce(_out: &mut [u8]) -> usize {
     0
 }
 
