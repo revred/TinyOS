@@ -43,9 +43,16 @@ pub mod ipc;
 pub mod lock;
 #[cfg(target_arch = "x86_64")]
 pub mod preempt;
-#[cfg(target_arch = "x86_64")]
+// `spoor` and `spoor_journal` are **not** x86_64-coupled and never were: the
+// first names no type outside itself, and the second names only the first.
+// They were swept into the block above with the modules that genuinely do name
+// `hal_x86_64` types, and the sweep is why the AArch64 boot image could not
+// have journalled a spoor even if a rung had tried to stamp one — `LE-56`'s
+// board half was unreachable by construction, not merely unimplemented
+// (`FEAT-P1-10`, 2026-08-04).
 pub mod spoor;
-#[cfg(target_arch = "x86_64")]
 pub mod spoor_journal;
+
+pub mod spoor_wire;
 #[cfg(target_arch = "x86_64")]
 pub mod wcet;

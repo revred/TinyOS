@@ -1,6 +1,6 @@
 # STORY-P1-07-10 — Interrupt Masking Is a Scope, Not a Switch: the Defect That Made `STORY-P1-07-04` Criterion 1 Unreachable
 
-Status: **In progress — host half Green 2026-08-04 (7 new tests in `hal::interrupts`, Red first against the defect's own behaviour: the recording gate logged `[Masked, BodyRan]` with no `Restored`, which is `LE-71` exactly); the board criterion needs one measure boot.**
+Status: **In progress — host half Green 2026-08-04 (7 new tests in `hal::interrupts`, Red first against the defect's own behaviour: the recording gate logged `[Masked, BodyRan]` with no `Restored`, which is `LE-71` exactly). **Criteria 4 and 5 Green on silicon** — `BOARD VERDICT 7` (measure boot 2026-08-04, kernel `619f40b8c076`) read `TOS64-TICK/1 count=1816 rmin=999 rmax=1000`, the tick surviving the fixture and handing [`STORY-P1-07-04`](STORY-P1-07-04.md)'s ratio requirement its evidence. Criterion 5 confirmed by a test written to refute it: Verdict 6's lone `max=3519` outlier is **absent** at `max=376`, on the boot where the tick fires 100×/s for the whole park loop, and the distributions came back tighter rather than looser. `LE-71` closed. Not Verified.**
 Feature: [`FEAT-P1-07`](../features/FEAT-P1-07.md)
 Introduced in: `session/hand-2026-08-04/03A` delivery session, from `BOARD VERDICT 6`
 

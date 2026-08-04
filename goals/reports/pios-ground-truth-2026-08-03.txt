@@ -1444,3 +1444,73 @@ reading:
 
   LINK/BEACON: unchanged and expected (verdicts 2-5). Host NIC was UP at 1 Gbps.
   No TOS64-RESULT/1 row visible in the photographed frame; the packet capture remains owed.
+
+===== BOARD VERDICT 7 (TinyOS measure boot 2026-08-04, kernel8.img 619f40b8c076 - LE-71 fix on board) =====
+transcription source: owner photograph of the HDMI canvas, full frame, single boot.
+
+canvas, report rows:
+  TOS64-LINK/1 RP1=PRESENT ID=0x0109 PHY=0x600D84A2 LINK=DOWN BEACON=SKIPPED
+  TOS64-BEAT/1 SEQ=18 STATE=BEACONING FB=REFUSED
+  TOS64-MMU/1  SCTLR=0000000030D01805 OFF=74380464 ON=183645
+  TOS64-CONF/1 CNTVCT=PASS SPAN=150 CNTFRQ=54000000 CPUS=54
+  TOS64-PMU/1  DELTA=24000190 RATE=2400MHZ SOURCE=PMCCNTR
+  TOS64-TICK/1 COUNT=1816 TVAL=540000 RMIN=999 RMAX=1000        <- LIVE, ratio bounded
+
+canvas, fixture transcript (all n=1000 dropped=0 warmup=100):
+  fixture-measure cycle_source_conformance ok span=5839
+  BEGIN tier=T1 arch=aarch64 platform=rpi5-bcm2712 qualification=none
+        cycle_source=pmccntr_el0 overhead_cycles=45 cycles_per_us=2400
+  ref  fixed_integer_loop                        min=2880 p50=2940 p99=3006 p99_9=3062 max=3062
+  D07  pool_u64x64_alloc_free_round_trip         min=372  p50=374  p99=376  p99_9=376  max=376
+  D07  pool_u64x4_alloc_denied_..._per_op_of_64  min=497  p50=499  p99=501  p99_9=501  max=501
+  D04  context_switch_yield_roundtrip_2switches  min=80   p50=80   p99=80   p99_9=80   max=80
+  D05  dispatch_select_highest_priority_ready    min=1532 p50=1532 p99=1532 p99_9=1532 max=1532
+  D05  dispatch_run_once_cooperative_round       min=1633 p50=1636 p99=1636 p99_9=1636 max=1637
+  D02  fault_brk_capture_escape_kernel_context   min=111  p50=111  p99=111  p99_9=111  max=111
+  D07  pool_..._round_trip_per_op_of_8           min=480  p50=480  p99=480  p99_9=480  max=480
+  END metrics=8
+
+laptop: Ethernet UP at 1 Gbps throughout; linkwatch alive (pid 4140).
+
+reading:
+
+  STORY-P1-07-04 CRITERION 1 IS GREEN, and it is the last non-capture item on the FEAT-P1-07
+  ladder. count=1816 at tval=540000 is ~18 s of uptime at the declared 100 Hz. The judgement is
+  the one the Story insisted on and the one a bring-up can actually trust: rmin=999, rmax=1000
+  per mille, i.e. every pair of consecutive intervals agrees to within 0.1%. No absolute-value
+  check was made and none is needed - clause 1's own caveat is that a uniformly wrong period
+  passes the ratio deliberately, and clause 4's measured rate (2400 MHz, cntfrq 54000000) is
+  where a divisor error would have been caught. Both are recorded and both agree.
+
+  LE-71 IS CLOSED, on the first boot carrying its fix. The tick survives the fixture: it now
+  runs continuously through the park loop instead of dying at the mask, which is what the
+  03A handover's own design sentence said it should do ("the park loop's wfe waits wake 100x
+  per second") and what the code prevented until this build.
+
+  THE OUTLIER IS GONE, AND THAT IS THE STRONGER RESULT. Verdict 6 recorded
+  pool_u64x64_alloc_free_round_trip at p99_9=379 max=3519, a lone ~9x excursion, and this file
+  recorded the reading that it was the single pre-mask tick caught in that metric's samples.
+  Verdict 7 reads max=376 against p99_9=376 - the excursion is absent on the boot where the tick
+  fires 100 times a second for the entire park loop.
+  TEST-P1-07-10-A clause 7 was written to REFUTE STORY-P1-07-10 if the outlier survived. It did
+  not survive, so the clause confirms rather than refutes, and the confirmation is meaningful
+  precisely because the refutation was possible.
+  The distributions came back TIGHTER, not looser, with interrupts running outside the fixture:
+  dispatch_select is flat at 1532 across all five statistics (1532/1532/1532/1532/1532),
+  fault_capture flat at 111, context_switch flat at 80. Interrupt masking inside the measured
+  region does exactly what it claims, and is now demonstrated against a board that genuinely has
+  interrupts to mask - which was never true before this boot.
+
+  Run-to-run stability across three measure boots (verdicts 5, 6, 7):
+    context_switch          80    / 80   / 80
+    per_op_of_8             480   / 479  / 480
+    round trip              383   / 379  / 374     (drifting down slightly, ~2%)
+    dispatch_select         1525  / 1532 / 1532
+    dispatch_round          1645  / 1647 / 1636
+    fault_brk_capture       109   / 120  / 111     (widest spread, ~10%, still unexplained)
+    overhead_cycles         43    / 43   / 45
+  fault_brk_capture remains the least repeatable metric and is the one to distrust first if any
+  absolute D02 figure is ever quoted.
+
+  MMU ratio this boot: 74380464 / 183645 = ~405x, consistent with verdicts 5 (410x) and 6.
+  LINK/BEACON row unchanged and expected. No TOS64-RESULT/1 in frame; the capture is still owed.
