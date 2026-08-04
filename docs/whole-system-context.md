@@ -23,6 +23,8 @@ The latest Phase-0 code establishes useful primitives:
 - fixed pools, WCET bookkeeping, priority-inheritance work, and compact spoors exist;
 - the TXE packer and hostile PE fixtures are deterministic and bounded.
 
+**Spoors are the substrate the rest of this document's evidence rides on, and 2026-08-04 gave them a transport.** A spoor is to a physical system what a token is to a language model: the uniform, fixed-width atom its whole observable behaviour is made of, which is why it is 64 bits and why nothing formats one on the board. [`FEAT-P1-10`](../goals/features/FEAT-P1-10.md) streams raw packed records over the point-to-point Ethernet link — see [`docs/spoor-transport-architecture.md`](spoor-transport-architecture.md) for the frame format, the loss accounting that makes a dropped record countable rather than invisible, and an honest statement of what the link does *not* provide (no confidentiality, no authenticity, and `LE-67`'s DMA exposure). The claim that the stream *is* the system's behaviour is not yet true: today it covers the boot and park rungs only, and every Report is required to say so.
+
 Those are not active process containment yet. The IDT has no domain-aware `#PF`/`#GP` termination route, no TSS/IST for stack-failure exceptions, and no scheduler tick consumer. Process page tables are constructed but no task switch activates a per-domain CR3. Production capability spaces, full task teardown, executable signatures/sealing, quarantine/provenance, IOMMU programming, immutable updates, and campaign evidence remain open. The honest state remains `baseline-debt`.
 
 This creates the correct short-term order:
