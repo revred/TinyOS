@@ -74,6 +74,47 @@ This is the single most likely way for this whole Feature to produce **confident
 - **No measurement.** Clause 4's loop is a cache detector, not a benchmark, and its numbers are not baselines and must not be recorded as any.
 - **`LE-09` stays open.**
 
+### Amended 2026-08-04, at implementation — three facts the 2026-07-28 text could not know
+
+Recorded rather than silently absorbed, per the house rule that a Test document and its
+implementation may not drift apart unannounced. Nothing above is weakened; two clauses are
+*wider* than written and one channel is substituted, and each has a reason.
+
+1. **Clause 2's region list.** "RAM and the UART MMIO and nothing else" was written when the
+   crate held one MMIO consumer. Between then and implementation, board-proven Stories added
+   four more, each of which the image actually touches before or inside the park loop: the
+   STAT GPIO block (`STORY-P1-07-08`), the PCIe2 controller and the RP1 window
+   (`FEAT-P1-09`), the VideoCore mailbox (`STORY-P1-07-07`) and the scan-out framebuffer
+   (`STORY-P1-07-09`). The map therefore covers exactly: RAM to the 2 GiB minimum
+   (Normal Write-Back, Inner Shareable), the two SoC-peripheral gigabytes and the RP1 window
+   (Device-nGnRnE), and the framebuffer (Normal **Non-Cacheable** — RAM a device scans out
+   behind the CPU's caches; a Write-Back framebuffer is a frozen screen wearing a working
+   boot). Still per-region, still explicit, still nothing else: page zero, the stack guard
+   page, RAM above 2 GiB and every other gigabyte translate to nothing. The clause's *spirit*
+   — an over-broad map makes a wrong attribute invisible — is what the walker test now pins.
+2. **The evidence channel.** The clauses above say "captures". Five consecutive zero-byte
+   serial captures and an owner-declared-infeasible loopback later (`LE-47`,
+   hand-2026-08-03/07A), the proven text channels on this bench are the HDMI canvas and the
+   lamp. Clause 4's before/after probe therefore reports as a `TOS64-MMU/1` line on **both**
+   the UART (if it ever decodes) and the canvas at its pinned row; clause 6's deliberate
+   translation fault is the registered `mmu-fault` fixture
+   (`cargo run -p xtask -- pi5 --fixture=mmu-fault`), and the fault frame is painted onto the
+   canvas through the *same generic reporting code* that drives the PL011 (`TranscriptSink`),
+   so screen and wire cannot disagree. DMA coherency rides along: the beacon staging cleans
+   its lines to the point of coherency and the mailbox exchange clean-invalidates around the
+   firmware's access, so `FEAT-P1-09`'s beacon survives the caches this Story turns on.
+3. **The guard pages.** The linker script has promised a stack guard to this Story since
+   `STORY-P1-07-01`; the L3 table the framebuffer island already required makes it nearly
+   free, so the map leaves both the page below the boot stack and page zero unmapped. A stack
+   overflow or null dereference after the switch reports through `STORY-P1-07-02`'s handler.
+   This is a *guard*, not W^X and not isolation; the named-debt section stands.
+
+### The board captures (to be quoted verbatim when the Tier 1 run happens)
+
+Pending. Clause 4's two `TOS64-MMU/1` probe numbers and clause 6's decoded fault frame land
+here, transcribed from the canvas into the ground-truth file's `===== BOARD VERDICT N =====`
+record first.
+
 ## Test type
 
 Host unit tests (`#[cfg(test)]` in `os/src/hal-arm64/src/`) plus a Tier 1 hardware run with paired captures.

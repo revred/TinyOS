@@ -14,5 +14,10 @@ license.workspace = true
 publish.workspace = true
 description = "Bootable Raspberry Pi 5 image, flattened to kernel8.img by `xtask pi5` (STORY-P1-07-05)"
 
+[features]
+# Forwarded to `hal-arm64`: the deliberate-translation-fault boot
+# (`TEST-P1-07-03-A` clause 6). Selected by `xtask pi5 --fixture=mmu-fault`.
+fixture-mmu-fault = ["hal-arm64/fixture-mmu-fault"]
+
 [dependencies]
 hal-arm64 = { path = "../hal-arm64" }

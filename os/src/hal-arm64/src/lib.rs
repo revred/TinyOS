@@ -33,6 +33,7 @@ pub mod exception_level;
 pub mod fault;
 pub mod gem;
 pub mod hdmi;
+pub mod mmu;
 pub mod pcie;
 pub mod pl011;
 pub mod rp1_clocks;

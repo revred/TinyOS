@@ -31,9 +31,12 @@ ENTRY(_start)
 
 /* 64 KiB. One core, no tasks, no allocator, no recursion in this slice — the
  * deepest call chain is _start -> boot_main -> Pl011::write_str. Sized for
- * headroom rather than measured, and deliberately over-provisioned: there is no
- * guard page until the MMU lands, so a stack overflow here silently eats .bss
- * rather than faulting. STORY-P1-07-03 is where this stops being true. */
+ * headroom rather than measured, and deliberately over-provisioned. The 4 KiB
+ * guard page below it (__stack_guard) is reserved here and left unmapped by
+ * STORY-P1-07-03's identity map, so once the MMU is on a stack overflow
+ * reports through STORY-P1-07-02's handler instead of silently eating .bss.
+ * Between _start and the MMU enable the guard does not bite — that window is
+ * short and allocation-free by construction. */
 __stack_size = 0x10000;
 
 SECTIONS
@@ -75,6 +78,14 @@ SECTIONS
         *(.bss .bss.*)
         . = ALIGN(16);
         __bss_end = .;
+    }
+
+    /* The guard hole: one page, 4 KiB-aligned, between .bss and the stack.
+     * Reserved in the address map but never mapped — see mmu.rs. */
+    .stack_guard (NOLOAD) : ALIGN(0x1000)
+    {
+        __stack_guard = .;
+        . += 0x1000;
     }
 
     .stack (NOLOAD) : ALIGN(16)

@@ -157,6 +157,10 @@ pub const REPORT_Y: u32 = 96;
 pub const STATUS_Y: u32 = 136;
 /// The spelled refusal line.
 pub const REFUSAL_Y: u32 = 176;
+/// The `TOS64-MMU/1` cache-evidence line (`STORY-P1-07-03`) — painted once
+/// at park, because serial has never produced a byte on this bench and the
+/// canvas is the proven text channel.
+pub const MMU_Y: u32 = 216;
 /// Body text scale (16×16 glyphs: 120 columns on the canvas).
 pub const BODY_SCALE: u32 = 2;
 
@@ -249,7 +253,11 @@ mod tests {
         const BLOCK: [u8; 8] = [0x00, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x00];
         let report_charset =
             b"TOS64-LINK/1 rp1=absent reason=id-module detail=0x0002 beacon=skipped \
-              TOS64-BEAT/1 seq=42 state=beaconing fb=granted CODE 09 DETAIL 65535 :.";
+              TOS64-BEAT/1 seq=42 state=beaconing fb=granted CODE 09 DETAIL 65535 :. \
+              TOS64-MMU/1 sctlr=0000000030D01805 off=920000 on=1800 \
+              TOS64-FAULT/1 slot=5 esr= class=data-abort-el1 ec=0x25 il=32 \
+              status=translation level=1 wnr=read isv=no size= s1ptw=no \
+              far= elr= spsr= vbar= readback= match=yes halted no-resume-path";
         for &byte in report_charset.iter() {
             let glyph = glyph_for(byte);
             assert_ne!(glyph, BLOCK, "byte {byte:#x} ({}) must have a real glyph", byte as char);
@@ -291,9 +299,10 @@ mod tests {
         // Compile-time claims, stated as such (the board.rs convention).
         const {
             assert!(TITLE_Y < REPORT_Y && REPORT_Y < STATUS_Y && STATUS_Y < REFUSAL_Y);
+            assert!(REFUSAL_Y < MMU_Y);
             // The title never collides with the report line.
             assert!(TITLE_Y + GLYPH_SIZE * TITLE_SCALE <= REPORT_Y);
-            assert!(REFUSAL_Y + GLYPH_SIZE * BODY_SCALE < board::SIMPLEFB_HEIGHT);
+            assert!(MMU_Y + GLYPH_SIZE * BODY_SCALE < board::SIMPLEFB_HEIGHT);
             // 120 body columns fit the canvas width at the margin.
             assert!(MARGIN_X + 120 * GLYPH_SIZE * BODY_SCALE <= board::SIMPLEFB_WIDTH + MARGIN_X);
         }

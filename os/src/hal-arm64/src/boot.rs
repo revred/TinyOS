@@ -147,13 +147,21 @@ pub fn report_result<M: Mmio>(uart: &Pl011<M>, fixture: &str, ok: bool) -> Resul
     uart.write_str(if ok { "true\n" } else { "false\n" })
 }
 
-/// The boot image's own self-consistency verdict: the two facts
-/// `continue_at_el1` can actually observe after the drop and the vector
-/// install. Anything less than both is `ok=false` — a wrong execution level
-/// or a `VBAR_EL1` write that did not take is a hang deferred, not a pass.
-pub fn boot_self_check(current_el_raw: u64, vbar_requested: u64, vbar_readback: u64) -> bool {
+/// The boot image's own self-consistency verdict: the three facts
+/// `continue_at_el1` can actually observe after the drop, the vector install
+/// and the MMU switch (`STORY-P1-07-03`). Anything less than all three is
+/// `ok=false` — a wrong execution level, a `VBAR_EL1` write that did not
+/// take, or an `SCTLR_EL1` whose enable bits silently did not stick is a
+/// hang (or a meaningless measurement) deferred, not a pass.
+pub fn boot_self_check(
+    current_el_raw: u64,
+    vbar_requested: u64,
+    vbar_readback: u64,
+    sctlr_readback: u64,
+) -> bool {
     matches!(ExceptionLevel::decode(current_el_raw), Some(ExceptionLevel::El1))
         && vbar_requested == vbar_readback
+        && sctlr_readback & crate::mmu::SCTLR_ENABLE_BITS == crate::mmu::SCTLR_ENABLE_BITS
 }
 
 /// Writes a `u64` as sixteen hex digits.
@@ -187,8 +195,10 @@ core::arch::global_asm!(
     "    cbz  x4, 1f",
     "0:  wfe",
     "    b    0b",
-    // Stack before anything that could call. There is no guard page until
-    // `STORY-P1-07-03`.
+    // Stack before anything that could call. The guard page below it exists
+    // in the linker script but only bites once `STORY-P1-07-03`'s map is
+    // live — between here and `mmu::enable_identity_map` an overflow still
+    // silently eats `.bss`.
     "1:  adrp x4, __stack_top",
     "    add  x4, x4, :lo12:__stack_top",
     "    mov  sp, x4",
@@ -304,8 +314,10 @@ unsafe fn drop_to_el1() -> ! {
             "msr  cntvoff_el2, xzr",
             // SCTLR_EL1 to its reserved-one pattern with M, C, I and A clear:
             // MMU off, caches off, alignment checking off. `STORY-P1-07-03`
-            // owns turning those on, and doing it here would be the "just get
-            // it booting" shortcut that Story exists to prevent.
+            // turns M, C and I on in `continue_at_el1` — after the vector
+            // install, so a wrong table faults loudly — and doing it here
+            // would be the "just get it booting" shortcut that Story exists
+            // to prevent.
             "mov  x0, #0x0800",
             "movk x0, #0x30d0, lsl #16",
             "msr  sctlr_el1, x0",
@@ -378,11 +390,47 @@ extern "C" fn continue_at_el1() -> ! {
     let (requested, readback) = unsafe { crate::fault::install() };
     let _ = crate::fault::report_vbar(&uart, requested, readback);
 
+    // `STORY-P1-07-03`: the flat identity map, strictly after the vector
+    // install (a wrong table must fault loudly, not hang) and strictly
+    // before the verdict (a boot whose caches did not come on is not a
+    // pass — every number `STORY-P1-07-06` will produce depends on this).
+    // The same measured loop runs before and after the switch; the pair of
+    // numbers is `TEST-P1-07-03-A` clause 4's evidence that the caches are
+    // actually on, as opposed to an `SCTLR_EL1` write silently ignored.
+    let cache_off_ticks = crate::mmu::measure_cache_probe();
+    // SAFETY: `continue_at_el1` runs at EL1 on the boot core, exactly once,
+    // with the vector table just installed; nothing holds pointers outside
+    // the identity map.
+    let sctlr_readback = unsafe { crate::mmu::enable_identity_map() };
+    // The UART surviving the switch *is* clause 5: if the device-region
+    // attributes are wrong, this line is where the board goes silent.
+    let cache_on_ticks = crate::mmu::measure_cache_probe();
+    let (mmu_line, mmu_line_len) =
+        crate::mmu::report_line(sctlr_readback, cache_off_ticks, cache_on_ticks);
+    if let Ok(text) = core::str::from_utf8(&mmu_line[..mmu_line_len]) {
+        let _ = uart.write_str(text);
+    }
+
+    // `fixture-mmu-fault` (`TEST-P1-07-03-A` clause 6): a deliberate load
+    // from an address the map excludes on purpose. The boot ends in the
+    // decoded `TOS64-FAULT/1` frame — `far=` must read 0x20_0000_0000 —
+    // and never reaches the verdict line below.
+    #[cfg(feature = "fixture-mmu-fault")]
+    {
+        // SAFETY: deliberately not safe — this is the fixture. The address
+        // is valid to *form*; the access faults by construction and control
+        // transfers to the vector table installed above.
+        let _ = unsafe { core::ptr::read_volatile(0x20_0000_0000usize as *const u64) };
+    }
+
     // `STORY-P1-07-05`: the verdict line the host run path's exit code is
     // driven by, emitted last so it vouches for every claim above it. This is
     // the line that turns a capture into a pass/fail rather than a transcript.
-    let _ =
-        report_result(&uart, BOOT_FIXTURE_NAME, boot_self_check(current_el, requested, readback));
+    let _ = report_result(
+        &uart,
+        BOOT_FIXTURE_NAME,
+        boot_self_check(current_el, requested, readback, sctlr_readback),
+    );
 
     // `STORY-P1-07-07`: the boot splash, strictly after the verdict — the
     // screen is UX, the serial line is evidence, and the order is the
@@ -399,8 +447,11 @@ extern "C" fn continue_at_el1() -> ! {
     // the serial heartbeat, the splash-surface animation, and the beacon
     // while the link and transmit path stay healthy. Every wait inside is
     // budget-bounded and every refusal resolves to the same fail-safe park
-    // this function always ended in.
-    crate::ethernet::announce_and_park(&uart, splash)
+    // this function always ended in. The MMU line rides along so the canvas
+    // can carry `STORY-P1-07-03`'s evidence — serial has never produced a
+    // byte on this bench (`LE-47`), and the screen is the proven text
+    // channel.
+    crate::ethernet::announce_and_park(&uart, splash, &mmu_line[..mmu_line_len.saturating_sub(1)])
 }
 
 /// Parks the core in `wfe` forever.
@@ -645,20 +696,27 @@ mod tests {
         const EL1: u64 = 0b0100;
         const EL2: u64 = 0b1000;
         const VBAR: u64 = 0x8_0800;
-        // The two facts `continue_at_el1` can actually observe: the re-read
-        // exception level, and the `VBAR_EL1` readback. Both right is the only
-        // pass.
-        assert!(boot_self_check(EL1, VBAR, VBAR));
+        // An SCTLR_EL1 with M, C and I set (plus the reserved-one pattern the
+        // drop wrote) — the third observable fact since `STORY-P1-07-03`.
+        const SCTLR_ON: u64 = 0x30D0_1805;
+        // The three facts `continue_at_el1` can actually observe: the re-read
+        // exception level, the `VBAR_EL1` readback, and the `SCTLR_EL1`
+        // readback. All right is the only pass.
+        assert!(boot_self_check(EL1, VBAR, VBAR, SCTLR_ON));
         // Still at EL2: the `eret` did not do what it was told.
-        assert!(!boot_self_check(EL2, VBAR, VBAR));
+        assert!(!boot_self_check(EL2, VBAR, VBAR, SCTLR_ON));
         // A `VBAR_EL1` readback that disagrees: the vector install silently
         // did not take, which is a hang wearing a success banner.
-        assert!(!boot_self_check(EL1, VBAR, VBAR + 0x800));
+        assert!(!boot_self_check(EL1, VBAR, VBAR + 0x800, SCTLR_ON));
         // An undecodable level is a wrong read, never a pass.
-        assert!(!boot_self_check(0xFFFF, VBAR, VBAR));
+        assert!(!boot_self_check(0xFFFF, VBAR, VBAR, SCTLR_ON));
         // EL0 is impossible as an execution level here; a capture claiming it
         // means the read is wrong.
-        assert!(!boot_self_check(0b0000, VBAR, VBAR));
+        assert!(!boot_self_check(0b0000, VBAR, VBAR, SCTLR_ON));
+        // The silently-ignored write TEST-P1-07-03-A clause 4 is about: an
+        // SCTLR readback with any enable bit clear is a fail, not a pass.
+        assert!(!boot_self_check(EL1, VBAR, VBAR, 0x30D0_0800));
+        assert!(!boot_self_check(EL1, VBAR, VBAR, SCTLR_ON & !(1 << 2)));
     }
 
     // The report is one transmit path, and it stops on the first failure like

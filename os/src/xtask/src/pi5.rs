@@ -68,12 +68,23 @@ pub struct Pi5Fixture {
 
 /// Every Pi 5 fixture. Manual runs only — CI stays Tier 0 per the recorded
 /// `FEAT-P1-07` §7.4 decision (b).
-pub const PI5_FIXTURES: &[Pi5Fixture] = &[Pi5Fixture {
-    name: "boot",
-    feature: None,
-    owning_test: "TEST-P1-07-01-A",
-    summary: "Boot to EL1: CurrentEL first, READY sequence, vectors installed, verdict on the UART",
-}];
+pub const PI5_FIXTURES: &[Pi5Fixture] = &[
+    Pi5Fixture {
+        name: "boot",
+        feature: None,
+        owning_test: "TEST-P1-07-01-A",
+        summary: "Boot to EL1: CurrentEL first, READY sequence, vectors installed, MMU on with \
+                  before/after cache evidence, verdict on the UART and the canvas",
+    },
+    Pi5Fixture {
+        name: "mmu-fault",
+        feature: Some("fixture-mmu-fault"),
+        owning_test: "TEST-P1-07-03-A",
+        summary: "Boot to the MMU switch, then deliberately load from an unmapped address: the \
+                  decoded translation-fault frame (far=0x20_0000_0000, level 1) on the canvas \
+                  is the pass, and no TOS64-RESULT line is ever emitted",
+    },
+];
 
 /// Resolves a `--fixture=` value against [`PI5_FIXTURES`].
 pub fn pi5_fixture(name: &str) -> Option<&'static Pi5Fixture> {
@@ -696,6 +707,15 @@ mod tests {
         let fixture = pi5_fixture("boot").expect("the boot fixture must be registered");
         assert_eq!(fixture.owning_test, "TEST-P1-07-01-A");
         assert!(!fixture.summary.is_empty());
+    }
+
+    #[test]
+    fn the_mmu_fault_fixture_is_registered_and_selects_the_feature() {
+        // `TEST-P1-07-03-A` clause 6: the deliberate translation fault is a
+        // registered fixture, not an ad-hoc build.
+        let fixture = pi5_fixture("mmu-fault").expect("the mmu-fault fixture must be registered");
+        assert_eq!(fixture.owning_test, "TEST-P1-07-03-A");
+        assert_eq!(fixture.feature, Some("fixture-mmu-fault"));
     }
 
     #[test]

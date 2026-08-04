@@ -1,6 +1,6 @@
 # STORY-P1-07-03 — Flat Identity MMU with Normal Cacheable RAM: the Prerequisite of Measurement
 
-Status: **Specified — not started; gated on `STORY-P1-07-02` and on `TEST-P1-07-03-A` Red first**
+Status: **In progress — host-testable half Green 2026-08-04 (259 host tests in `hal-arm64`, from 246, Red first: descriptor words, `MAIR`/`TCR` fields, the walk itself, the probe arithmetic and the report line all pinned); acceptance criteria 2, 3, 4 and 5 blocked on a board capture. The evidence channel is the canvas plus the `mmu-fault` fixture — serial has never produced a byte on this bench (`LE-47`). Not Verified.**
 Feature: [`FEAT-P1-07`](../features/FEAT-P1-07.md)
 Introduced in: [`session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md`](../../session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md) §4.1
 

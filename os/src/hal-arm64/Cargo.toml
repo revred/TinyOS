@@ -4,7 +4,14 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "AArch64 HAL backend. STORY-P1-01-03: generic-timer cycle source and timebase only — no boot path, no UART, no MMU."
+description = "AArch64 HAL backend: boot path, PL011, vectors, flat identity MMU (STORY-P1-07-03), RP1 Ethernet, canvas — bounded by FEAT-P1-07 §6, not a full HAL port."
+
+[features]
+# TEST-P1-07-03-A clause 6: the boot deliberately loads from an address the
+# identity map excludes, so the translation fault reports through the
+# STORY-P1-07-02 handler with a decoded ESR and a matching FAR. A fixture,
+# never a default.
+fixture-mmu-fault = []
 
 [dependencies]
 hal = { path = "../hal" }

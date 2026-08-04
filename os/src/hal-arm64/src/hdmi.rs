@@ -542,9 +542,13 @@ mod board {
             // SAFETY: `parse_response` validated base, size, pitch and
             // dimensions as a whole descriptor, and both guards above keep
             // `address` inside `[base, base + size)`. The buffer is
-            // firmware-owned RAM outside every TinyOS structure; with the
-            // MMU off the access is Device memory and cannot be reordered
-            // into anything it could corrupt.
+            // firmware-owned RAM outside every TinyOS structure. Since
+            // `STORY-P1-07-03` a mailbox-granted buffer inside the mapped
+            // 2 GiB is Normal cacheable, so scan-out may lag the stores —
+            // a visual artifact at worst, on a path this board's firmware
+            // refuses anyway (`fb=refused`, BOARD VERDICT 4); the canvas at
+            // the pinned simple-framebuffer address is mapped Non-Cacheable
+            // and is the display path evidence rides on.
             unsafe { core::ptr::write_volatile(address as *mut u32, color) };
         }
     }
@@ -615,7 +619,18 @@ mod board {
         // splash owes the operator its best effort.
         let mut query = SizeQuery::new();
         let query_address = query.words().as_ptr() as usize as u32;
+        // `STORY-P1-07-03`: the buffer is Normal cacheable now, and the
+        // VideoCore reads and writes it behind the CPU's caches — clean out
+        // the request, and clean-invalidate before reading the answer.
+        crate::mmu::clean_invalidate_dcache_range(
+            query_address as usize,
+            QUERY_WORDS * core::mem::size_of::<u32>(),
+        );
         let native = if exchange(query_address) {
+            crate::mmu::clean_invalidate_dcache_range(
+                query_address as usize,
+                QUERY_WORDS * core::mem::size_of::<u32>(),
+            );
             parse_display_size(query.words_mut())
         } else {
             Err(FramebufferError::Timeout)
@@ -625,9 +640,19 @@ mod board {
         // Phase 2: the framebuffer request at the chosen mode.
         let mut message = PropertyMessage::framebuffer_request(width, height);
         let buffer_address = message.words().as_ptr() as usize as u32;
+        // As above: out to memory before the firmware looks, fresh from
+        // memory before this code does.
+        crate::mmu::clean_invalidate_dcache_range(
+            buffer_address as usize,
+            REQUEST_WORDS * core::mem::size_of::<u32>(),
+        );
         if !exchange(buffer_address) {
             return None;
         }
+        crate::mmu::clean_invalidate_dcache_range(
+            buffer_address as usize,
+            REQUEST_WORDS * core::mem::size_of::<u32>(),
+        );
 
         // The firmware wrote the response into our buffer; validate whole.
         // The *answer's* geometry is what gets drawn into — the firmware may

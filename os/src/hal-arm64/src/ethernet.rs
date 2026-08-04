@@ -1289,9 +1289,13 @@ mod glue {
     }
 
     /// Writes the frame and ring for `seq` into the pinned memory and
-    /// returns the ring's DMA address. Plain stores are sufficient: with the
-    /// MMU off every access is Device-nGnRnE and nothing is cached; the
-    /// `dsb sy` afterwards orders them before the MAC is started.
+    /// returns the ring's DMA address. Since `STORY-P1-07-03` this memory is
+    /// Normal Write-Back cacheable, and the GEM masters its reads from DRAM
+    /// behind the CPU's caches — so the stores are made visible with an
+    /// explicit clean to the point of coherency (which ends in `dsb sy`,
+    /// ordering the maintenance before the MAC is started). The GEM's own
+    /// write-back of the used bit into the ring is never read by this code,
+    /// so no invalidate is owed on the return path.
     fn stage_frame(seq: u32) -> u64 {
         let (frame, len) = gem::beacon_frame(seq);
         // SAFETY: single core, interrupts masked since `drop_to_el1`, and
@@ -1302,7 +1306,7 @@ mod glue {
             (*memory).frame = frame;
             let frame_dma = board::RP1_DMA_RAM_BASE + core::ptr::addr_of!((*memory).frame) as u64;
             (*memory).ring = gem::tx_ring(frame_dma, len);
-            core::arch::asm!("dsb sy", options(nostack, preserves_flags));
+            crate::mmu::clean_dcache_range(memory as usize, core::mem::size_of::<BeaconMemory>());
             board::RP1_DMA_RAM_BASE + core::ptr::addr_of!((*memory).ring) as u64
         }
     }
@@ -1317,6 +1321,7 @@ mod glue {
     pub fn announce_and_park(
         uart: &Pl011<VolatileMmio>,
         splash: Option<crate::hdmi::FramebufferInfo>,
+        mmu_line: &[u8],
     ) -> ! {
         // SAFETY: the constants are the recorded CPU-physical bases of the
         // PCIe2 controller block and the GEM window; both are naturally
@@ -1371,6 +1376,10 @@ mod glue {
             &line[..len.saturating_sub(1)],
             crate::canvas::TEXT,
         );
+        // `STORY-P1-07-03`: the cache-evidence line, painted once — it never
+        // changes after boot, and the canvas is the channel the owner
+        // transcribes into the ground-truth file.
+        crate::canvas::draw_line(&mut console, crate::canvas::MMU_Y, mmu_line, crate::canvas::TEXT);
 
         let mut beaconing = matches!(beacon, BeaconField::Running);
         // `STORY-P1-09-14`: the park verdict's memory — a stopped transmit

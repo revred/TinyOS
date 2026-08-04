@@ -245,6 +245,75 @@ fn write_hex<M: Mmio>(uart: &Pl011<M>, value: u64) -> Result<(), Pl011Error> {
     uart.write_bytes(&hex_u64(value))
 }
 
+/// Capacity of the canvas fault transcript — five report lines with room to
+/// spare; overflow is truncated, never wrapped.
+pub const TRANSCRIPT_CAPACITY: usize = 512;
+
+/// An always-ready [`Mmio`] sink that accumulates data-register writes.
+///
+/// The bridge that lets [`report`] paint the canvas without a second
+/// formatter: the same generic code that drives the PL011 drives this, so
+/// the pixels and the wire can never disagree (`STORY-P1-07-03` clause 6's
+/// evidence rides the screen — serial has never produced a byte on this
+/// bench, `LE-47`).
+pub struct TranscriptSink {
+    state: core::cell::RefCell<([u8; TRANSCRIPT_CAPACITY], usize)>,
+}
+
+impl TranscriptSink {
+    /// An empty transcript.
+    #[must_use]
+    pub const fn new() -> Self {
+        TranscriptSink { state: core::cell::RefCell::new(([0; TRANSCRIPT_CAPACITY], 0)) }
+    }
+
+    /// Calls `visit` once per completed line, in order, with the line's row
+    /// number and its bytes — line endings stripped, because the canvas has
+    /// rows instead of a framer.
+    pub fn for_each_line<F: FnMut(usize, &[u8])>(&self, mut visit: F) {
+        let state = self.state.borrow();
+        let (buffer, len) = (&state.0, state.1);
+        let mut row = 0;
+        for raw in buffer[..len].split(|&byte| byte == b'\n') {
+            let line = match raw.split_last() {
+                Some((b'\r', head)) => head,
+                _ => raw,
+            };
+            if line.is_empty() {
+                continue;
+            }
+            visit(row, line);
+            row += 1;
+        }
+    }
+}
+
+impl Default for TranscriptSink {
+    fn default() -> Self {
+        TranscriptSink::new()
+    }
+}
+
+impl Mmio for TranscriptSink {
+    fn read_u32(&self, _offset: usize) -> u32 {
+        // Always ready: no flag is ever set, so the driver's bounded poll
+        // passes immediately and the sink can never wedge a fault report.
+        0
+    }
+
+    fn write_u32(&self, offset: usize, value: u32) {
+        if offset != crate::pl011::register::DR {
+            return;
+        }
+        let mut state = self.state.borrow_mut();
+        let len = state.1;
+        if len < TRANSCRIPT_CAPACITY {
+            state.0[len] = value as u8;
+            state.1 = len + 1;
+        }
+    }
+}
+
 /// Writes ` level=N`, or ` level=none` for a status that names no translation
 /// level.
 ///
@@ -378,6 +447,26 @@ pub extern "C" fn tinyos_arm64_exception_entry(
     // channel to lose. Report on whatever device state exists.
     let _ = report(&uart, &frame);
 
+    // The same report, painted (`STORY-P1-07-03`): the serial line has never
+    // produced a byte on this bench (`LE-47`), and the canvas is the proven
+    // text channel. Rendered through the identical generic path via
+    // [`TranscriptSink`], so screen and wire cannot disagree; volatile
+    // stores into the pinned scan-out buffer are safe whether or not the
+    // display is attached, and bounded like everything else here.
+    let sink = TranscriptSink::new();
+    let sink_uart = Pl011::new(&sink);
+    let _ = report(&sink_uart, &frame);
+    let mut console = crate::canvas::SimplefbSurface;
+    crate::canvas::draw_frame(&mut console);
+    sink.for_each_line(|row, line| {
+        crate::canvas::draw_line(
+            &mut console,
+            crate::canvas::REPORT_Y + row as u32 * 40,
+            line,
+            crate::canvas::ALERT,
+        );
+    });
+
     park()
 }
 
@@ -451,10 +540,13 @@ pub unsafe fn deliberate_breakpoint() -> ! {
 /// With `SCTLR_EL1.M` clear every access is Device-nGnRnE, and an unaligned
 /// access to Device memory takes an **alignment fault** rather than merely
 /// running slowly (`session/hand-2026-07-28/23-bcm2712-divergence-record.md`
-/// §5). That makes this the fault most representative of what will actually go
-/// wrong on this board before `STORY-P1-07-03` lands the MMU — and the one
-/// whose `ESR_EL1` exercises [`crate::esr::DataAbortIss`] end to end rather
-/// than only the `BRK` path.
+/// §5). That made this the representative fault while the MMU was off.
+/// **Since `STORY-P1-07-03` the premise is narrower**: RAM is Normal memory
+/// and unaligned accesses to it simply complete, so this fault now requires
+/// an address in a *Device-mapped* region — and the representative deliberate
+/// fault became the translation fault against an unmapped address
+/// (`fixture-mmu-fault`), which exercises [`crate::esr::DataAbortIss`] plus
+/// the walk level and `FAR_EL1` in one capture.
 ///
 /// **Unverified.** Never executed.
 ///
@@ -548,6 +640,40 @@ mod tests {
         let uart = Pl011::new(&wire);
         report(&uart, frame).expect("a ready device");
         wire.captured()
+    }
+
+    // ---- the canvas transcript (`STORY-P1-07-03` clause 6's channel) -------
+
+    #[test]
+    fn the_transcript_sink_yields_the_same_lines_the_wire_carries() {
+        let frame = FaultFrame::from_entry(0, 0x9600_0005, 0x20_0000_0000, 0x8_1000, 0x3C5);
+        let sink = TranscriptSink::new();
+        let uart = Pl011::new(&sink);
+        report(&uart, &frame).expect("the sink is always ready");
+        let mut lines: Vec<String> = Vec::new();
+        sink.for_each_line(|row, line| {
+            assert_eq!(row, lines.len(), "rows arrive in order");
+            lines.push(String::from_utf8(line.to_vec()).expect("ASCII"));
+        });
+        // The identical formatting path: the wire capture split into lines
+        // must equal what the sink hands the canvas.
+        let capture = captured_report(&frame);
+        let wire: Vec<&str> = capture.lines().filter(|line| !line.is_empty()).collect();
+        assert_eq!(lines, wire);
+        assert_eq!(lines.len(), 5, "five report lines, every one painted");
+        assert!(lines[0].starts_with("TOS64-FAULT/1 slot="));
+    }
+
+    #[test]
+    fn the_transcript_sink_truncates_overflow_rather_than_wrapping() {
+        let sink = TranscriptSink::new();
+        for _ in 0..(TRANSCRIPT_CAPACITY + 100) {
+            sink.write_u32(register::DR, u32::from(b'A'));
+        }
+        sink.write_u32(register::DR, u32::from(b'\n'));
+        let mut total = 0;
+        sink.for_each_line(|_, line| total += line.len());
+        assert_eq!(total, TRANSCRIPT_CAPACITY, "beyond capacity is dropped, not wrapped");
     }
 
     // The vector entries load `x0`-`x4` in one order and this function names
