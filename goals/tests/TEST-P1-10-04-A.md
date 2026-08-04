@@ -1,6 +1,6 @@
 # TEST-P1-10-04-A — A Listener Joining Late Must Learn What It Missed
 
-Status: **Specified — written before implementation, per the TDD mandate**
+Status: **In progress — written before implementation per the TDD mandate (14 tests Red-verified against an unwritten implementation). Clauses 1, 2, 3, 4, 5, 7, 8, 9 host-Green; clauses 1–5 and 10 **Green on silicon 2026-08-05** (`BOARD VERDICT 11`, `12`, `13`). Clause 6's board half is not evidenced: no board run has stamped enough certificate rungs to reach the buffer ceiling, and the host test drives that bound instead.**
 Story: [`STORY-P1-10-04`](../stories/STORY-P1-10-04.md)
 Tier: Host unit tests (`kernel::spoor_wire`, `kernel::spoor_stream`) **plus** a Tier 1 hardware run whose capture is taken *without* a power cycle inside it, per [Target Hardware & Test Matrix](../../README.md#target-hardware--test-matrix)
 Assurance contract: [`goals/assurance/story-contracts.tsv`](../assurance/story-contracts.tsv)

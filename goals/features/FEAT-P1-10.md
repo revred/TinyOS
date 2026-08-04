@@ -36,7 +36,7 @@ park rungs at all.
 |---|---|---|
 | [`STORY-P1-10-01`](../stories/STORY-P1-10-01.md) | The on-wire format: raw packed `u64` records, MTU-filling frames, `u64` sequence for exact loss accounting, reusing the journal's own magic and record layout | In progress — host half Green 2026-08-04, 13 tests |
 | [`STORY-P1-10-02`](../stories/STORY-P1-10-02.md) | Boot and park stamping, and the park-loop drain that transmits frames | In progress — criteria 1, 2, 3 and 5 Green on silicon 2026-08-04 (`BOARD VERDICT 10`), criterion 4 evidenced negatively by `BOARD VERDICT 9`, criterion 6 (stated cost) not yet met |
-| [`STORY-P1-10-04`](../stories/STORY-P1-10-04.md) | The retained boot certificate and the boot epoch: a listener joining late learns which boot it joined, and learns the boot rungs it never saw | Specified — host half implemented test-first 2026-08-04; no board evidence |
+| [`STORY-P1-10-04`](../stories/STORY-P1-10-04.md) | The retained boot certificate and the boot epoch: a listener joining late learns which boot it joined, and learns the boot rungs it never saw | In progress — criteria 1–5 and 7 Green on silicon 2026-08-05 (`BOARD VERDICT 11`–`13`: boot state read from a capture opened at record 74, epoch changing across power cycles, two boots in one window with 0 lost, certificate byte-identical to a live frame 0). Criterion 6 host-Green only |
 
 **Enumerated, deliberately not decomposed** (just-in-time rule): a C# `tos64-listen` host
 decoder growing into Ti64Dink (`FEAT-P2-10`), and the extension that wires the existing

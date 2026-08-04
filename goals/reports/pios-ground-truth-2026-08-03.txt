@@ -1657,3 +1657,157 @@ reading:
 
   UNELEVATED. Npcap was installed once; Ti64Dink reads the stream through P/Invoke to wpcap.dll
   with no admin shell, which is what makes this repeatable rather than ceremonial.
+
+================================================================================
+BOARD VERDICT 11, 12 and 13 - 2026-08-05, kernel fd966f7514e4
+STORY-P1-10-04: the retained boot certificate and the boot epoch
+================================================================================
+
+  Image fd966f7514e4 (measure fixture, spoor egress + STORY-P1-10-04). Three captures,
+  all read UNELEVATED by Ti64Dink through Npcap. Every one of these is a capture shape
+  that produced NO boot evidence at all before this Story existed.
+
+--------------------------------------------------------------------------------
+BOARD VERDICT 11 - the late listener. Power on, wait ~30 s with NOTHING listening,
+then start a 30 s capture. TEST-P1-10-04-A clause 10.
+--------------------------------------------------------------------------------
+
+  == boot certificate (epoch 0x049F8B28) - 3 record(s), re-announced ==
+      [0] Boot Kernel Create Ok  rung=MmuEnabled  cost=184052
+      [1] Boot Kernel Create Ok  rung=GicRouted   cost=0
+      [2] Boot Kernel Create Ok  rung=TickArmed   cost=1
+
+  frames        : 36   (30 stream, 6 retained)
+  records ok    : 60
+  records refused: 0
+  records lost  : 0
+  boots seen    : 1
+  sequence span : 74 .. 134   (0 lost)
+  boot state    : recovered from a retained certificate - frame 0 was never captured
+
+  THIS IS THE RUN THE STORY EXISTS FOR. The capture opened at record 74. Frame 0 -
+  carrying MmuEnabled, GicRouted and TickArmed - went out and was gone long before pcap
+  was listening, and the boot state was read out anyway. Before this build the same
+  capture would have shown park iterations and beacon transmits and nothing whatsoever
+  about how the machine came up.
+
+  BOARD VERDICT 10 obtained the same three rungs by having a capture already running
+  across a power cycle. That was luck. This is a channel property.
+
+  SIX RETAINED FRAMES IN 30 SECONDS. ANNOUNCE_EVERY = 5 against a ~1 s park beat, so one
+  announcement every ~5 s - what the constant says, and what a listener is promised as
+  its worst-case window. Measured, not assumed.
+
+  ZERO LOST ACROSS A WINDOW CONTAINING SIX RETAINED FRAMES. This is the FLAG_RETAINED
+  clause proven on hardware: each of those frames carries seq=0 while the stream sat at
+  seq 74..134. A decoder without the flag would have reported six enormous backwards
+  jumps. FrameHeader::expected_next returns None for a retained frame, so the arithmetic
+  that would produce a phantom gap is unreachable rather than merely discouraged.
+
+  MmuEnabled cost=184052 against BOARD VERDICT 10's 183974 - 0.04% apart, well inside
+  the ~3% build-to-build variation BOARD VERDICT 9 recorded.
+
+--------------------------------------------------------------------------------
+BOARD VERDICT 12 - a fresh boot, capture started as soon as power was restored.
+--------------------------------------------------------------------------------
+
+  == boot certificate (epoch 0x04B328BC) - 3 record(s), re-announced ==
+      [0] Boot Kernel Create Ok  rung=MmuEnabled  cost=184032
+      [1] Boot Kernel Create Ok  rung=GicRouted   cost=0
+      [2] Boot Kernel Create Ok  rung=TickArmed   cost=1
+
+  frames        : 90   (75 stream, 15 retained)
+  records lost  : 0        records refused: 0        boots seen: 1
+  sequence span : 16 .. 166   (0 lost)
+  boot state    : recovered from a retained certificate - frame 0 was never captured
+
+  THE EPOCH CHANGED ACROSS THE POWER CYCLE: 0x049F8B28 -> 0x04B328BC. First time this
+  board has ever been able to say which boot a frame belongs to.
+
+  Frame 0 was still missed - the board reached seq=16 before pcap opened, which is
+  itself a useful measurement: the gap between the stream starting and a human starting
+  a listener is small but real, and it is exactly the gap that used to cost the whole
+  boot state.
+
+  15 retained frames in 75 s - one per 5 s again, on a second boot.
+
+--------------------------------------------------------------------------------
+BOARD VERDICT 13 - one capture spanning a power cycle: both halves for one boot.
+TEST-P1-10-04-A clause 4, the verbatim claim, CHECKED rather than asserted.
+--------------------------------------------------------------------------------
+
+  frames        : 77   (64 stream, 13 retained)
+  records ok    : 134
+  records refused: 0
+  records lost  : 0
+  boots seen    : 2
+  stream        : continuous - no records lost across the captured window
+
+  ---- boot 0x04B328BC ----
+  sequence span : 228 .. 244   (0 lost)
+  boot state    : recovered from a retained certificate - frame 0 was never captured
+      [0] MmuEnabled cost=184032   [1] GicRouted cost=0   [2] TickArmed cost=1
+
+  ---- boot 0x04B32825 ----
+  sequence span : 0 .. 118   (0 lost)
+  boot state    : captured live AND re-announced - 3 record(s) byte-identical
+      [0] MmuEnabled cost=183951   [1] GicRouted cost=0   [2] TickArmed cost=1
+
+  BYTE-IDENTICAL. The window holds this boot's live frame 0 and its certificate, and
+  Ti64Dink compared them record for record rather than trusting the design. The
+  re-announcement is the same packed u64s carrying the same sequence numbers - not a
+  re-stamp, which would have carried fresh sequences and a fresh cost field and would
+  have been a different event wearing the same name.
+
+  TWO BOOTS, ZERO RECORDS LOST. The restart took the sequence from 244 back to 0. Read
+  by the epoch that is a reboot; read by sequence alone it is a backwards jump of 244
+  records, and a decoder that "recovered" by resynchronising would have reported the new
+  boot's first frames as loss. The distinction is the field, and the field works.
+
+  CAPTURE PLUMBING NOTE, recorded because it is a defect in the evidence and not in the
+  subject: this run was piped through `tail -90`, so the `== BOOT CHANGED ==` line
+  scrolled off the top of the retained output. The summary above is intact and proves
+  the transition was handled (boots seen: 2, records lost: 0), but the line itself is not
+  in this transcript. Re-runnable at will; noted so a later reader does not conclude the
+  line was absent.
+
+--------------------------------------------------------------------------------
+THE FINDING THIS SESSION DID NOT GO LOOKING FOR - epoch entropy, LE-74
+--------------------------------------------------------------------------------
+
+  Three consecutive boots produced:
+
+      0x049F8B28
+      0x04B328BC
+      0x04B32825
+
+  The last two differ by 0x97 = 151 counter ticks. At 54 MHz that is 2.8 MICROSECONDS.
+  Two consecutive power cycles put the kernel entry point within three microseconds of
+  the same counter reading, so only the low byte of the epoch moved.
+
+  LE-74 was filed at design time saying the epoch's entropy is the firmware's rather
+  than ours. This MEASURES it, and it is far thinner than that row assumed. The first
+  pair differ by ~1.28M ticks (~23 ms), so the variation is not uniform - but a pair
+  landing 151 ticks apart makes collision a plausible event rather than a theoretical
+  one, and a collision reads as "same boot" to every host.
+
+  What this does NOT invalidate: the epoch remains a sound change detector for a bench
+  session, and every board result above stands - the epochs did differ and were read as
+  different. What it does invalidate is any future reading of the field as an identifier.
+  LE-74 is amended with this measurement rather than left as a design-time caution,
+  because a measured limit and an anticipated one are not the same evidence.
+
+--------------------------------------------------------------------------------
+WHAT THESE THREE RUNS DO NOT SHOW
+--------------------------------------------------------------------------------
+
+  - The per-stamp, per-drain and per-announce cost. Still unmeasured, STORY-P1-10-02
+    criterion 6, unchanged by this Story. An observability substrate whose overhead is
+    unknown is one that gets switched off in the run that mattered.
+  - Completeness. Boot-and-park behaviour only, per FEAT-P1-10 exit criterion 4. The
+    dispatch/lock/wcet/actuation call sites still do not stamp on this path.
+  - Any inbound path. Receive stays disabled; nothing here moves toward one.
+  - Thermal behaviour. The fan did not spin during any of these runs, because TinyOS
+    does not program RP1's PWM and has no thermal sensing at all - LE-75, raised from
+    the owner's observation during this session. These runs are 30-90 seconds each and
+    nothing here supports any claim about sustained operation.
