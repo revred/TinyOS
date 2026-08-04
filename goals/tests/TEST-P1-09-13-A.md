@@ -1,6 +1,6 @@
 # TEST-P1-09-13-A — A Device Is Told Where to Listen, and Believed Only When It Repeats It Back
 
-Status: **In progress — host clauses Green 2026-08-04; clause 5 awaits the next boot**
+Status: **In progress — every clause Green 2026-08-04; clause 5 answered on silicon in its success arm (`RP1=PRESENT ID=0x0109 PHY=0x600D84A2` on the canvas; the wire trained to 1000 Mbps at 01:27:03 by the laptop's linkwatch)**
 Story: [`STORY-P1-09-13`](../stories/STORY-P1-09-13.md)
 Tier: Host unit tests (sizing gate, assignment readback, write order, idempotence, confession wiring)
 **plus** a Tier 1 boxed-boot readback

@@ -1,6 +1,6 @@
 # STORY-P1-09-13 — The Address Nobody Wrote: the Endpoint's BARs Are Sized, Assigned, and Believed
 
-Status: **In progress — host half Green 2026-08-04 (sizing masks pinned, assignment by readback, zero-write idempotence, codes 19–20, order before memory-enable); criterion 5 awaits the board. Not Verified.**
+Status: **In progress — every criterion Green on silicon 2026-08-04: the boxed boot answered criterion 5 in its success arm — the canvas read `RP1=PRESENT ID=0x0109 PHY=0x600D84A2` where a week of `0xDEAD` poison had been, and the laptop's linkwatch logged the wire training to 1000 Mbps at 01:27:03 under TinyOS. Not Verified.**
 Feature: [`FEAT-P1-09`](../features/FEAT-P1-09.md)
 Introduced in: [`session/hand-2026-08-03/09A-window-poisoned-inbound-path-indicted.md`](../../session/hand-2026-08-03/09A-window-poisoned-inbound-path-indicted.md) — the same-night conviction capture
 
@@ -83,7 +83,7 @@ it.
 | 2 — assignment by readback | **Green** (host): held readback required; a dropped write refuses as code 20. |
 | 3 — order + idempotence | **Green** (host): write-list pinned — vendor gate, three size/assign pairs, then memory-enable; already-assigned pass writes nothing to the BARs. |
 | 4 — confession wiring | **Green** (host): codes 19/20 distinct and exhaustive; `bar-silent`/`bar-held` lines pinned. |
-| 5 — board | **Awaits the next boxed boot.** |
+| 5 — board | **Green, success arm (2026-08-04 ~01:27).** The window is claimed: identity answered module `0x0007` rev `0x0109`, the PHY scan identified `0x600D/0x84A2`, and the wire autonegotiated to gigabit (laptop linkwatch, 01:27:03) — the first Ethernet link TinyOS has ever trained. The report line's boot-time `LINK=DOWN` is the expected snapshot; the park-loop watch owns the transition, and its on-silicon beacon flip is the next observation. |
 
 ## Tests
 

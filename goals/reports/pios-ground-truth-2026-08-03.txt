@@ -1163,3 +1163,18 @@ VERDICT — H1 CONVICTED, mechanism fully specified:
     already written after (order: BARs before COMMAND_ENABLE, per spec). Refusal codes 19+.
     Note BAR1's happy readback is 0x00000000 — belief must come from the size-probe mask,
     not from the zero readback alone.
+
+===== BOARD VERDICT 2 (TinyOS boxed boot 2026-08-04 ~01:27, kernel f228b6b5 — STORY-P1-09-13 on board) =====
+canvas:  TOS64-LINK/1 RP1=PRESENT ID=0x0109 PHY=0x600D84A2 LINK=DOWN BEACON=SKIPPED
+         TOS64-BEAT/1 SEQ=31,32,33... STATE=PARKED FB=REFUSED   (transcribed in the first minute)
+lamp:    plain pulse (no sentence — no refusal anywhere in the chain)
+laptop:  linkwatch 01:27:03.446 TRANSITION Down -> UP at 1000 Mbps  <- THE WIRE TRAINED under TinyOS
+
+reading: the BAR fix cleared the window-wide poison. Identity read 0x0007 rev 0x0109 (was
+0xDEADDEAD), the clock rung passed silently upstream of it (pre-flight credible, enables
+landed), the PHY scan identified the BCM54213PE pair 0x600D/0x84A2, and the physical link
+autonegotiated to gigabit — the first Ethernet link TinyOS has ever trained. The LINK=DOWN
+on the report line is the boot-time snapshot (autonegotiation takes seconds; the ~4 s
+measurement from the original ground truth); the park-loop watch owns the transition.
+Open observation at transcription time: whether the beat line flipped to STATE=BEACONING
+after 01:27:03 — the watch-resolution path's on-silicon proof rides on it.

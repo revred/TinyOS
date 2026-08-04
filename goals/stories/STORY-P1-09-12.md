@@ -1,6 +1,6 @@
 # STORY-P1-09-12 — The Current: the Ethernet Clocks Are Switched On Before the Identity Is Asked
 
-Status: **In progress — every criterion Green on silicon 2026-08-03: the boxed boot answered criterion 5 in its refusal arm — the canvas printed `reason=clk-silent detail=0xdeaddead` and the lamp spelled code 16 detail 57005. The clocks block itself reads fabric poison, so the poison is window-wide, not per-peripheral, and the next story is chosen on that number. Not Verified.**
+Status: **In progress — every criterion Green on silicon: 2026-08-03's boxed boot answered criterion 5 in its refusal arm (`reason=clk-silent detail=0xdeaddead`, code 16 detail 57005 — the poison proven window-wide, `STORY-P1-09-13` chosen on that number), and 2026-08-04's boot ran the success arm — behind the claimed window the pre-flight read credibly, the enables landed, and the identity answered `0x0007` downstream. Not Verified.**
 Feature: [`FEAT-P1-09`](../features/FEAT-P1-09.md)
 Introduced in: the 2026-08-03 first-light session — the canvas held at `ID-MODULE 0xDEAD` and the
 Pi OS capture proved the same register reads `0x00070109` once two clock-enable bits are set
