@@ -5,6 +5,22 @@
 work/**/*.pdf
 work/**/*.PDF
 
+# The Npcap source tree (external/npcap188/, upstream github.com/nmap/npcap
+# v1.88). Npcap is **source-available, not open source**: its EULA
+# (c) 2013-2025 Nmap Software LLC grants no redistribution right. Committing
+# the tree into this MIT-licensed repository would be unlicensed
+# redistribution AND would falsely imply those files are MIT — so it is
+# ignored rather than merely left untracked, because untracked survives
+# exactly until someone types `git add external/`.
+#
+# It is present locally as a *reference* only: Ti64Dink calls the installed
+# wpcap.dll through P/Invoke declarations written here from the public
+# libpcap API, and contains no Npcap-derived code. Nothing in `os/` touches
+# it. Unlike the trees in external/README.md it is not a submodule, because
+# the local copy is extracted files rather than a clone and carries no commit
+# to pin; the version is recorded in external/README.md instead.
+external/npcap188/
+
 # Common editor/OS cruft
 .DS_Store
 Thumbs.db

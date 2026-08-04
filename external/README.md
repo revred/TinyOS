@@ -24,6 +24,35 @@ contract, stated where the trees live:
 | [`MsDOS/`](MsDOS/) | reference-only | submodule (`microsoft/MS-DOS`) | upstream `main` | Language forbidden by [`CODING_STANDARDS.md`](../agent/CODING_STANDARDS.md); self-enforcing |
 | [`WindowsTerminal/`](WindowsTerminal/) | reference-only | submodule (`microsoft/terminal`) | upstream `main` | Same enforcement |
 | [`tauri/`](tauri/) | fork-under-discipline | **vendored in-tree** (plain files) | baseline tag `tauri-runtime-wry-v2.11.4` (`ca90b46`) | ADR 0007's six constraints. History preserved at `github.com/revred/tauri` branch `tinyos-poc` (head `1bf5882` at vendoring) |
+| `npcap188/` | reference-only | **local only — git-ignored, never committed** | upstream `github.com/nmap/npcap`, v1.88 | See below. Not a submodule and not vendored |
+
+### `npcap188/` — the one tree that must never enter this repository
+
+Npcap is **source-available, not open source**. Its EULA (© 2013–2025 Nmap Software LLC)
+grants no redistribution right, so committing the tree would be *unlicensed redistribution*
+and would also falsely imply those files carry TinyOS's MIT licence. It is therefore listed
+in [`.gitignore`](../.gitignore) rather than merely left untracked — untracked survives
+exactly until someone types `git add external/`.
+
+It is not a submodule either, unlike the two reference trees above: the local copy is
+extracted files rather than a clone, so there is no commit to pin. The version above is the
+pin; re-obtain it from [npcap.com](https://npcap.com) or `github.com/nmap/npcap` if needed.
+
+**Nothing in this repository derives from it.** `work/tools/ti64dink` reaches Npcap the way
+Wireshark and every other capture tool does — by calling the `wpcap.dll` that the *user*
+installs, through P/Invoke declarations written against the public libpcap API. No Npcap
+source is copied, linked, or shipped, which is what keeps Ti64Dink cleanly MIT and leaves
+TinyOS itself untouched: the kernel never links it, and the two sides exchange only our own
+`TOS64` frames over the wire. A licence governs copies of software, not packets that cross
+its driver.
+
+Redistribution is the line Npcap draws. If Ti64Dink is ever published it ships **Npcap-free**,
+and each user installs Npcap themselves under their own free licence (which covers up to five
+copies). Bundling the installer, the driver or the DLLs — or silent-installing any of them —
+would require an OEM Redistribution licence from Insecure.Com and is out of scope.
+
+Because the host tool is coded against the libpcap API rather than an Npcap-specific one, it
+also stays portable to libpcap on Linux/macOS later with no Npcap-derived code anywhere.
 
 ## The fork's health metric, post-vendoring
 
