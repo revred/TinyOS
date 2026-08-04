@@ -21,3 +21,11 @@ os/tmp*.log
 # Claude Code local runtime state. Shared settings (.claude/settings.json) are
 # deliberately NOT ignored, so they can be committed if the project adopts any.
 .claude/scheduled_tasks.lock
+
+# .NET build output for the work/tools/ C# host-tool fleet (sdprep is the
+# pattern) — sources and project files are committed, binaries are rebuilt
+# with `dotnet build -c Release` per tool.
+work/tools/**/bin/
+work/tools/**/obj/
+work/tools/**/out/
+work/tools/**/smoketest/
