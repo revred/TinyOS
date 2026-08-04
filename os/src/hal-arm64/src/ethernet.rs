@@ -1232,17 +1232,23 @@ mod glue {
     use crate::pl011::{Pl011, VolatileMmio};
 
     /// The beacon buffer and transmit ring, 64-byte aligned so descriptors
-    /// never straddle what the MAC fetches. One static grant, per `LE-67`.
-    /// The frame buffer is sized for the larger transcript text frame
-    /// (`STORY-P1-07-06`); the beacon uses its prefix.
+    /// never straddle what the MAC fetches. **One static grant, per `LE-67`** —
+    /// still exactly one, sized now for the largest frame any channel emits.
+    ///
+    /// That is the spoor frame (`STORY-P1-10-02`, 1510 bytes); the beacon and
+    /// the transcript text frame use its prefix. Growing the single buffer
+    /// does not widen the containment story `LE-67` records — the device is
+    /// granted one pinned region and receive stays disabled — but it does mean
+    /// the region a confused device could reach is larger, which is why the
+    /// size is pinned to the frame format's own bound rather than rounded up.
     #[repr(C, align(64))]
     struct BeaconMemory {
         ring: [[u32; 4]; 2],
-        frame: [u8; gem::TEXT_FRAME_CAPACITY],
+        frame: [u8; gem::SPOOR_FRAME_CAPACITY],
     }
 
     static mut BEACON_MEMORY: BeaconMemory =
-        BeaconMemory { ring: [[0; 4]; 2], frame: [0; gem::TEXT_FRAME_CAPACITY] };
+        BeaconMemory { ring: [[0; 4]; 2], frame: [0; gem::SPOOR_FRAME_CAPACITY] };
 
     /// Bound on the ticks-elapsed busy wait, so a stuck counter converts to
     /// a stop instead of a silent hang (`SEC-20` — no unbounded wait, even
@@ -1308,6 +1314,14 @@ mod glue {
     fn stage_text_line(line: &[u8]) -> u64 {
         let (frame, len) = gem::text_frame(line);
         stage_bytes(&frame, len)
+    }
+
+    /// Stages one spoor frame (`STORY-P1-10-02`), or [`None`] when the payload
+    /// does not fit — refused rather than truncated, because a shortened run
+    /// of packed records decodes to a plausible lie.
+    fn stage_spoor_payload(payload: &[u8]) -> Option<u64> {
+        let (frame, len) = gem::payload_frame(payload)?;
+        Some(stage_bytes(&frame, len))
     }
 
     /// Writes the frame bytes and the ring into the pinned memory, cleans
@@ -1560,11 +1574,52 @@ mod glue {
                                 // (TEST-P1-09-14-A clause 3).
                                 stopped = Some(refused);
                                 beaconing = false;
+                                crate::spoor::stamp(
+                                    crate::spoor::Rung::BeaconTransmitted,
+                                    crate::spoor::Verdict::Failed,
+                                    frame_seq,
+                                );
                             } else {
                                 frame_seq = frame_seq.wrapping_add(1);
+                                crate::spoor::stamp(
+                                    crate::spoor::Rung::BeaconTransmitted,
+                                    crate::spoor::Verdict::Ok,
+                                    frame_seq,
+                                );
                             }
                         }
                         None => beaconing = false,
+                    }
+                }
+
+                // `STORY-P1-10-02`: the spoor stream leaves the board here.
+                // Last of the channels deliberately — the rungs stamped by
+                // this very pass are already in the journal, so a frame is
+                // never one pass stale. Same fail-safe as every other channel:
+                // one refused transmit ends it and is spoken, and a payload
+                // that will not fit is refused rather than truncated.
+                crate::spoor::stamp(
+                    crate::spoor::Rung::ParkIteration,
+                    crate::spoor::Verdict::Ok,
+                    beat_seq,
+                );
+                if beaconing {
+                    if let Some((speed, full_duplex)) = speed_config {
+                        let mut payload = [0u8; gem::SPOOR_FRAME_CAPACITY - 14];
+                        let len = crate::spoor::drain(&mut payload);
+                        // Zero is "nothing to send", not "send nothing": an
+                        // empty frame every pass would fill the wire with
+                        // silence that looks like data.
+                        if len > 0 {
+                            if let Some(ring_dma) = stage_spoor_payload(&payload[..len]) {
+                                if let Err(refused) =
+                                    gem::transmit_once(&gem_window, ring_dma, speed, full_duplex)
+                                {
+                                    stopped = Some(refused);
+                                    beaconing = false;
+                                }
+                            }
+                        }
                     }
                 }
                 // `STORY-P1-07-06`: one transcript line per beat rides the

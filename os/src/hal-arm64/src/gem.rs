@@ -403,6 +403,35 @@ pub const MINIMUM_FRAME_LEN: usize = 60;
 /// [`BEACON_CAPACITY`] because a `METRIC` line is ~130 bytes.
 pub const TEXT_FRAME_CAPACITY: usize = 192;
 
+/// Capacity of a spoor frame (`STORY-P1-10-02`): the 14-byte Ethernet header
+/// plus a full `kernel::spoor_wire` payload of 184 packed records.
+///
+/// 1510 bytes, inside a standard 1500-byte MTU payload plus header, so nothing
+/// here is ever handed to the MAC to fragment.
+pub const SPOOR_FRAME_CAPACITY: usize = 14 + 1496;
+
+/// Builds a broadcast frame whose payload is `payload` **verbatim** — the
+/// binary carrier, beside [`text_frame`]'s textual one.
+///
+/// Returns [`None`] rather than truncating. Silently shortening a text line
+/// costs a reader some characters; silently shortening a run of packed
+/// records corrupts them, and a corrupted record decodes to a plausible lie.
+#[must_use]
+pub fn payload_frame(payload: &[u8]) -> Option<([u8; SPOOR_FRAME_CAPACITY], usize)> {
+    if payload.len() > SPOOR_FRAME_CAPACITY - 14 {
+        return None;
+    }
+    let mut frame = [0u8; SPOOR_FRAME_CAPACITY];
+    frame[0..6].copy_from_slice(&[0xFF; 6]);
+    frame[6..12].copy_from_slice(&BEACON_SOURCE_MAC);
+    frame[12] = (BEACON_ETHERTYPE >> 8) as u8;
+    frame[13] = BEACON_ETHERTYPE as u8;
+    frame[14..14 + payload.len()].copy_from_slice(payload);
+    let at = 14 + payload.len();
+    let len = if at < MINIMUM_FRAME_LEN { MINIMUM_FRAME_LEN } else { at };
+    Some((frame, len))
+}
+
 /// Builds a broadcast frame whose payload is `text` (truncated to fit) —
 /// same destination, source and EtherType as the beacon, so the same
 /// `pktmon`/Wireshark filter captures both. The transcript-on-the-wire

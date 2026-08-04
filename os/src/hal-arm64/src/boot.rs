@@ -410,6 +410,14 @@ extern "C" fn continue_at_el1() -> ! {
     // The UART surviving the switch *is* clause 5: if the device-region
     // attributes are wrong, this line is where the board goes silent.
     let cache_on_ticks = crate::mmu::measure_cache_probe();
+    // `STORY-P1-10-02`: the first rung the board leaves a spoor for. The cost
+    // field carries the cache-on probe, so a reader of the stream alone can
+    // see the ratio that `TOS64-MMU/1` reports on the canvas.
+    crate::spoor::stamp(
+        crate::spoor::Rung::MmuEnabled,
+        crate::spoor::Verdict::Ok,
+        cache_on_ticks as u32,
+    );
     let (mmu_line, mmu_line_len) =
         crate::mmu::report_line(sctlr_readback, cache_off_ticks, cache_on_ticks);
     if let Ok(text) = core::str::from_utf8(&mmu_line[..mmu_line_len]) {
@@ -430,7 +438,17 @@ extern "C" fn continue_at_el1() -> ! {
         let gicc = unsafe { crate::pl011::VolatileMmio::new(crate::board::GICC_BASE) };
         match crate::gic::enable_tick_interrupt(&gicd, &gicc) {
             Ok(()) => {
+                crate::spoor::stamp(crate::spoor::Rung::GicRouted, crate::spoor::Verdict::Ok, 0);
                 let ctl = crate::timer::start_virtual_timer(crate::tick::TICK_INTERVAL_TICKS);
+                crate::spoor::stamp(
+                    crate::spoor::Rung::TickArmed,
+                    if ctl & 0b11 == 0b01 {
+                        crate::spoor::Verdict::Ok
+                    } else {
+                        crate::spoor::Verdict::Failed
+                    },
+                    ctl as u32,
+                );
                 if ctl & 0b11 == 0b01 {
                     // Enabled, not masked: open the door. From here every
                     // wait in the park loop is tick-interrupted, and slot 5
@@ -449,7 +467,17 @@ extern "C" fn continue_at_el1() -> ! {
                     )))
                 }
             }
-            Err(refused) => Some(crate::tick::tick_refused_line(refused)),
+            Err(refused) => {
+                // A refusal is stamped as readily as a success: the readback
+                // that convicted the register rides in the cost field, so the
+                // stream carries the diagnosis and not merely the fact.
+                crate::spoor::stamp(
+                    crate::spoor::Rung::GicRouted,
+                    crate::spoor::Verdict::Failed,
+                    refused.readback(),
+                );
+                Some(crate::tick::tick_refused_line(refused))
+            }
         }
     };
     if let Some((line, len)) = &tick_refusal {

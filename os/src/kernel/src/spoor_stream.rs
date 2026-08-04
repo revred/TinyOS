@@ -207,6 +207,132 @@ impl<const N: usize> Default for SpoorStream<N> {
     }
 }
 
+/// What a boot rung reports across the seam.
+///
+/// A deliberately tiny closed set rather than the whole [`Outcome`]
+/// vocabulary. A boot rung either did the thing, was refused, or was not
+/// attempted; the richer outcomes (`Chose`, `Capped`, `Superseded`, `Partial`)
+/// describe decisions this path does not make, and exposing them across an
+/// `extern "C"` boundary would invite a call site to pick one that sounds
+/// close. The narrow set is also why `Outcome`'s own `from_bits` stays
+/// private: nothing here needs to widen that type's surface.
+///
+/// Discriminants are wire-visible through the mapped [`Outcome`] and are
+/// therefore append-only, for the same reason [`Rung`]'s are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Verdict {
+    /// The rung did what it exists to do.
+    Ok = 0,
+    /// The rung was refused, by a readback that disagreed or a device that
+    /// said no. A refusal must be as stampable as a success, or the stream
+    /// hides exactly the runs worth reading.
+    Failed = 1,
+    /// The rung was not attempted — a path not taken, not a path that failed.
+    Skipped = 2,
+}
+
+impl Verdict {
+    /// Decodes a verdict from the seam, refusing anything unknown.
+    #[must_use]
+    pub const fn from_bits(bits: u8) -> Option<Self> {
+        match bits {
+            0 => Some(Verdict::Ok),
+            1 => Some(Verdict::Failed),
+            2 => Some(Verdict::Skipped),
+            _ => None,
+        }
+    }
+
+    /// This verdict's seam encoding.
+    #[must_use]
+    pub const fn to_bits(self) -> u8 {
+        self as u8
+    }
+
+    /// The spoor [`Outcome`] this verdict is.
+    #[must_use]
+    pub const fn outcome(self) -> Outcome {
+        match self {
+            Verdict::Ok => Outcome::Ok,
+            Verdict::Failed => Outcome::Failed,
+            Verdict::Skipped => Outcome::Skipped,
+        }
+    }
+}
+
+/// Records the board's stream holds between drains.
+///
+/// A jitter buffer, not storage: it absorbs the burst a boot rung sequence
+/// produces between park passes. Sized to one full frame so a drain that
+/// happens promptly never loses anything, and a drain that is late loses
+/// countably (`FEAT-P1-10` named debt — this number is chosen, not measured).
+pub const BOARD_STREAM_CAPACITY: usize = MAX_RECORDS;
+
+/// The board's one stream.
+///
+/// A `static mut` for the same reason the measurement fixture's sample buffer
+/// is one: single core, non-reentrant, and no allocator exists. Every access
+/// goes through the two `extern "C"` entry points below, which are the only
+/// callers.
+static mut BOARD_STREAM: SpoorStream<BOARD_STREAM_CAPACITY> = SpoorStream::new();
+
+/// Stamps one rung from the AArch64 boot path (`STORY-P1-10-02`).
+///
+/// The `extern "C"` half of the seam: `hal-arm64` cannot import this crate —
+/// on AArch64 the dependency runs `kernel` → `hal-arm64` — so the boot rungs
+/// reach the journal through a symbol, exactly as `hal-arm64`'s boot already
+/// reaches `tinyos_arm64_fixture_measure`.
+///
+/// An unrecognised `rung` or `verdict` is **dropped, not guessed**. A stamped
+/// record that means nothing is worse than a missing one: the missing one
+/// shows up as a sequence gap the host can count, and the meaningless one is
+/// indistinguishable from truth.
+///
+/// # Safety
+///
+/// Single core, non-reentrant. The caller must not be inside a drain.
+#[no_mangle]
+pub extern "C" fn tinyos_spoor_stamp(rung: u16, verdict: u8, cost: u32) {
+    let Some(rung) = Rung::from_bits(rung) else {
+        return;
+    };
+    let Some(verdict) = Verdict::from_bits(verdict) else {
+        return;
+    };
+    // SAFETY: single core, non-reentrant, and the only other accessor is the
+    // drain below, which the caller contract forbids overlapping with.
+    let stream = unsafe { &mut *core::ptr::addr_of_mut!(BOARD_STREAM) };
+    stream.stamp(rung, verdict.outcome(), cost);
+}
+
+/// Drains the board's stream into `out`, returning the payload length, or `0`
+/// when there was nothing to send (`STORY-P1-10-02`).
+///
+/// Zero means "no frame" rather than "empty frame": an empty frame every park
+/// pass would be a stream of silence indistinguishable from a stream of
+/// nothing happening.
+///
+/// # Safety
+///
+/// `out` must be valid for `cap` bytes. Single core, non-reentrant.
+#[no_mangle]
+pub unsafe extern "C" fn tinyos_spoor_drain(out: *mut u8, cap: usize) -> usize {
+    if out.is_null() {
+        return 0;
+    }
+    // SAFETY: the caller's contract is that `out` is valid for `cap` bytes.
+    let buffer = unsafe { core::slice::from_raw_parts_mut(out, cap) };
+    // SAFETY: as in `tinyos_spoor_stamp`.
+    let stream = unsafe { &mut *core::ptr::addr_of_mut!(BOARD_STREAM) };
+    match stream.drain(buffer) {
+        Ok(Some(len)) => len,
+        // A refused drain leaves the journal intact, so the records are not
+        // lost — they go out on the next pass. Fail-safe over keep-trying.
+        Ok(None) | Err(_) => 0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,6 +485,44 @@ mod tests {
         assert_eq!(s.drain(&mut tiny), Err(SpoorWireError::BufferTooSmall));
         let mut out = [0u8; MAX_PAYLOAD];
         assert!(s.drain(&mut out).expect("encodes").is_some(), "nothing was lost to the refusal");
+    }
+
+    // ---- the seam's verdict vocabulary -----------------------------------
+
+    #[test]
+    fn every_verdict_round_trips_and_maps_to_an_outcome() {
+        for (verdict, outcome) in [
+            (Verdict::Ok, Outcome::Ok),
+            (Verdict::Failed, Outcome::Failed),
+            (Verdict::Skipped, Outcome::Skipped),
+        ] {
+            assert_eq!(Verdict::from_bits(verdict.to_bits()), Some(verdict));
+            assert_eq!(verdict.outcome(), outcome);
+        }
+    }
+
+    #[test]
+    fn an_unknown_verdict_is_refused_not_guessed() {
+        assert_eq!(Verdict::from_bits(3), None);
+        assert_eq!(Verdict::from_bits(u8::MAX), None);
+    }
+
+    /// Wire-visible through the mapped `Outcome`, so append-only.
+    #[test]
+    fn verdict_discriminants_are_append_only() {
+        assert_eq!(Verdict::Ok.to_bits(), 0);
+        assert_eq!(Verdict::Failed.to_bits(), 1);
+        assert_eq!(Verdict::Skipped.to_bits(), 2);
+    }
+
+    /// A garbage rung or verdict must produce **no record at all**. A stamped
+    /// record that means nothing is worse than a missing one: the missing one
+    /// is a countable sequence gap, the meaningless one reads as truth.
+    #[test]
+    fn the_seam_drops_what_it_cannot_decode_rather_than_stamping_a_guess() {
+        // Exercised through the same decode the `extern "C"` entry uses.
+        assert!(Rung::from_bits(999).is_none(), "an unknown rung decodes to nothing");
+        assert!(Verdict::from_bits(9).is_none(), "an unknown verdict decodes to nothing");
     }
 
     /// A refused rung must still be observable: the stream is how a reader

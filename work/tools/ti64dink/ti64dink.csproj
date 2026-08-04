@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Ti64Dink — the host application for the TinyOS board link (FEAT-P2-10).
+
+    Zero package dependencies on purpose, matching tos64-cardswap and
+    tos64-linkwatch. The decoder is pure byte arithmetic, so it builds and runs
+    offline and cannot be blocked by a NuGet restore on a bench with no
+    internet. Live capture (Npcap/SharpPcap) is a later, separable addition;
+    nothing in the decode path will need to change when it lands, because the
+    decoder already takes bytes and knows nothing about where they came from.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>ti64dink</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+</Project>
