@@ -268,6 +268,8 @@ pub fn check_dashboard(
     check_footnote_counts(&contents, facts)?;
     check_epic_denominator(&contents, facts)?;
     check_generated_region(&contents, facts)?;
+    check_block_placement(&contents)?;
+    check_no_empty_stat_row(&contents)?;
     check_spine_sentence(&contents, facts)?;
     let badges_checked = check_story_badges(&contents, statuses)?;
 
@@ -325,6 +327,70 @@ fn check_progress_region(contents: &str, facts: &DashboardFacts) -> Result<(), S
         &emit_overall_progress(facts),
         "Overall-progress tiles",
     )
+}
+
+/// The `<h2>` heading a marker sits beneath, if any (`LE-70`).
+///
+/// Scans backwards from the marker to the nearest preceding `<h2>`, which is
+/// the section the block renders under as far as a reader is concerned.
+fn enclosing_heading<'a>(contents: &'a str, marker: &str) -> Option<&'a str> {
+    let marker_at = contents.find(marker)?;
+    let heading_at = contents[..marker_at].rfind("<h2>")? + "<h2>".len();
+    let heading_end = contents[heading_at..].find("</h2>")? + heading_at;
+    Some(contents[heading_at..heading_end].trim())
+}
+
+/// Every generated block must render under the heading it belongs to (`LE-70`).
+///
+/// The byte-compare in [`check_marked_region`] verifies a block's *content*
+/// wherever it happens to sit. On 2026-08-03 the `overall-progress` block was
+/// moved into the *Assurance release status* section, stacking above the
+/// stat-row block and leaving *Overall progress* with an empty `stat-row` div.
+/// The four headline tiles were invisible for four days across sixteen commits
+/// and every gate passed on every one of them — the spine was run immediately
+/// before and immediately after the corrective move and could not tell the
+/// broken page from the fixed one. Content was never the problem; placement was.
+fn check_block_placement(contents: &str) -> Result<(), String> {
+    for (marker, expected, label) in [
+        (PROGRESS_BEGIN_MARKER, "Overall progress", "Overall-progress tiles"),
+        (BEGIN_MARKER, "Assurance release status", "stat tiles"),
+    ] {
+        let Some(heading) = enclosing_heading(contents, marker) else {
+            return Err(format!(
+                "goals/index.html: the generated {label} block sits under no `<h2>` section \
+                 at all (LE-70)"
+            ));
+        };
+        if !heading.starts_with(expected) {
+            return Err(format!(
+                "goals/index.html: the generated {label} block renders under `{heading}`, but \
+                 belongs under `{expected}`. A block byte-compares correctly wherever it sits, \
+                 so placement is checked separately (LE-70)"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// No `stat-row` container may be empty (`LE-70`).
+///
+/// The visible symptom of a relocated block is a heading with nothing under it.
+/// Checking for the hole as well as for the block's location means either half
+/// of the 2026-08-03 defect is caught on its own.
+fn check_no_empty_stat_row(contents: &str) -> Result<(), String> {
+    const OPEN: &str = "<div class=\"stat-row\">";
+    for (offset, _) in contents.match_indices(OPEN) {
+        let rest = contents[offset + OPEN.len()..].trim_start();
+        if rest.starts_with("</div>") {
+            return Err(
+                "goals/index.html carries an empty `stat-row` container — a section heading with \
+                 no tiles under it, which is how a relocated generated block looks to a reader \
+                 (LE-70)"
+                    .to_string(),
+            );
+        }
+    }
+    Ok(())
 }
 
 /// The tabstrip's two inline counts, gated rather than generated: one number
@@ -657,6 +723,86 @@ mod tests {
     }
 
     // --- the gated numerics that survived -08 (STORY-P0-01-09) ----------------
+
+    // --- LE-70: placement, not just content ---------------------------------
+
+    /// The page as it should be: each generated block under its own heading.
+    fn placed_page() -> String {
+        format!(
+            "<details><summary><h2>Overall progress</h2></summary>\n\
+             <div class=\"stat-row\">\n{}\n</div>\n</details>\n\
+             <details><summary><h2>Assurance release status <span class=\"badge\">DEBT</span>\
+             </h2></summary>\n<div class=\"stat-row\">\n{}\n</div>\n</details>",
+            emit_overall_progress(&facts()),
+            emit_stat_row(&facts())
+        )
+    }
+
+    /// The page as commit 3849ece actually left it: the `overall-progress`
+    /// block relocated into *Assurance release status*, stacked above the
+    /// stat-row block, with *Overall progress* left holding an empty div.
+    fn relocated_page() -> String {
+        format!(
+            "<details><summary><h2>Overall progress</h2></summary>\n\
+             <div class=\"stat-row\">\n</div>\n</details>\n\
+             <details><summary><h2>Assurance release status <span class=\"badge\">DEBT</span>\
+             </h2></summary>\n<div class=\"stat-row\">\n{}\n\n{}\n</div>\n</details>",
+            emit_overall_progress(&facts()),
+            emit_stat_row(&facts())
+        )
+    }
+
+    #[test]
+    fn a_correctly_placed_page_is_accepted() {
+        check_block_placement(&placed_page()).expect("each block sits under its own heading");
+        check_no_empty_stat_row(&placed_page()).expect("no container is empty");
+    }
+
+    /// Both blocks still byte-compare perfectly in the relocated page — which
+    /// is exactly why the content gate could not see the defect for four days.
+    #[test]
+    fn the_relocated_page_still_passes_every_content_check() {
+        let page = relocated_page();
+        check_generated_region(&page, &facts()).expect("stat tiles are byte-identical");
+        check_progress_region(&page, &facts()).expect("progress tiles are byte-identical");
+    }
+
+    #[test]
+    fn a_block_rendered_under_the_wrong_heading_is_refused() {
+        let error = check_block_placement(&relocated_page())
+            .expect_err("a relocated block must be refused");
+        assert!(error.contains("Assurance release status"), "names where it wrongly sits: {error}");
+        assert!(error.contains("Overall progress"), "names where it belongs: {error}");
+    }
+
+    #[test]
+    fn an_empty_stat_row_is_refused() {
+        let error =
+            check_no_empty_stat_row(&relocated_page()).expect_err("an empty container must fail");
+        assert!(error.contains("empty `stat-row`"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn a_block_under_no_section_at_all_is_refused() {
+        let orphaned = format!("<html>{}</html>", emit_overall_progress(&facts()));
+        let error =
+            check_block_placement(&orphaned).expect_err("an orphaned block must be refused");
+        assert!(error.contains("no `<h2>` section"), "unexpected error: {error}");
+    }
+
+    /// The committed page must satisfy the gate it ships with.
+    #[test]
+    fn the_committed_page_places_every_generated_block_correctly() {
+        let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .expect("xtask manifest lives at os/src/xtask")
+            .to_path_buf();
+        let contents = fs::read_to_string(repo_root.join("goals").join("index.html"))
+            .expect("the committed dashboard must be readable");
+        check_block_placement(&contents).expect("every block sits under its own heading");
+        check_no_empty_stat_row(&contents).expect("no container is empty");
+    }
 
     #[test]
     fn a_stale_tabstrip_epic_count_is_refused_and_the_fix_is_printed() {

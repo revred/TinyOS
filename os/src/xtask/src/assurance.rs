@@ -221,6 +221,9 @@ struct GuardrailEvidenceIndex {
 struct LooseEndIndex {
     ids: BTreeSet<String>,
     open_count: usize,
+    /// Every `raised_in`/`closed_in` as `(id, field name, raw value)`, for
+    /// [`validate_loose_end_citations`] to resolve against `session/` (`LE-51`).
+    citations: Vec<(String, &'static str, String)>,
 }
 
 impl LandingZoneIndex {
@@ -396,6 +399,7 @@ fn walk_spine(
         .map_err(|error| format!("failed to read {}: {error}", loose_end_path.display()))?;
     let loose_ends = validate_loose_ends(&loose_end_contents)?;
     validate_loose_end_references(repo_root, &loose_ends.ids)?;
+    validate_loose_end_citations(repo_root, &loose_ends.citations)?;
 
     // The no-heap gate runs before the evidence register reads it, so a
     // `PERF-Dnn-G11` row can never outlive the property it records.
@@ -1322,6 +1326,7 @@ fn validate_loose_ends(contents: &str) -> Result<LooseEndIndex, String> {
 
     let mut ids = BTreeSet::new();
     let mut open_count = 0;
+    let mut citations: Vec<(String, &'static str, String)> = Vec::new();
     for (zero_based_index, raw_line) in lines.enumerate() {
         let line_number = zero_based_index + 2;
         let fields =
@@ -1380,12 +1385,19 @@ fn validate_loose_ends(contents: &str) -> Result<LooseEndIndex, String> {
         if state == "open" {
             open_count += 1;
         }
+
+        // `LE-51`: collected here, resolved against `session/` by the caller —
+        // this function is pure so its own tests stay filesystem-free.
+        citations.push((id.to_string(), "raised_in", fields[6].to_string()));
+        if closed_in != LOOSE_END_UNSET {
+            citations.push((id.to_string(), "closed_in", closed_in.to_string()));
+        }
     }
 
     if ids.is_empty() {
         return Err("loose-ends register has no entries".to_string());
     }
-    Ok(LooseEndIndex { ids, open_count })
+    Ok(LooseEndIndex { ids, open_count, citations })
 }
 
 /// Validates the guardrail evidence register and returns the number of gates
@@ -1711,6 +1723,117 @@ fn validate_loose_end_references(
         }
     }
     Ok(reference_count)
+}
+
+/// A parsed loose-end citation: the dated session folder and the slot prefix
+/// within it (`LE-51`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Citation {
+    folder: String,
+    slot: String,
+}
+
+/// Parses a `raised_in`/`closed_in` field into the document it cites.
+///
+/// The citation is the first whitespace-delimited token; a few historical rows
+/// carry trailing prose (`hand-2026-07-30/05A session, owner feedback`) and
+/// that prose is deliberately preserved rather than rewritten — the citation
+/// still has to resolve, which is the whole point of `LE-51`.
+///
+/// The slot is the `NN`/`NN<Letter>` prefix, or a whole document stem when the
+/// short form would be ambiguous. Keeping the letter *in* the slot is what lets
+/// the check tell `41A` from `41B`; allowing the long form is what lets a row
+/// cite one of two documents that genuinely share a slot, which
+/// `hand-2026-07-30/03A` does. Renaming a committed handover to suit the gate
+/// would edit the historical record, so the citation gets more specific instead.
+fn parse_citation(field: &str) -> Result<Citation, String> {
+    let token = field.split_whitespace().next().unwrap_or("");
+    let Some((folder, slot)) = token.split_once('/') else {
+        return Err(format!("`{token}` is not a `hand-<date>/<slot>` citation"));
+    };
+    if !folder.starts_with("hand-") {
+        return Err(format!("`{token}` does not name a `hand-<date>` session folder"));
+    }
+    let slot = slot.trim_end_matches(',');
+    if slot.len() < 2 || !slot.as_bytes()[..2].iter().all(u8::is_ascii_digit) {
+        return Err(format!("`{token}` has no `NN` slot number"));
+    }
+    if !slot.as_bytes()[2..].iter().all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-') {
+        return Err(format!("`{token}`'s slot must be `NN`, `NN<Letter>` or a document stem"));
+    }
+    Ok(Citation { folder: folder.to_string(), slot: slot.to_string() })
+}
+
+/// Picks the one document in a session folder that a slot names.
+///
+/// Zero matches is a dangling citation — the register pointing at a handover
+/// nobody wrote. Two or more is the `LE-51` ambiguity itself. The prefix
+/// includes the separating `-` so slot `07` cannot swallow `07A-...`.
+fn resolve_slot(file_names: &[String], slot: &str) -> Result<String, String> {
+    let prefix = format!("{slot}-");
+    let matches: Vec<&String> = file_names
+        .iter()
+        .filter(|name| {
+            // A short slot matches by prefix; a full stem matches exactly.
+            let stem = name.rsplit_once('.').map_or(name.as_str(), |(stem, _)| stem);
+            name.starts_with(&prefix) || stem == slot
+        })
+        .collect();
+    match matches.as_slice() {
+        [] => Err(format!("no document in that folder begins with `{prefix}`")),
+        [only] => Ok((*only).clone()),
+        many => Err(format!(
+            "{} documents begin with `{prefix}` ({}); a citation must name exactly one",
+            many.len(),
+            many.iter().map(|name| name.as_str()).collect::<Vec<_>>().join(", ")
+        )),
+    }
+}
+
+/// Resolves every `raised_in` and `closed_in` against `session/` (`LE-51`).
+///
+/// Before this gate the register checked only that a closed row carried *some*
+/// `closed_in` string. It never asked whether the string named a document that
+/// exists, so a defect could be recorded as resolved by a handover nobody
+/// wrote, and two rows could cite one slot while meaning two different files.
+/// Returns the number of citations resolved.
+fn validate_loose_end_citations(
+    repo_root: &Path,
+    citations: &[(String, &'static str, String)],
+) -> Result<usize, String> {
+    let mut listings: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (id, field, value) in citations {
+        let citation = parse_citation(value)
+            .map_err(|reason| format!("loose-ends `{id}` {field}: {reason}"))?;
+
+        let folder = &citation.folder;
+        if !listings.contains_key(folder) {
+            let directory = repo_root.join("session").join(folder);
+            let mut names = Vec::new();
+            match fs::read_dir(&directory) {
+                Ok(entries) => {
+                    for entry in entries {
+                        let entry = entry.map_err(|error| {
+                            format!("failed to read {}: {error}", directory.display())
+                        })?;
+                        names.push(entry.file_name().to_string_lossy().into_owned());
+                    }
+                }
+                Err(_) => {
+                    return Err(format!(
+                        "loose-ends `{id}` {field}: `{folder}` is not a folder under session/"
+                    ));
+                }
+            }
+            names.sort();
+            listings.insert(folder.clone(), names);
+        }
+
+        let names = &listings[folder];
+        resolve_slot(names, &citation.slot)
+            .map_err(|reason| format!("loose-ends `{id}` {field} `{value}`: {reason}"))?;
+    }
+    Ok(citations.len())
 }
 
 /// Extracts every `LE-NN` token from one line.
@@ -3630,6 +3753,119 @@ mod tests {
         fixture.push_str("LE-01\tsummary\torigin\tpath\towned\tclosed\traised\tclosed-here\n");
         fixture.push_str("LE-02\tsummary\torigin\tpath\tunowned\topen\traised\t-\n");
         fixture
+    }
+
+    // ---- LE-51: citations must resolve to exactly one session document ----
+
+    #[test]
+    fn a_citation_names_a_dated_folder_and_a_slot() {
+        assert_eq!(
+            parse_citation("hand-2026-08-01/02B").expect("a plain citation parses"),
+            Citation { folder: "hand-2026-08-01".to_string(), slot: "02B".to_string() }
+        );
+        assert_eq!(
+            parse_citation("hand-2026-07-26/07").expect("a letterless slot parses"),
+            Citation { folder: "hand-2026-07-26".to_string(), slot: "07".to_string() }
+        );
+    }
+
+    /// Historical rows carry trailing prose. The prose is kept — rewriting
+    /// the register to suit its own gate would be the drift this project
+    /// keeps finding, not a fix for it.
+    #[test]
+    fn trailing_prose_after_the_citation_is_ignored_not_rejected() {
+        assert_eq!(
+            parse_citation("hand-2026-07-30/05A session, owner feedback")
+                .expect("trailing prose is tolerated"),
+            Citation { folder: "hand-2026-07-30".to_string(), slot: "05A".to_string() }
+        );
+    }
+
+    #[test]
+    fn a_field_that_names_no_document_is_rejected() {
+        assert!(parse_citation("hand-2026-08-01").is_err(), "a folder alone names no document");
+        assert!(parse_citation("REPORT-2026-08-04-01").is_err(), "not a session citation");
+        assert!(parse_citation("hand-2026-08-01/").is_err(), "an empty slot names nothing");
+        assert!(parse_citation("hand-2026-08-01/AB").is_err(), "a slot needs its number");
+        assert!(parse_citation("notes-2026-08-01/02A").is_err(), "not a hand- folder");
+    }
+
+    #[test]
+    fn a_slot_resolves_to_the_one_document_that_carries_it() {
+        let files = vec![
+            "02A-tinytile-architecture-document.md".to_string(),
+            "02B-pushed-and-ci-fixed-le-64.md".to_string(),
+            "index.html".to_string(),
+        ];
+        assert_eq!(
+            resolve_slot(&files, "02B").expect("exactly one match"),
+            "02B-pushed-and-ci-fixed-le-64.md"
+        );
+    }
+
+    /// The defect `LE-51` was raised for: `LE-47` and `LE-48` both cited
+    /// `hand-2026-07-28/41A` while meaning two different documents.
+    #[test]
+    fn two_documents_in_one_slot_are_the_ambiguity_this_gate_exists_for() {
+        let files = vec![
+            "41A-the-dashboard-as-a-register.md".to_string(),
+            "41A-something-else-entirely.md".to_string(),
+        ];
+        let error = resolve_slot(&files, "41A").expect_err("two matches must be refused");
+        assert!(error.contains("exactly one"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn a_citation_with_no_document_behind_it_is_dangling() {
+        let files = vec!["01A-only-this-one.md".to_string()];
+        let error = resolve_slot(&files, "02A").expect_err("a dangling citation must fail");
+        assert!(error.contains("no document"), "unexpected error: {error}");
+    }
+
+    /// `hand-2026-07-30/03A` really is two documents. Renaming a committed
+    /// handover to suit the gate would edit the historical record, so the
+    /// citation names the whole stem and resolves to exactly one.
+    #[test]
+    fn a_full_document_stem_disambiguates_a_shared_slot() {
+        let files = vec![
+            "03A-android-plan-and-the-spoor-gap.md".to_string(),
+            "03A-deep-os-textbook-code-review.md".to_string(),
+        ];
+        assert!(resolve_slot(&files, "03A").is_err(), "the short slot is genuinely ambiguous");
+        assert_eq!(
+            resolve_slot(&files, "03A-android-plan-and-the-spoor-gap")
+                .expect("the full stem names one document"),
+            "03A-android-plan-and-the-spoor-gap.md"
+        );
+        assert!(
+            parse_citation("hand-2026-07-30/03A-android-plan-and-the-spoor-gap").is_ok(),
+            "the long form must parse"
+        );
+    }
+
+    /// A letterless slot must not swallow its lettered siblings, or `07`
+    /// would silently resolve to `07A` and the citation would be wrong
+    /// while the gate stayed green.
+    #[test]
+    fn a_letterless_slot_does_not_match_a_lettered_document() {
+        let files = vec!["07A-lettered.md".to_string()];
+        assert!(resolve_slot(&files, "07").is_err(), "`07` must not match `07A-`");
+    }
+
+    /// The committed register must satisfy the gate it ships with.
+    #[test]
+    fn every_committed_citation_resolves_to_a_real_session_document() {
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .expect("xtask manifest lives at os/src/xtask")
+            .to_path_buf();
+        let contents =
+            fs::read_to_string(repo_root.join("goals").join("assurance").join("loose-ends.tsv"))
+                .expect("the committed register must be readable");
+        let index = validate_loose_ends(&contents).expect("committed register must be valid");
+        validate_loose_end_citations(&repo_root, &index.citations)
+            .expect("every committed citation must resolve");
     }
 
     #[test]
