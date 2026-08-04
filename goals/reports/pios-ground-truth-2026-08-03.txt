@@ -1223,3 +1223,24 @@ cross-check: all three windows match the captured dma-ranges exactly; window 2 i
 counterpart of board.rs RP1_DMA_RAM_BASE = 0x10_0000_0000. The beacon's descriptor/frame
 fetches ride window 2; TinyOS programs none of these — the convicted cause of
 STOPPED REASON=TIMEOUT, and STORY-P1-09-15's whole payload: twelve dwords, readback-believed.
+
+===== BOARD VERDICT 4 (TinyOS boxed boot 2026-08-04 ~02:07, kernel 7be16dee - STORY-P1-09-15 on board) =====
+canvas:  slow blue fill, then TinyOS title, then:
+         TOS64-LINK/1 RP1=PRESENT ID=0x0109 PHY=0x600D84A2 LINK=DOWN BEACON=SKIPPED
+         TOS64-BEAT/1 SEQ=35,36,37,38... STATE=BEACONING FB=REFUSED   (owner transcription, first minute)
+laptop:  linkwatch armed 02:07:58.962; baseline read the NIC ALREADY UP at 1000 Mbps - the wire
+         trained before the watch armed (third boot in a row to train) and held through observation.
+
+reading: criterion 5 of STORY-P1-09-15 GREEN in its success arm - the beat line walked
+  STOPPED REASON=TIMEOUT -> STATE=BEACONING on the first boot carrying the twelve inbound dwords.
+  The RC's inbound windows claimed the DMA path: the GEM fetched its descriptor ring and frame
+  at PCI 0x10_0000_0000 -> RAM 0, TSR completed, and the park loop beacons every period. The
+  boot-time LINK=DOWN/BEACON=SKIPPED on the report line is the expected snapshot (autonegotiation
+  takes seconds; the watch owns the transition, exactly as in verdicts 2 and 3). FB=REFUSED
+  unchanged (the firmware refuses the legacy mailbox path; the canvas is the display path).
+  The one recurring disease is dead: all three instances (outbound window -09, endpoint BARs -13,
+  inbound windows -15) of "state Linux programs and the firmware does not" are now written by
+  establish(), each believed only from readback.
+  FEAT-P1-09's exit is now exactly one packet capture away: pktmon remains access-denied from an
+  unelevated shell (retried tonight, same refusal as 08-03); the beacon-on-the-wire byte-compare
+  belongs to an elevated session or Ti64Dink's capture path (FEAT-P2-10, which this unblocks).

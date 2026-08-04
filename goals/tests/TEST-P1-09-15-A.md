@@ -1,6 +1,6 @@
 # TEST-P1-09-15-A — A Window Is Claimed at Both Ends, and Twelve Dwords Are Believed One Readback at a Time
 
-Status: **In progress — clauses 1–4 Green on the host 2026-08-04; clause 5 awaits the boxed boot**
+Status: **In progress — every clause Green 2026-08-04; clause 5 answered on silicon in its success arm (`STATE=BEACONING` on the beat line where every prior boot stopped or parked; the wire already trained at 1000 Mbps on linkwatch's baseline)**
 Story: [`STORY-P1-09-15`](../stories/STORY-P1-09-15.md)
 Tier: Host unit tests (size-encoding transcription, dword derivation, write order, readback belief, idempotence, confession wiring)
 **plus** a Tier 1 boxed-boot readback

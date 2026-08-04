@@ -1,6 +1,6 @@
 # STORY-P1-09-15 — The Unclaimed Fetch: the Root Complex's Inbound Windows Written from the Capture, Believed from Readback
 
-Status: **In progress — host half Green 2026-08-04; criterion 5 awaits the boxed boot whose beat line walks `STOPPED REASON=TIMEOUT` → `STATE=BEACONING`.**
+Status: **In progress — every criterion Green on silicon 2026-08-04 ~02:07, criterion 5 in its success arm: the first boot carrying the twelve dwords walked the beat line `STOPPED REASON=TIMEOUT` → `STATE=BEACONING`, and the laptop's linkwatch baseline read the wire already trained at gigabit — the transmit completes and the beacon runs every period. Not Verified.**
 Feature: [`FEAT-P1-09`](../features/FEAT-P1-09.md)
 Introduced in: [`session/hand-2026-08-04/01A-covernote-boot-first-the-inbound-window.md`](../../session/hand-2026-08-04/01A-covernote-boot-first-the-inbound-window.md) — the same-night inbound-window capture (2026-08-04 ~02:05)
 
@@ -83,7 +83,7 @@ sees zero writes — idempotent, same as the BARs and for the same reason.
 | 2 — readback belief | **Green** (host): write-once-readback-believe per dword; both refusal arms driven; nothing written past a refusal. |
 | 3 — seat + idempotence | **Green** (host): establish's write list pinned with the inbound pass after enumeration; a settled window sees zero writes. |
 | 4 — confession wiring | **Green** (host): codes 21/22 distinct and exhaustive; `ibw-held`/`ibw-remap` lines pinned; every prior line byte-identical. |
-| 5 — board | Awaits the boxed boot with the rebuilt kernel. |
+| 5 — board | **Green, success arm (2026-08-04 ~02:07).** The beat line read `STATE=BEACONING` where every prior boot read `STOPPED REASON=TIMEOUT` or `PARKED`; the report line's boot-time `LINK=DOWN BEACON=SKIPPED` is the expected snapshot; linkwatch's baseline read the NIC already up at 1000 Mbps. The beacon-on-the-wire byte-compare stays owed to an elevated capture or Ti64Dink (`FEAT-P2-10`) — `pktmon` is still access-denied unelevated. |
 
 ## Tests
 
