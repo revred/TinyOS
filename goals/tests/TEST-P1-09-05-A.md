@@ -1,6 +1,6 @@
 # TEST-P1-09-05-A — Four Timed Silences Become One Untimed Experiment
 
-Status: **In progress — host clauses Green 2026-08-03; clause 5 awaits the board listen/sweep session**
+Status: **In progress — host clauses Green 2026-08-03; clause 5 awaits the board listen/sweep session. Amended 2026-08-04 (`STORY-P1-09-14`): the pinned `state=parked` byte-shape gains its watch field (`watch=alive|dead|none`) and a refused transmit is spoken as `state=stopped reason=…` — the line's seq/fb shape and cadence are unchanged**
 Story: [`STORY-P1-09-05`](../stories/STORY-P1-09-05.md)
 Tier: Host unit tests (heartbeat bytes, placement, fail-safe stop) **plus** the board listen/sweep session the Story exists for
 Assurance contract: [`goals/assurance/story-contracts.tsv`](../assurance/story-contracts.tsv)

@@ -250,23 +250,53 @@ pub fn link_line(discovery: &Discovery, beacon: BeaconField) -> ([u8; LINK_LINE_
     (line.bytes, line.at)
 }
 
-/// Builds one `TOS64-BEAT/1` heartbeat line (`STORY-P1-09-05`): emitted every
-/// park period so a passive listener can find a powered board without any
-/// operator timing, and so a wrong UART clock becomes bytes at a findable
-/// baud instead of silence. `fb_granted` reports whether the splash's
-/// firmware framebuffer exchange succeeded — the field 06A's Question 1
-/// needs: it splits "firmware refused the mailbox path" from "wrong plug
-/// conditions" with no monitor involved. Pure; pinned by the tests.
+/// The park loop's verdict for one beat (`STORY-P1-09-14`): the three
+/// silences the first trained wire exposed, each named. `Beaconing` is the
+/// healthy hum; `parked` now carries its watch; a refused transmit is
+/// `Stopped` with its error, permanently — never re-labelled "parked".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParkState {
+    /// The beacon transmits every period.
+    Beaconing,
+    /// Parked with the link watch alive and polling.
+    WatchAlive,
+    /// Parked with the watch dead — the management port wedged; terminal,
+    /// like the watch itself (`STORY-P1-09-06`).
+    WatchDead,
+    /// Parked with nothing to watch (absent chain, unknown PHY, or a link
+    /// that was already up when discovery looked).
+    Unwatched,
+    /// A transmit refused and beaconing stopped permanently; the error is
+    /// spoken every period.
+    Stopped(TxError),
+}
+
+/// Builds one `TOS64-BEAT/1` heartbeat line (`STORY-P1-09-05`, extended by
+/// `STORY-P1-09-14`): emitted every park period so a passive listener can
+/// find a powered board without any operator timing, and so a wrong UART
+/// clock becomes bytes at a findable baud instead of silence. `fb_granted`
+/// reports whether the splash's firmware framebuffer exchange succeeded —
+/// the field 06A's Question 1 needs. Pure; pinned by the tests.
 pub fn heartbeat_line(
     seq: u32,
-    beaconing: bool,
+    park: ParkState,
     fb_granted: bool,
 ) -> ([u8; LINK_LINE_CAPACITY], usize) {
     let mut line = LineBuilder::new();
     line.push("TOS64-BEAT/1 seq=");
     line.push_dec(seq);
     line.push(" state=");
-    line.push(if beaconing { "beaconing" } else { "parked" });
+    match park {
+        ParkState::Beaconing => line.push("beaconing"),
+        ParkState::WatchAlive => line.push("parked watch=alive"),
+        ParkState::WatchDead => line.push("parked watch=dead"),
+        ParkState::Unwatched => line.push("parked watch=none"),
+        ParkState::Stopped(TxError::Timeout) => line.push("stopped reason=timeout"),
+        ParkState::Stopped(TxError::MacError(status)) => {
+            line.push("stopped reason=mac detail=0x");
+            line.push_hex(u64::from(status), 8);
+        }
+    }
     line.push(" fb=");
     line.push(if fb_granted { "granted" } else { "refused" });
     line.push("\n");
@@ -279,13 +309,36 @@ pub fn heartbeat_line(
 pub fn emit_heartbeat<M: Mmio>(
     uart: &crate::pl011::Pl011<M>,
     seq: u32,
-    beaconing: bool,
+    park: ParkState,
     fb_granted: bool,
 ) -> bool {
-    let (line, len) = heartbeat_line(seq, beaconing, fb_granted);
+    let (line, len) = heartbeat_line(seq, park, fb_granted);
     match core::str::from_utf8(&line[..len]) {
         Ok(text) => uart.write_str(text).is_ok(),
         Err(_) => false,
+    }
+}
+
+/// Derives one beat's park verdict from the loop's channels
+/// (`STORY-P1-09-14`) — pure, so the precedence is pinned on the host: a
+/// stopped transmit outranks everything but an active beacon (a beacon that
+/// stopped is `Stopped`, not `Beaconing`), then the watch speaks its state.
+pub const fn park_state(
+    beaconing: bool,
+    stopped: Option<TxError>,
+    watch_alive: bool,
+    watch_dead: bool,
+) -> ParkState {
+    if beaconing {
+        ParkState::Beaconing
+    } else if let Some(error) = stopped {
+        ParkState::Stopped(error)
+    } else if watch_dead {
+        ParkState::WatchDead
+    } else if watch_alive {
+        ParkState::WatchAlive
+    } else {
+        ParkState::Unwatched
     }
 }
 
@@ -747,20 +800,85 @@ mod tests {
     // TEST-P1-09-05-A clauses 1 and 3: the heartbeat is exact bytes and
     // stops fail-safe on a refused write.
 
+    fn beat_text(seq: u32, park: ParkState, fb: bool) -> String {
+        let (bytes, len) = heartbeat_line(seq, park, fb);
+        String::from_utf8(bytes[..len].to_vec()).unwrap()
+    }
+
+    // TEST-P1-09-14-A clause 1: every park state prints a distinct line.
+
+    #[test]
+    fn every_park_state_prints_a_distinct_pinned_line() {
+        assert_eq!(
+            beat_text(9, ParkState::WatchAlive, false),
+            "TOS64-BEAT/1 seq=9 state=parked watch=alive fb=refused\n"
+        );
+        assert_eq!(
+            beat_text(9, ParkState::WatchDead, false),
+            "TOS64-BEAT/1 seq=9 state=parked watch=dead fb=refused\n"
+        );
+        assert_eq!(
+            beat_text(9, ParkState::Unwatched, false),
+            "TOS64-BEAT/1 seq=9 state=parked watch=none fb=refused\n"
+        );
+        assert_eq!(
+            beat_text(9, ParkState::Stopped(TxError::Timeout), false),
+            "TOS64-BEAT/1 seq=9 state=stopped reason=timeout fb=refused\n"
+        );
+        assert_eq!(
+            beat_text(9, ParkState::Stopped(TxError::MacError(0x40)), false),
+            "TOS64-BEAT/1 seq=9 state=stopped reason=mac detail=0x00000040 fb=refused\n"
+        );
+        // No two verdicts share a line.
+        let all = [
+            ParkState::Beaconing,
+            ParkState::WatchAlive,
+            ParkState::WatchDead,
+            ParkState::Unwatched,
+            ParkState::Stopped(TxError::Timeout),
+            ParkState::Stopped(TxError::MacError(0x40)),
+        ];
+        let mut lines: Vec<String> = all.iter().map(|&p| beat_text(1, p, true)).collect();
+        lines.sort();
+        lines.dedup();
+        assert_eq!(lines.len(), all.len(), "every park state must speak differently");
+    }
+
+    // TEST-P1-09-14-A clauses 2 and 3: the derivation's precedence is pinned.
+
+    #[test]
+    fn the_park_verdict_precedence_is_pinned() {
+        assert_eq!(park_state(true, None, false, false), ParkState::Beaconing);
+        // A stopped transmit outranks the watch's remains.
+        assert_eq!(
+            park_state(false, Some(TxError::Timeout), false, false),
+            ParkState::Stopped(TxError::Timeout)
+        );
+        assert_eq!(
+            park_state(false, Some(TxError::MacError(7)), true, true),
+            ParkState::Stopped(TxError::MacError(7)),
+            "a spoken stop is never re-labelled by a later watch state"
+        );
+        // The wedge outranks alive (a dead watch cannot also be polling).
+        assert_eq!(park_state(false, None, false, true), ParkState::WatchDead);
+        assert_eq!(park_state(false, None, true, false), ParkState::WatchAlive);
+        assert_eq!(park_state(false, None, false, false), ParkState::Unwatched);
+    }
+
     #[test]
     fn the_heartbeat_line_is_exact_bytes_with_every_field_driven() {
-        let (bytes, len) = heartbeat_line(1, true, true);
+        let (bytes, len) = heartbeat_line(1, ParkState::Beaconing, true);
         assert_eq!(
             core::str::from_utf8(&bytes[..len]).unwrap(),
             "TOS64-BEAT/1 seq=1 state=beaconing fb=granted\n"
         );
-        let (bytes, len) = heartbeat_line(42, false, false);
+        let (bytes, len) = heartbeat_line(42, ParkState::Unwatched, false);
         assert_eq!(
             core::str::from_utf8(&bytes[..len]).unwrap(),
-            "TOS64-BEAT/1 seq=42 state=parked fb=refused\n"
+            "TOS64-BEAT/1 seq=42 state=parked watch=none fb=refused\n"
         );
-        let (a, len_a) = heartbeat_line(7, true, false);
-        let (b, len_b) = heartbeat_line(8, true, false);
+        let (a, len_a) = heartbeat_line(7, ParkState::Beaconing, false);
+        let (b, len_b) = heartbeat_line(8, ParkState::Beaconing, false);
         assert_eq!(len_a, len_b);
         let differing: Vec<usize> = (0..len_a).filter(|&i| a[i] != b[i]).collect();
         assert_eq!(differing.len(), 1, "the sequence digit is the only variance");
@@ -777,7 +895,7 @@ mod tests {
             }
             fn write_u32(&self, _offset: usize, _value: u32) {}
         }
-        assert!(emit_heartbeat(&Pl011::new(ReadyWire), 1, false, true));
+        assert!(emit_heartbeat(&Pl011::new(ReadyWire), 1, ParkState::Unwatched, true));
         /// A wedged transmit FIFO: the flag register always reads full, so
         /// `write_str` times out and the heartbeat must report stop.
         struct WedgedWire;
@@ -791,7 +909,7 @@ mod tests {
             }
             fn write_u32(&self, _offset: usize, _value: u32) {}
         }
-        assert!(!emit_heartbeat(&Pl011::new(WedgedWire), 2, true, false));
+        assert!(!emit_heartbeat(&Pl011::new(WedgedWire), 2, ParkState::Beaconing, false));
     }
 
     // TEST-P1-09-08-A clause 1: re-probe eligibility is total, refusal-only.
@@ -998,7 +1116,8 @@ mod tests {
             if watch_step(&mut watch, &port).is_some() {
                 beaconing = true;
             }
-            let (line, len) = heartbeat_line(seq, beaconing, false);
+            let park = park_state(beaconing, None, watch.is_some(), false);
+            let (line, len) = heartbeat_line(seq, park, false);
             states.push(String::from_utf8(line[..len].to_vec()).unwrap());
         }
         assert!(states[0].contains("state=parked"));
@@ -1216,6 +1335,13 @@ mod glue {
         );
 
         let mut beaconing = matches!(beacon, BeaconField::Running);
+        // `STORY-P1-09-14`: the park verdict's memory — a stopped transmit
+        // and a dead watch each stay spoken until a settled re-probe.
+        let mut stopped = match beacon {
+            BeaconField::Stopped(error) => Some(error),
+            _ => None,
+        };
+        let mut watch_dead = false;
         let mut speed_config = beacon_eligible(&discovery);
         // `STORY-P1-09-06`: a known PHY whose link was not up when discovery
         // looked stays watched from the park loop — the wire decides when.
@@ -1277,6 +1403,10 @@ mod glue {
                         speed_config = beacon_eligible(&discovery);
                         beaconing = speed_config.is_some();
                         watch = watch_from(&discovery);
+                        // A settled chain resets the park verdict with
+                        // every other channel (TEST-P1-09-14-A clause 3).
+                        stopped = None;
+                        watch_dead = false;
                         // The canvas report line follows the newest outcome
                         // (UX; the serial line's exactly-once is untouched).
                         let field =
@@ -1290,8 +1420,44 @@ mod glue {
                         );
                     }
                 }
+                // TEST-P1-09-06-A clause 1 / TEST-P1-09-14-A clause 2:
+                // while the link is down, one bounded poll per second — and
+                // the one call site that can tell a resolve from a wedge
+                // records which one emptied the watch.
+                if !beaconing && speed_config.is_none() && watch.is_some() {
+                    let port = MdioPort::enable(gem_window);
+                    match watch_step(&mut watch, &port) {
+                        Some(config) => {
+                            speed_config = Some(config);
+                            beaconing = true;
+                        }
+                        None => watch_dead = watch.is_none(),
+                    }
+                    let _device = port.finish();
+                }
+                if beaconing {
+                    match speed_config {
+                        Some((speed, full_duplex)) => {
+                            let ring_dma = stage_frame(frame_seq);
+                            if let Err(refused) =
+                                gem::transmit_once(&gem_window, ring_dma, speed, full_duplex)
+                            {
+                                // Fail-safe over keep-trying: one refusal
+                                // ends the beacon permanently — and is
+                                // spoken, never re-labelled "parked"
+                                // (TEST-P1-09-14-A clause 3).
+                                stopped = Some(refused);
+                                beaconing = false;
+                            } else {
+                                frame_seq = frame_seq.wrapping_add(1);
+                            }
+                        }
+                        None => beaconing = false,
+                    }
+                }
+                let park = park_state(beaconing, stopped, watch.is_some(), watch_dead);
                 // `STORY-P1-07-09`: the live status and any refusal, as text.
-                let (status, status_len) = heartbeat_line(beat_seq, beaconing, fb_granted);
+                let (status, status_len) = heartbeat_line(beat_seq, park, fb_granted);
                 crate::canvas::draw_line(
                     &mut console,
                     crate::canvas::STATUS_Y,
@@ -1312,35 +1478,7 @@ mod glue {
                         crate::canvas::TEXT,
                     ),
                 }
-                // TEST-P1-09-06-A clause 1: while the link is down, one
-                // bounded poll per second — the beacon starts on whatever
-                // tick the wire trains, with no bench-tuned constant.
-                if !beaconing && speed_config.is_none() && watch.is_some() {
-                    let port = MdioPort::enable(gem_window);
-                    if let Some(config) = watch_step(&mut watch, &port) {
-                        speed_config = Some(config);
-                        beaconing = true;
-                    }
-                    let _device = port.finish();
-                }
-                if beaconing {
-                    match speed_config {
-                        Some((speed, full_duplex)) => {
-                            let ring_dma = stage_frame(frame_seq);
-                            if gem::transmit_once(&gem_window, ring_dma, speed, full_duplex)
-                                .is_err()
-                            {
-                                // Fail-safe over keep-trying: one refusal
-                                // ends the beacon permanently.
-                                beaconing = false;
-                            } else {
-                                frame_seq = frame_seq.wrapping_add(1);
-                            }
-                        }
-                        None => beaconing = false,
-                    }
-                }
-                if heartbeating && !emit_heartbeat(uart, beat_seq, beaconing, fb_granted) {
+                if heartbeating && !emit_heartbeat(uart, beat_seq, park, fb_granted) {
                     heartbeating = false;
                 }
                 beat_seq = beat_seq.wrapping_add(1);
