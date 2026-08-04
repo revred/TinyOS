@@ -28,6 +28,27 @@ use hal_arm64::boot as _;
 // the symbol `hal_arm64::boot` calls under the same feature.
 use kernel::fixture_measure_arm64 as _;
 
+/// Forces `kernel`'s spoor seam into the link (`STORY-P1-10-02`).
+///
+/// `hal-arm64`'s boot rungs call `tinyos_spoor_stamp`/`tinyos_spoor_drain` by
+/// symbol, because on AArch64 the dependency runs `kernel` → `hal-arm64` and
+/// the call cannot be a direct one. But nothing else in this image references
+/// `kernel` unless `fixture-measure` is on, and an rlib nothing references is
+/// dropped from the link entirely — taking the `#[no_mangle]` definitions with
+/// it and leaving those two symbols undefined.
+///
+/// That is exactly how this image failed to link on the runner while building
+/// fine locally: every local build passed `--fixture=measure`, which pulls
+/// `kernel` in for its own reasons and masked the missing reference. The
+/// spoor stream is not a fixture, so the reference is unconditional.
+///
+/// `#[used]` rather than a plain `use`, because a mere import of a function
+/// item is not a reference the linker must honour.
+#[cfg(target_arch = "aarch64")]
+#[used]
+static SPOOR_SEAM: (extern "C" fn(u16, u8, u32), unsafe extern "C" fn(*mut u8, usize) -> usize) =
+    (kernel::spoor_stream::tinyos_spoor_stamp, kernel::spoor_stream::tinyos_spoor_drain);
+
 /// A panic in this image has no reporting channel of its own — the UART may
 /// be the very thing that failed — so the fail-safe terminal state is the
 /// same park the boot path ends in.
