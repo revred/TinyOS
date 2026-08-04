@@ -55,5 +55,6 @@ pub mod spoor_journal;
 
 pub mod spoor_stream;
 pub mod spoor_wire;
+pub mod udp_wire;
 #[cfg(target_arch = "x86_64")]
 pub mod wcet;

@@ -35,7 +35,7 @@ park rungs at all.
 | Story | What it does | Status |
 |---|---|---|
 | [`STORY-P1-10-01`](../stories/STORY-P1-10-01.md) | The on-wire format: raw packed `u64` records, MTU-filling frames, `u64` sequence for exact loss accounting, reusing the journal's own magic and record layout | In progress — host half Green 2026-08-04, 13 tests |
-| [`STORY-P1-10-02`](../stories/STORY-P1-10-02.md) | Boot and park stamping, and the park-loop drain that transmits frames | Specified — 2026-08-04 |
+| [`STORY-P1-10-02`](../stories/STORY-P1-10-02.md) | Boot and park stamping, and the park-loop drain that transmits frames | In progress — criteria 1, 2, 3 and 5 Green on silicon 2026-08-04 (`BOARD VERDICT 10`), criterion 4 evidenced negatively by `BOARD VERDICT 9`, criterion 6 (stated cost) not yet met |
 
 **Enumerated, deliberately not decomposed** (just-in-time rule): a C# `tos64-listen` host
 decoder growing into Ti64Dink (`FEAT-P2-10`), and the extension that wires the existing

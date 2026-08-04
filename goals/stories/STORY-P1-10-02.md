@@ -1,6 +1,6 @@
 # STORY-P1-10-02 — The Board Starts Leaving Spoors: Boot and Park Stamping, and the Drain
 
-Status: **Specified — 2026-08-04, written before implementation. Depends on [`STORY-P1-10-01`](STORY-P1-10-01.md)'s format, which is host-Green.**
+Status: **In progress — implemented and **proven on silicon 2026-08-04** (`BOARD VERDICT 10`). Criteria 1, 2, 3 and 5 Green: a power cycle captured inside a listening window produced `frame seq=0 count=8` carrying `MmuEnabled cost=183974`, `GicRouted`, `TickArmed cost=1`, then park and beacon rungs — 160 records, **0 refused, 0 lost**, sequence unbroken 0..160, read **unelevated** by Ti64Dink through Npcap. `MmuEnabled`'s cost agrees with the same boot's canvas (`ON=183971`) to three cycles, so the wire now carries what the screen carried. Criterion 4 (fail-safe drain) is evidenced negatively — the beacon survived with a second transmit per pass (`BOARD VERDICT 9`) — and criterion 6 (stated cost) is **not yet met**: the per-stamp and per-drain cost is unmeasured and recorded as such. Not Verified.**
 Feature: [`FEAT-P1-10`](../features/FEAT-P1-10.md)
 Architecture: [`docs/spoor-transport-architecture.md`](../../docs/spoor-transport-architecture.md) §2, §4
 Introduced in: `session/hand-2026-08-04/04A` session

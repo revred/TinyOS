@@ -1570,3 +1570,90 @@ verdicts:
   FEAT-P1-07's ordering rule is vindicated rather than merely obeyed: -02 before -03 existed so
   that an MMU would never be debugged on a board that cannot report a translation fault. This
   frame is what that rule was protecting, and it arrived first time.
+
+===== BOARD VERDICT 9 (TinyOS measure boot 2026-08-04, kernel8.img b44040659702 - first spoor-emitting image) =====
+canvas (owner photograph):
+  TOS64-LINK/1 RP1=PRESENT ID=0x0109 PHY=0x600D84A2 LINK=DOWN BEACON=SKIPPED
+  TOS64-BEAT/1 SEQ=32 STATE=BEACONING FB=REFUSED
+  TOS64-MMU/1  SCTLR=0000000030D01805 OFF=70786353 ON=183971
+  TOS64-CONF/1 CNTVCT=PASS SPAN=154 CNTFRQ=54000000 CPUS=54
+  TOS64-PMU/1  DELTA=24000212 RATE=2400MHZ SOURCE=PMCCNTR
+  TOS64-TICK/1 COUNT=3220 TVAL=540000 RMIN=999 RMAX=1000
+  fixture: ok span=5870, 8 metrics, all n=1000 dropped=0
+  ref 2876/2935/2993/3027/3027 | D07 round-trip 360/361/361/361/361
+  D07 denied_per_op_of_64 487/489/489/490/491 | D04 ctx 81/81/81/81/82
+  D05 select 1502/1503/1503/1503/1503 | D05 round 1618/1619/1619/1620/1620
+  D02 fault 117/117/117/117/117 | D07 per_op_of_8 467/467/467/467/467
+
+reading: NO REGRESSION from adding the spoor channel. STATE=BEACONING at SEQ=32 means the
+beacon survived 32 park passes with a second transmit added to each one - the spoor drain
+shares the single pinned buffer and the same transmit_once path, so a refusal would have
+stopped the whole channel fail-safe. It did not.
+
+BUILD-TO-BUILD VARIATION, recorded because it bears on every timing claim. Several metrics
+moved ~3% against VERDICT 7 on code paths this build does not touch (round trip 374 -> 361,
+dispatch_select 1532 -> 1503, per_op_of_8 480 -> 467). The spoor stamps happen before the
+fixture and the fixture still runs interrupts-masked, so the cause is almost certainly code
+layout - the binary changed, so alignment, branch prediction and I-cache behaviour moved with
+it. Consequence: ~3% build-to-build variation exists INDEPENDENT of any change to the measured
+path. A timing gate tighter than that will produce false failures, and no absolute figure here
+should be quoted to better than ~3%.
+
+===== BOARD VERDICT 10 (spoor stream captured off the wire 2026-08-04, kernel8.img b44040659702) =====
+THE FIRST KERNEL SPOORS EVER OBSERVED LEAVING A RUNNING TinyOS SYSTEM. LE-56's board half.
+
+capture: Ti64Dink (work/tools/ti64dink) --live 90, via Npcap on the Realtek GbE, UNELEVATED.
+232 TOS64 frames seen; 77 carried the SPOORJ01 magic.
+
+verbatim, the first frame of a fresh boot:
+  frame seq=0 count=8
+    [0] Boot   Kernel Create Ok  rung=MmuEnabled         cost=183974
+    [1] Boot   Kernel Create Ok  rung=GicRouted          cost=0
+    [2] Boot   Kernel Create Ok  rung=TickArmed          cost=1
+    [3] Boot   Kernel Select Ok  rung=ParkIteration      cost=1
+    [4] Boot   Kernel Select Ok  rung=ParkIteration      cost=2
+    [5] Boot   Kernel Select Ok  rung=ParkIteration      cost=3
+    [6] Boot   Kernel Create Ok  rung=BeaconTransmitted  cost=2
+    [7] Boot   Kernel Select Ok  rung=ParkIteration      cost=4
+  ...
+  summary: frames 77, records ok 160, refused 0, lost 0, span 0..160,
+           "continuous - no records lost across the captured window"
+
+reading:
+
+  THE SEQUENCE RESTARTED AT 0. Every prior capture sat near 25,000. A stream beginning at zero
+  is what proves these are boot-time records rather than a replay of steady state, and it is
+  why the power cycle had to happen inside the capture window rather than before it.
+
+  THE WIRE AND THE SCREEN AGREE. MmuEnabled carries cost=183974; VERDICT 9's canvas printed
+  ON=183971 on the same boot. Three cycles apart on a ~184,000-cycle probe - the difference is
+  run-to-run noise on the probe itself, not a discrepancy. The canvas has stopped being the
+  evidence channel: the same fact now arrives as a decoded record instead of a photograph a
+  human transcribes, which is the whole point of FEAT-P1-10.
+
+  TickArmed cost=1 is the CNTV_CTL_EL0 readback: bit0 ENABLE set, bit1 IMASK clear - exactly
+  the `ctl & 0b11 == 0b01` condition boot.rs requires before it unmasks IRQs. The register
+  value that gates the tick is now on the wire.
+
+  GicRouted Ok is the rung that read Failed with 0xF0 in its cost field two builds ago, before
+  LE-69. The stream records the cure as plainly as it recorded the defect.
+
+  THE RING WORKED AS A JITTER BUFFER, WHICH WAS NOT GUARANTEED. The boot rungs stamp within
+  ~200 ms; the drain cannot run until the link trains, which takes seconds. Those three records
+  were held in the journal across that entire gap and went out intact in the first frame after
+  the beacon started, together with the park passes that accumulated meanwhile - eight records
+  against a 181-record ring. FEAT-P1-10's named debt (ring sized for a crash dump, not measured
+  for a stream) did NOT bite here, and this capture is the measurement that says so for this
+  boot shape. It is not a general result: a slower link train or a faster stamp rate would
+  still overflow, and the overflow would be reported as a sequence gap rather than hidden.
+
+  ZERO REFUSED across 160 records. Every Category/Actor/Action/Outcome discriminant resolved
+  against the kernel's own tables, and every rung resolved against spoor_stream::Rung. The
+  vocabulary duplicated across the hal-arm64/kernel boundary agrees not only in the parity test
+  but on the wire.
+
+  ZERO LOST across 160 records, and across 238 records in a separate 120 s steady-state capture.
+  The drain keeps up with the stamps at this rate.
+
+  UNELEVATED. Npcap was installed once; Ti64Dink reads the stream through P/Invoke to wpcap.dll
+  with no admin shell, which is what makes this repeatable rather than ceremonial.

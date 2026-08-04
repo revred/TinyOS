@@ -38,16 +38,29 @@ pub const HEADER_LEN: usize = 24;
 
 /// Records per frame.
 ///
-/// Sized to fill a standard 1500-byte MTU (`24 + 184 * 8 = 1496`) rather than
-/// to a diagnostic trickle. A spoor is to a physical system what a token is to
-/// a language model — the uniform atom its whole observable behaviour is made
-/// of — so this stream is continuous and high-rate by nature, and the frame
-/// must not be what limits it. One transmit carries 184 events.
+/// Sized to fill a standard MTU rather than a diagnostic trickle. A spoor is
+/// to a physical system what a token is to a language model — the uniform atom
+/// its whole observable behaviour is made of — so this stream is continuous and
+/// high-rate by nature, and the frame must not be what limits it. One transmit
+/// carries 181 events.
 ///
-/// It is also the constant that keeps fragmentation impossible: a payload that
-/// cannot exceed the MTU is never handed to the MAC to split, and this protocol
-/// has no reassembly because it can never need any.
-pub const MAX_RECORDS: usize = 184;
+/// The exact number is set by the *larger* of the two framings this payload
+/// travels in, so one constant keeps both inside an MTU:
+///
+/// ```text
+///   raw 0x88B5 : 14 (Ethernet)                  + 24 + 181*8 = 1486
+///   IPv4/UDP   : 14 (Ethernet) + 20 (IP) + 8 (UDP) + 24 + 181*8 = 1514
+/// ```
+///
+/// 1514 is exactly a maximum Ethernet frame before the FCS. That is why this is
+/// 181 and not 184: the UDP wrapper (`crate::udp_wire`) exists so an ordinary
+/// unprivileged socket can read the same records, and a payload sized only for
+/// the raw framing would have forced *that* one to fragment.
+///
+/// It is also the constant that keeps fragmentation impossible in both: a
+/// payload that cannot exceed the MTU is never handed to the MAC to split, and
+/// neither protocol has reassembly because neither can ever need any.
+pub const MAX_RECORDS: usize = 181;
 
 /// The largest payload [`encode`] can produce.
 pub const MAX_PAYLOAD: usize = HEADER_LEN + MAX_RECORDS * 8;
