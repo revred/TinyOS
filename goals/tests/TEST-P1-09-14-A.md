@@ -1,6 +1,6 @@
 # TEST-P1-09-14-A — One Word Per State, and No State Left Mute
 
-Status: **In progress — host clauses Green 2026-08-04; clause 4 awaits the next boot**
+Status: **In progress — every clause Green 2026-08-04; clause 4 answered on silicon (`STATE=STOPPED REASON=TIMEOUT` with the wire trained — the watch cleared, the transmit convicted)**
 Story: [`STORY-P1-09-14`](../stories/STORY-P1-09-14.md)
 Tier: Host unit tests (line shapes, wedge/resolve distinction, stopped persistence)
 **plus** a Tier 1 boxed-boot transcription

@@ -1178,3 +1178,25 @@ on the report line is the boot-time snapshot (autonegotiation takes seconds; the
 measurement from the original ground truth); the park-loop watch owns the transition.
 Open observation at transcription time: whether the beat line flipped to STATE=BEACONING
 after 01:27:03 — the watch-resolution path's on-silicon proof rides on it.
+
+===== BOARD VERDICT 3 (TinyOS boxed boot 2026-08-04 ~01:41, kernel fb827f98 — STORY-P1-09-14 on board) =====
+canvas:  TOS64-LINK/1 RP1=PRESENT ID=0x0109 PHY=0x600D84A2 LINK=DOWN BEACON=SKIPPED
+         TOS64-BEAT/1 SEQ=19,20,21,22... STATE=STOPPED REASON=TIMEOUT FB=REFUSED
+laptop:  linkwatch 01:40:58.697 TRANSITION Down -> UP at 1000 Mbps (second boot in a row)
+
+reading: criterion 4 of -14 GREEN — the silence named its arm on the first boot. The named arm
+convicts and clears simultaneously:
+  CLEARED: the link watch (it resolved — Stopped is only reachable through a resolved watch and
+           a started beacon; STORY-P1-09-06's board criterion has its evidence), the MDIO
+           re-enable path, the BMSR/partner decode.
+  CONVICTED: the transmit path — transmit_once staged the frame, started TX, and TSR never
+           reported completion within TX_POLL_LIMIT (STORY-P1-09-03's board criterion, now
+           precisely scoped to a hung first transmit).
+prime suspect (same disease as the BARs, last remaining path): the beacon's DMA needs RP1 to
+master INBOUND reads through the root complex — descriptor ring + frame at PCI 0x10_0000_0000
+-> RAM 0 per tonight's captured dma-ranges. Linux programs the RC's inbound window (the
+RC_BAR2-config registers in pcie-brcmstb.c); TinyOS's establish() does not touch them, exactly
+as it did not touch the endpoint BARs. The GEM most likely never fetched its descriptor.
+next capture owed (Pi OS role): the RC inbound-window registers (PCIE_MISC_RC_BAR*_CONFIG_LO/HI
+family — offsets from pcie-brcmstb.c, fetch before asserting) live under working ethernet, vs
+the same registers under TinyOS; then the one-write story with readback belief, same as -13.

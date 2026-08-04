@@ -1,6 +1,6 @@
 # STORY-P1-09-14 — The Park Loop Speaks: Three Silences Named on the Night the Wire First Trained
 
-Status: **In progress — host half Green 2026-08-04 (the park verdict enum, the spoken beat line, the wedge distinguished from the resolve, the stopped transmit carried with its error); criterion 4 awaits the board. Not Verified.**
+Status: **In progress — every criterion Green on silicon 2026-08-04, criterion 4 answered first boot: the spoken verdict read `STATE=STOPPED REASON=TIMEOUT` — one word cleared the watch and the MDIO path (a `Stopped` is only reachable through a resolved watch) and convicted the transmit, whose DMA inbound path is the next story. Not Verified.**
 Feature: [`FEAT-P1-09`](../features/FEAT-P1-09.md)
 Introduced in: the 2026-08-04 first-link boot — `RP1=PRESENT`, the laptop's linkwatch logged
 the wire training to gigabit at 01:27:03, and the beat line said `STATE=PARKED` and nothing else
@@ -72,7 +72,7 @@ verdict fresh.
 | 1 — distinct lines | **Green** (host): all six shapes pinned byte-exact. |
 | 2 — wedge vs resolve | **Green** (host): the call-site distinction pinned; dead is terminal. |
 | 3 — stopped stays spoken | **Green** (host): the error persists across beats; reset only by a settled re-probe. |
-| 4 — board | **Awaits the next boxed boot.** |
+| 4 — board | **Green (2026-08-04 ~01:41).** The beat read `STATE=STOPPED REASON=TIMEOUT` while the laptop logged the wire training (01:40:58, second boot running) — the watch resolved, the beacon started, and the first transmit hung. One word replaced three conjectures: the watch and MDIO paths are cleared, the transmit's DMA inbound path is convicted, and the next story is chosen on it. |
 
 ## Tests
 
