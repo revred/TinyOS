@@ -133,7 +133,7 @@ pub unsafe fn run_once<const N: usize>(
 /// everything the incoming task's saved registers/stack — and the kernel
 /// code/IDT servicing it — need, or the install is an immediate,
 /// unrecoverable fault.
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(target_arch = "x86_64", not(target_os = "windows")))]
 pub unsafe fn run_once_in_space<const N: usize>(
     scheduler: &mut Scheduler<N>,
     dispatcher_ctx: *mut Context,

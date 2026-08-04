@@ -8,7 +8,22 @@ description = "TinyOS kernel: scheduler, IPC, memory pools, deadline monitor. Ph
 
 [dependencies]
 hal = { path = "../hal" }
+
+# The x86_64 backend is a dependency of the x86_64 build only
+# (`STORY-P1-07-06`): the AArch64 boot image links this crate's lib for the
+# shared harness, pools, scheduler and context switch, and an unconditional
+# `hal-x86_64` here was the one line that made the measurement seam
+# x86-shaped in practice while every trait claimed otherwise.
+[target.'cfg(target_arch = "x86_64")'.dependencies]
 hal-x86_64 = { path = "../hal-x86_64" }
+
+# The AArch64 backend, for `fixture_measure_arm64` (`STORY-P1-07-06`) — the
+# same relationship this crate has always had with `hal-x86_64`, on the
+# second architecture. (`hal-arm64`'s dev-dependency on this crate is
+# host-side only; Cargo permits the cycle because dev-dependencies do not
+# participate in the dependency graph of the library build.)
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+hal-arm64 = { path = "../hal-arm64" }
 
 [lib]
 name = "kernel"

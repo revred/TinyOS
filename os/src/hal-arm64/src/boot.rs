@@ -504,14 +504,33 @@ extern "C" fn continue_at_el1() -> ! {
         let _ = unsafe { core::ptr::read_volatile(0x20_0000_0000usize as *const u64) };
     }
 
+    let self_check = boot_self_check(current_el, requested, readback, sctlr_readback);
+
+    // `STORY-P1-07-06`: the measurement fixture, strictly after everything
+    // above (MMU on — the prerequisite of measurement — tick available,
+    // counters proven) and strictly before the splash and the park. The
+    // symbol is provided by `kernel::fixture_measure_arm64`, linked only by
+    // fixture images; it masks IRQs for its own duration, emits the
+    // `TOS64-MEAS/2` envelope on the UART, and records the transcript the
+    // park loop then paints and transmits.
+    #[cfg(feature = "fixture-measure")]
+    let (fixture_name, verdict) = {
+        unsafe extern "C" {
+            fn tinyos_arm64_fixture_measure() -> bool;
+        }
+        // SAFETY: fixture images link exactly one implementation of this
+        // symbol; it runs single-core with the vector table installed, which
+        // is its documented contract.
+        let measured = unsafe { tinyos_arm64_fixture_measure() };
+        ("measure", self_check && measured)
+    };
+    #[cfg(not(feature = "fixture-measure"))]
+    let (fixture_name, verdict) = (BOOT_FIXTURE_NAME, self_check);
+
     // `STORY-P1-07-05`: the verdict line the host run path's exit code is
     // driven by, emitted last so it vouches for every claim above it. This is
     // the line that turns a capture into a pass/fail rather than a transcript.
-    let _ = report_result(
-        &uart,
-        BOOT_FIXTURE_NAME,
-        boot_self_check(current_el, requested, readback, sctlr_readback),
-    );
+    let _ = report_result(&uart, fixture_name, verdict);
 
     // `STORY-P1-07-07`: the boot splash, strictly after the verdict — the
     // screen is UX, the serial line is evidence, and the order is the
@@ -540,6 +559,26 @@ extern "C" fn continue_at_el1() -> ! {
     };
     let tick_refused = tick_refusal.as_ref().map(|(line, len)| &line[..len.saturating_sub(1)]);
     crate::ethernet::announce_and_park(&uart, splash, &lines, tick_refused)
+}
+
+/// Masks IRQs at `PSTATE` — the measurement fixture's guard
+/// (`STORY-P1-07-06`): Tier 0 measures interrupt-free, and the board does
+/// the same or its samples silently include tick handlers.
+#[cfg(target_arch = "aarch64")]
+pub fn mask_interrupts() {
+    // SAFETY: writing `DAIFSet` only masks; it cannot fault and affects no
+    // state but this core's own interrupt acceptance.
+    unsafe { core::arch::asm!("msr daifset, #2", options(nomem, nostack, preserves_flags)) };
+}
+
+/// Unmasks IRQs at `PSTATE` — the counterpart of [`mask_interrupts`], called
+/// only where a vector table and a programmed GIC already exist.
+#[cfg(target_arch = "aarch64")]
+pub fn unmask_interrupts() {
+    // SAFETY: as in `mask_interrupts`; the caller's contract is that the
+    // vector table is installed, which `continue_at_el1` established before
+    // any call site of this function can run.
+    unsafe { core::arch::asm!("msr daifclr, #2", options(nomem, nostack, preserves_flags)) };
 }
 
 /// Parks the core in `wfe` forever.

@@ -1588,7 +1588,12 @@ mod tests {
             .join("tier0-x86_64.tsv");
         let text = std::fs::read_to_string(&path).expect("the committed baseline must exist");
         let baseline = parse_baseline(&text).expect("the committed baseline must parse");
-        assert_eq!(baseline.rows.len(), 7, "six measured metrics plus the reference");
+        assert_eq!(
+            baseline.rows.len(),
+            8,
+            "seven measured metrics plus the reference — the eighth row is the batched \
+             round-trip twin STORY-P1-07-06 added for LE-24"
+        );
         assert!(baseline.rows.iter().all(|row| row.profile == "release"));
         assert!(baseline.rows.iter().all(|row| row.tier == "T0"));
         let keys: BTreeSet<String> = baseline.rows.iter().map(BaselineRow::key).collect();

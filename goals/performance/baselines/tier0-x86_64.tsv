@@ -6,3 +6,4 @@ D04	context_switch_yield_roundtrip_2switches	T0	x86_64	release	rdtsc	3	221	245	5
 D05	dispatch_select_highest_priority_ready	T0	x86_64	release	rdtsc	3	98	123	221719	251020	2026-07-29
 D05	dispatch_run_once_cooperative_round	T0	x86_64	release	rdtsc	3	319	343	721719	700000	2026-07-29
 D02	fault_ud2_capture_terminate_kernel_context	T0	x86_64	release	rdtsc	3	539	588	1222222	1197556	2026-07-29
+D07	pool_u64x64_alloc_free_round_trip_per_op_of_8	T0	x86_64	release	rdtsc	3	33	35	87765	85784	2026-08-04

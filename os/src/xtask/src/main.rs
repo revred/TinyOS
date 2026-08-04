@@ -474,6 +474,10 @@ const SUBCOMMANDS: &[Subcommand] = &[
     Subcommand { name: "list-status", summary: "Emit Epic/Feature/Story state as TSV on stdout" },
     Subcommand { name: "measure", summary: "Run a measurable fixture and emit its envelope" },
     Subcommand {
+        name: "parse-meas",
+        summary: "Parse a board capture (packet export or transcription) as a TOS64-MEAS envelope",
+    },
+    Subcommand {
         name: "check-timing-regression",
         summary: "Gate measured cycles against the committed baselines",
     },
@@ -664,6 +668,76 @@ fn main() -> ExitCode {
                 Err(message) => {
                     eprintln!("xtask: {message}");
                     ExitCode::from(XtaskExit::HarnessError as u8)
+                }
+            }
+        }
+        // `STORY-P1-07-06`: parse a board capture — a `pktmon`/Wireshark
+        // text export of the transcript frames, or a hand transcription of
+        // the canvas — through the **unchanged** `timing::parse_stream`
+        // (`TEST-P1-07-06-A` clause 1). Only the capture container's framing
+        // is stripped here; the envelope grammar is the parser's alone.
+        "parse-meas" => {
+            let Some(path) = args.next() else {
+                eprintln!("xtask: parse-meas needs a capture file path");
+                return ExitCode::from(XtaskExit::HarnessError as u8);
+            };
+            let text = match std::fs::read_to_string(&path) {
+                Ok(text) => text,
+                Err(error) => {
+                    eprintln!("xtask: cannot read {path}: {error}");
+                    return ExitCode::from(XtaskExit::HarnessError as u8);
+                }
+            };
+            let extracted = pi5::extract_tos64_lines(&text);
+            match timing::parse_stream(&extracted) {
+                Ok(envelope) => {
+                    println!(
+                        "parse-meas: tier={} arch={} platform={} qualification={} \
+                         cycle_source={} overhead_cycles={} metrics={}",
+                        envelope.tier,
+                        envelope.arch,
+                        envelope.platform,
+                        envelope.qualification,
+                        envelope.cycle_source,
+                        envelope.overhead_cycles,
+                        envelope.metrics.len(),
+                    );
+                    for metric in &envelope.metrics {
+                        println!(
+                            "parse-meas: {}/{} n={} min={} p50={} p99={} p99_9={} max={}",
+                            metric.domain,
+                            metric.metric,
+                            metric.n,
+                            metric.min,
+                            metric.p50,
+                            metric.p99,
+                            metric.p99_9,
+                            metric.max,
+                        );
+                    }
+                    match timing::parse_result(&extracted) {
+                        Ok(result) => {
+                            println!(
+                                "parse-meas: verdict fixture={} ok={}",
+                                result.fixture, result.ok
+                            );
+                            if result.ok {
+                                ExitCode::from(XtaskExit::KernelBootSucceeded as u8)
+                            } else {
+                                ExitCode::from(XtaskExit::KernelBootFailed as u8)
+                            }
+                        }
+                        Err(error) => {
+                            // A capture without the verdict line is still a
+                            // parsed envelope — but it is not a pass.
+                            eprintln!("parse-meas: no usable verdict line: {error}");
+                            ExitCode::from(XtaskExit::KernelBootFailed as u8)
+                        }
+                    }
+                }
+                Err(error) => {
+                    eprintln!("xtask: capture did not parse: {error}");
+                    ExitCode::from(XtaskExit::KernelBootFailed as u8)
                 }
             }
         }

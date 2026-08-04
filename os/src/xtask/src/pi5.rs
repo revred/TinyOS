@@ -77,6 +77,15 @@ pub const PI5_FIXTURES: &[Pi5Fixture] = &[
                   before/after cache evidence, verdict on the UART and the canvas",
     },
     Pi5Fixture {
+        name: "measure",
+        feature: Some("fixture-measure"),
+        owning_test: "TEST-P1-07-06-A",
+        summary: "fixture_measure on silicon: the TOS64-MEAS/2 envelope through the shared \
+                  harness and the unchanged parser — on the UART, painted on the canvas, and \
+                  cycling line-by-line as TOS64 Ethernet frames for the host packet capture; \
+                  the run LE-09 closes on",
+    },
+    Pi5Fixture {
         name: "mmu-fault",
         feature: Some("fixture-mmu-fault"),
         owning_test: "TEST-P1-07-03-A",
@@ -89,6 +98,27 @@ pub const PI5_FIXTURES: &[Pi5Fixture] = &[
 /// Resolves a `--fixture=` value against [`PI5_FIXTURES`].
 pub fn pi5_fixture(name: &str) -> Option<&'static Pi5Fixture> {
     PI5_FIXTURES.iter().find(|fixture| fixture.name == name)
+}
+
+/// Extracts every `TOS64-*` line from a capture that may wrap them in
+/// foreign framing — a `pktmon` text dump's packet prefixes, a transcription
+/// with margin notes — by taking each line from its first `TOS64-` onward.
+///
+/// Capture plumbing, deliberately **not** parsing: `timing::parse_stream`
+/// stays byte-for-byte unchanged (`TEST-P1-07-06-A` clause 1 — a parser
+/// change would mean the seam was x86-shaped all along), and this function
+/// only undoes what the capture *container* wrapped around the lines the
+/// board emitted.
+#[must_use]
+pub fn extract_tos64_lines(capture: &str) -> String {
+    let mut extracted = String::new();
+    for line in capture.lines() {
+        if let Some(position) = line.find("TOS64-") {
+            extracted.push_str(&line[position..]);
+            extracted.push('\n');
+        }
+    }
+    extracted
 }
 
 /// A flat, placeable image: the bytes `kernel8.img` will hold, plus what the
@@ -707,6 +737,29 @@ mod tests {
         let fixture = pi5_fixture("boot").expect("the boot fixture must be registered");
         assert_eq!(fixture.owning_test, "TEST-P1-07-01-A");
         assert!(!fixture.summary.is_empty());
+    }
+
+    #[test]
+    fn the_measure_fixture_is_registered_and_selects_the_feature() {
+        let fixture = pi5_fixture("measure").expect("the measure fixture must be registered");
+        assert_eq!(fixture.owning_test, "TEST-P1-07-06-A");
+        assert_eq!(fixture.feature, Some("fixture-measure"));
+    }
+
+    #[test]
+    fn tos64_lines_are_extracted_from_foreign_capture_framing() {
+        let capture = "\
+packet 17 [148 bytes] payload: TOS64-MEAS/2 BEGIN tier=T1 arch=aarch64\n\
+noise with no sentinel at all\n\
+TOS64-MEAS/2 END metrics=8\n\
+  transcribed:   TOS64-RESULT/1 fixture=measure ok=true\n";
+        let extracted = extract_tos64_lines(capture);
+        assert_eq!(
+            extracted,
+            "TOS64-MEAS/2 BEGIN tier=T1 arch=aarch64\n\
+             TOS64-MEAS/2 END metrics=8\n\
+             TOS64-RESULT/1 fixture=measure ok=true\n"
+        );
     }
 
     #[test]

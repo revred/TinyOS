@@ -80,6 +80,54 @@ It also carries the measurement change the coarse-counter problem forces, which 
 - **`LE-23` and `LE-18` are unaffected.** Both are about which *host* recorded the Tier 0 baseline; a hardware tier neither fixes nor worsens them.
 - **No release-gate closure.** `PERF-*` guardrails close in a declared deployment profile, and this is a bring-up.
 
+### Amended 2026-08-04, at implementation — the decisions this session owed and the facts the 2026-07-28 text could not know
+
+Recorded rather than silently absorbed:
+
+1. **The `ADR 0005` sentence: criterion 4 absorbs it.** The Story's named-debt section
+   deferred one decision to the session that started the Story — whether "these numbers
+   establish the tier, not a bound" becomes part of criterion 4's Report or a seventh Story
+   for the qualification record. Decided: **criterion 4 absorbs the sentence.** The Report's
+   "what the numbers are *not*" list gains *no worst-case bound, WCET claim or jitter
+   envelope — `ADR 0005`, no secure-world qualification record exists for this platform*;
+   the qualification record itself stays with `LE-33`'s open second condition and is not a
+   Story here (`FEAT-P1-07` §6: a seventh Story means re-decomposing).
+2. **Where the batching landed.** The "Implementation location" above says `os/src/hal/`;
+   the shared harness actually lives in `kernel::measure`, and the batched shape landed as
+   phase-level arithmetic in `kernel::measure_phases` — the module both architectures'
+   fixtures now drive verbatim (the x86_64 binary and `kernel::fixture_measure_arm64`),
+   which is a *stronger* form of the arch-neutrality claim than relocating the harness
+   would have been. Clause 2's batch policy, per metric: the denial metric keeps its
+   recorded 64; the round-trip twin uses **8** (large enough that the calibrated
+   subtraction stops being the whole answer, small enough to stay near the batch-of-1
+   regime the recorded 607-vs-58 superlinearity finding indicts at 64); every other metric
+   is unbatched with `PMCCNTR_EL0` as the source, and the envelope's metric *names* carry
+   the batch (`_per_op_of_N`), so the parser needed no new key.
+3. **Clause 3's host half is measured**: on this Windows dev host — the exact host whose
+   median-0 is `LE-24`'s subject — the batched twin medians **35 cycles/op (release,
+   3 runs, min 33)** and is *gated*, with the eighth baseline row added on 2026-08-04 and
+   none of the seven existing rows re-recorded (clause 6 checked: the timing gate reports
+   no regression across 14 gated statistics). The board half lands with the capture.
+4. **The evidence channel.** Serial has never produced a byte on this bench (`LE-47`), so
+   the envelope leaves the board three ways at once: the PL011 (if it ever decodes), the
+   canvas (the whole transcript at 1× scale, transcribable), and — the owner's standing
+   "diagnosis moves onto the cable" — as `TOS64-*` Ethernet frames, one envelope line per
+   beat, cycling, behind the same EtherType as the proven beacon.
+   `cargo run -p xtask -- parse-meas <capture>` strips the capture container's framing and
+   feeds the lines to the **unchanged** `timing::parse_stream` (clause 1: the parser is
+   byte-for-byte untouched; only capture plumbing was added around it).
+5. **The D02 metric's board name.** `fault_brk_capture_escape_kernel_context`: the victim
+   raises `BRK` (the `ud2` sibling), the span runs fault-to-escape-decided through
+   `STORY-P1-07-02`'s real vector table, and the name differs from x86_64's
+   `capture_terminate` because `kernel::fault`'s disposition/audit half is x86_64-gated —
+   stating in the metric name that a different span was timed, rather than borrowing a
+   name the mechanism does not earn (clause 7's discipline).
+
+### The board captures (to be quoted verbatim when the Tier 1 run happens)
+
+Pending. The parsed envelope (`parse-meas` output), the packet-capture lines it came from,
+and the canvas transcript land here, via the ground-truth file first.
+
 ## Test type
 
 Host unit tests (`#[cfg(test)]` in `os/src/hal/src/`, `os/src/xtask/src/`) plus a Tier 1 hardware measurement run.

@@ -1233,14 +1233,16 @@ mod glue {
 
     /// The beacon buffer and transmit ring, 64-byte aligned so descriptors
     /// never straddle what the MAC fetches. One static grant, per `LE-67`.
+    /// The frame buffer is sized for the larger transcript text frame
+    /// (`STORY-P1-07-06`); the beacon uses its prefix.
     #[repr(C, align(64))]
     struct BeaconMemory {
         ring: [[u32; 4]; 2],
-        frame: [u8; gem::BEACON_CAPACITY],
+        frame: [u8; gem::TEXT_FRAME_CAPACITY],
     }
 
     static mut BEACON_MEMORY: BeaconMemory =
-        BeaconMemory { ring: [[0; 4]; 2], frame: [0; gem::BEACON_CAPACITY] };
+        BeaconMemory { ring: [[0; 4]; 2], frame: [0; gem::TEXT_FRAME_CAPACITY] };
 
     /// Bound on the ticks-elapsed busy wait, so a stuck counter converts to
     /// a stop instead of a silent hang (`SEC-20` — no unbounded wait, even
@@ -1298,12 +1300,28 @@ mod glue {
     /// so no invalidate is owed on the return path.
     fn stage_frame(seq: u32) -> u64 {
         let (frame, len) = gem::beacon_frame(seq);
-        // SAFETY: single core, interrupts masked since `drop_to_el1`, and
-        // this function is the only writer of `BEACON_MEMORY`; the raw
-        // pointer avoids taking a reference to a mutable static.
+        stage_bytes(&frame, len)
+    }
+
+    /// Stages one transcript line as a text frame (`STORY-P1-07-06`).
+    #[cfg(feature = "fixture-measure")]
+    fn stage_text_line(line: &[u8]) -> u64 {
+        let (frame, len) = gem::text_frame(line);
+        stage_bytes(&frame, len)
+    }
+
+    /// Writes the frame bytes and the ring into the pinned memory, cleans
+    /// the lines to the point of coherency, and returns the ring's DMA
+    /// address — the one staging path both the beacon and the transcript
+    /// frames go through.
+    fn stage_bytes(frame: &[u8], len: usize) -> u64 {
+        // SAFETY: single core, and this function is the only writer of
+        // `BEACON_MEMORY`; the raw pointer avoids taking a reference to a
+        // mutable static, and `frame.len()` is at most `TEXT_FRAME_CAPACITY`
+        // by both callers' construction.
         unsafe {
             let memory = core::ptr::addr_of_mut!(BEACON_MEMORY);
-            (*memory).frame = frame;
+            (&mut (*memory).frame)[..frame.len()].copy_from_slice(frame);
             let frame_dma = board::RP1_DMA_RAM_BASE + core::ptr::addr_of!((*memory).frame) as u64;
             (*memory).ring = gem::tx_ring(frame_dma, len);
             crate::mmu::clean_dcache_range(memory as usize, core::mem::size_of::<BeaconMemory>());
@@ -1406,6 +1424,26 @@ mod glue {
                 refused,
                 crate::canvas::ALERT,
             );
+        }
+        // `STORY-P1-07-06`: the whole measurement transcript, painted once
+        // at 1× scale — complete before this loop starts, and the reason the
+        // canvas is a court record rather than a status display.
+        #[cfg(feature = "fixture-measure")]
+        {
+            let mut line = [0u8; crate::gem::TEXT_FRAME_CAPACITY];
+            for nth in 0..crate::transcript::line_count() {
+                if let Some(len) = crate::transcript::copy_line(nth, &mut line) {
+                    crate::canvas::draw_text(
+                        &mut console,
+                        crate::canvas::MARGIN_X,
+                        crate::canvas::TRANSCRIPT_Y + nth as u32 * crate::canvas::TRANSCRIPT_STEP_Y,
+                        crate::canvas::TRANSCRIPT_SCALE,
+                        &line[..len],
+                        crate::canvas::TEXT,
+                        crate::hdmi::BACKGROUND,
+                    );
+                }
+            }
         }
 
         let mut beaconing = matches!(beacon, BeaconField::Running);
@@ -1527,6 +1565,31 @@ mod glue {
                             }
                         }
                         None => beaconing = false,
+                    }
+                }
+                // `STORY-P1-07-06`: one transcript line per beat rides the
+                // wire behind the beacon, cycling, so a capture of any
+                // dozen-odd seconds holds the whole envelope — the owner's
+                // "diagnosis moves onto the cable" applied to the first
+                // hardware measurement. Same fail-safe as the beacon: one
+                // refusal ends the channel and is spoken.
+                #[cfg(feature = "fixture-measure")]
+                if beaconing {
+                    if let Some((speed, full_duplex)) = speed_config {
+                        let count = crate::transcript::line_count();
+                        if count > 0 {
+                            let mut line = [0u8; crate::gem::TEXT_FRAME_CAPACITY];
+                            let nth = beat_seq as usize % count;
+                            if let Some(len) = crate::transcript::copy_line(nth, &mut line) {
+                                let ring_dma = stage_text_line(&line[..len]);
+                                if let Err(refused) =
+                                    gem::transmit_once(&gem_window, ring_dma, speed, full_duplex)
+                                {
+                                    stopped = Some(refused);
+                                    beaconing = false;
+                                }
+                            }
+                        }
                     }
                 }
                 // `STORY-P1-07-04` clause 1: the ratio evidence accumulates

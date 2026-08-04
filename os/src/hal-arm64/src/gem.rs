@@ -398,6 +398,28 @@ pub const BEACON_CAPACITY: usize = 64;
 /// Minimum Ethernet frame length without FCS (the MAC appends the FCS).
 pub const MINIMUM_FRAME_LEN: usize = 60;
 
+/// Capacity of a transcript text frame (`STORY-P1-07-06`): the 14-byte
+/// header plus one `TOS64-MEAS/2` envelope line. Larger than
+/// [`BEACON_CAPACITY`] because a `METRIC` line is ~130 bytes.
+pub const TEXT_FRAME_CAPACITY: usize = 192;
+
+/// Builds a broadcast frame whose payload is `text` (truncated to fit) —
+/// same destination, source and EtherType as the beacon, so the same
+/// `pktmon`/Wireshark filter captures both. The transcript-on-the-wire
+/// carrier (`STORY-P1-07-06`): each envelope line rides as one frame.
+pub fn text_frame(text: &[u8]) -> ([u8; TEXT_FRAME_CAPACITY], usize) {
+    let mut frame = [0u8; TEXT_FRAME_CAPACITY];
+    frame[0..6].copy_from_slice(&[0xFF; 6]);
+    frame[6..12].copy_from_slice(&BEACON_SOURCE_MAC);
+    frame[12] = (BEACON_ETHERTYPE >> 8) as u8;
+    frame[13] = BEACON_ETHERTYPE as u8;
+    let take = text.len().min(TEXT_FRAME_CAPACITY - 14);
+    frame[14..14 + take].copy_from_slice(&text[..take]);
+    let at = 14 + take;
+    let len = if at < MINIMUM_FRAME_LEN { MINIMUM_FRAME_LEN } else { at };
+    (frame, len)
+}
+
 /// Builds the board-present beacon frame: broadcast destination,
 /// [`BEACON_SOURCE_MAC`], [`BEACON_ETHERTYPE`], and a single
 /// `TOS64-PRESENT/1` envelope line, zero-padded to the Ethernet minimum.
@@ -806,6 +828,23 @@ mod tests {
         assert_eq!(differing.len(), 1, "exactly the sequence digit differs");
         assert_eq!(a[differing[0]], b'0');
         assert_eq!(b[differing[0]], b'9');
+    }
+
+    #[test]
+    fn a_text_frame_carries_its_line_behind_the_same_header_as_the_beacon() {
+        let (frame, len) = text_frame(b"TOS64-MEAS/2 END metrics=8");
+        assert_eq!(&frame[0..6], &[0xFF; 6], "broadcast destination");
+        assert_eq!(&frame[6..12], &BEACON_SOURCE_MAC);
+        assert_eq!(frame[12], 0x88);
+        assert_eq!(frame[13], 0xB5);
+        assert_eq!(&frame[14..40], b"TOS64-MEAS/2 END metrics=8" as &[u8]);
+        assert_eq!(len, MINIMUM_FRAME_LEN, "short payloads pad to the Ethernet minimum");
+        assert!(frame[40..MINIMUM_FRAME_LEN].iter().all(|&b| b == 0), "zero padding");
+        // A long line truncates to the capacity, never wraps or overruns.
+        let long = [b'M'; TEXT_FRAME_CAPACITY * 2];
+        let (frame, len) = text_frame(&long);
+        assert_eq!(len, TEXT_FRAME_CAPACITY);
+        assert!(frame[14..].iter().all(|&b| b == b'M'));
     }
 
     #[test]

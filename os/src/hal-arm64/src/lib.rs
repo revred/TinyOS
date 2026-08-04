@@ -42,4 +42,5 @@ pub mod rp1_gpio;
 pub mod stat_led;
 pub mod tick;
 pub mod timer;
+pub mod transcript;
 pub mod vectors;

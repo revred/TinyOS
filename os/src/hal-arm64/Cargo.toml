@@ -12,6 +12,11 @@ description = "AArch64 HAL backend: boot path, PL011, vectors, flat identity MMU
 # STORY-P1-07-02 handler with a decoded ESR and a matching FAR. A fixture,
 # never a default.
 fixture-mmu-fault = []
+# STORY-P1-07-06: the boot calls the measurement fixture the image linked
+# (`tinyos_arm64_fixture_measure`), the fault path honours the fixture's
+# escape hook, and the park loop carries the recorded envelope on the canvas
+# and the wire. A fixture, never a default.
+fixture-measure = []
 
 [dependencies]
 hal = { path = "../hal" }

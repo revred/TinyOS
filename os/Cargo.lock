@@ -35,6 +35,7 @@ name = "kernel"
 version = "0.1.0"
 dependencies = [
  "hal",
+ "hal-arm64",
  "hal-x86_64",
 ]
 
@@ -57,6 +58,7 @@ name = "pi5-image"
 version = "0.1.0"
 dependencies = [
  "hal-arm64",
+ "kernel",
 ]
 
 [[package]]

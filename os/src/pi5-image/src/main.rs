@@ -22,6 +22,12 @@
 // exec's Tier 0 fixtures link `hal_x86_64::boot`.
 use hal_arm64::boot as _;
 
+#[cfg(all(target_arch = "aarch64", feature = "fixture-measure"))]
+#[allow(unused_imports)]
+// Linked for `tinyos_arm64_fixture_measure`'s `#[no_mangle]` side effect —
+// the symbol `hal_arm64::boot` calls under the same feature.
+use kernel::fixture_measure_arm64 as _;
+
 /// A panic in this image has no reporting channel of its own — the UART may
 /// be the very thing that failed — so the fail-safe terminal state is the
 /// same park the boot path ends in.

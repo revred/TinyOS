@@ -170,6 +170,14 @@ pub const PMU_Y: u32 = 296;
 /// The live `TOS64-TICK/1` line (`STORY-P1-07-04` clause 1) — repainted
 /// every second, the ratio evidence accumulating on screen.
 pub const TICK_Y: u32 = 336;
+/// First row of the measurement transcript (`STORY-P1-07-06`) — the
+/// `TOS64-MEAS/2` envelope at 1× scale (a `METRIC` line is ~130 columns,
+/// which the 2× body scale cannot fit), one line per [`TRANSCRIPT_STEP_Y`].
+pub const TRANSCRIPT_Y: u32 = 400;
+/// Vertical step between transcript lines.
+pub const TRANSCRIPT_STEP_Y: u32 = 12;
+/// Scale of transcript text: 1× (8-pixel glyphs, 232 columns at the margin).
+pub const TRANSCRIPT_SCALE: u32 = 1;
 
 /// The once-rendered boot evidence lines the park loop paints beneath the
 /// live rows — carried as bytes (line endings already stripped) so the park
@@ -327,6 +335,14 @@ mod tests {
             // The title never collides with the report line.
             assert!(TITLE_Y + GLYPH_SIZE * TITLE_SCALE <= REPORT_Y);
             assert!(TICK_Y + GLYPH_SIZE * BODY_SCALE < board::SIMPLEFB_HEIGHT);
+            assert!(TICK_Y + GLYPH_SIZE * BODY_SCALE <= TRANSCRIPT_Y);
+            // Every transcript row fits the canvas, at full occupancy.
+            assert!(
+                TRANSCRIPT_Y
+                    + crate::transcript::MAX_LINES as u32 * TRANSCRIPT_STEP_Y
+                    + GLYPH_SIZE * TRANSCRIPT_SCALE
+                    < board::SIMPLEFB_HEIGHT
+            );
             // 120 body columns fit the canvas width at the margin.
             assert!(MARGIN_X + 120 * GLYPH_SIZE * BODY_SCALE <= board::SIMPLEFB_WIDTH + MARGIN_X);
         }

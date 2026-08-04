@@ -1,6 +1,6 @@
 # STORY-P1-07-06 — `fixture_measure` on Silicon: Batched Iteration and the First Hardware Report
 
-Status: **Specified — not started; the Story that closes `LE-09`, and it needs `TEST-P1-07-06-A` Red first**
+Status: **In progress — host-testable half Green 2026-08-04 (the shared phases extracted to `kernel::measure_phases` and run identically by both architectures; the batched round-trip twin measured non-zero and gated on this Windows host, the `LE-24` shape working; `xtask parse-meas` feeds a board capture to the unchanged parser; the Tier 0 gate green across 14 statistics with the eighth baseline row added, none re-recorded); acceptance criteria 1, 2, 3, 4 and 6 blocked on a board capture and its Report. The envelope leaves the board on the UART, the canvas, and as `TOS64-*` Ethernet frames the host packet capture reads. Not Verified.**
 Feature: [`FEAT-P1-07`](../features/FEAT-P1-07.md)
 Introduced in: [`session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md`](../../session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md) §5
 

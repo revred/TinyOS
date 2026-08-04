@@ -462,6 +462,25 @@ pub extern "C" fn tinyos_arm64_irq_entry() {
     crate::gic::end_of_interrupt(&gicc, claimed);
 }
 
+/// The measurement fixture's escape hook (`STORY-P1-07-06`): a synchronous
+/// `EL1h` fault taken while the hook is installed is handed to the fixture,
+/// which records its sample and context-switches away — the same
+/// escape-switch pattern the x86_64 `fixture_measure` uses to survive a
+/// deliberate fault. Zero means "no hook"; anything else is the handler's
+/// address.
+#[cfg(all(target_arch = "aarch64", feature = "fixture-measure"))]
+static MEASURE_FAULT_HOOK: core::sync::atomic::AtomicUsize =
+    core::sync::atomic::AtomicUsize::new(0);
+
+/// Installs (or, with `None`, removes) the fixture's fault hook. Fixture
+/// only, single core; the production fault path is unreachable while a hook
+/// is installed **for synchronous `EL1h` faults only** — every other slot
+/// still reports and parks.
+#[cfg(all(target_arch = "aarch64", feature = "fixture-measure"))]
+pub fn install_measure_hook(hook: Option<extern "C" fn() -> !>) {
+    MEASURE_FAULT_HOOK.store(hook.map_or(0, |f| f as usize), core::sync::atomic::Ordering::Release);
+}
+
 /// Where every one of the sixteen vector entries lands.
 ///
 /// Takes the slot index and the four registers that describe the exception, in
@@ -470,6 +489,8 @@ pub extern "C" fn tinyos_arm64_irq_entry() {
 /// [`Routing::Decoded`](crate::vectors::Routing::Decoded) and
 /// [`Routing::FailClosedDefault`](crate::vectors::Routing::FailClosedDefault)
 /// differ in what the *report* says, never in whether execution continues.
+/// (The one exception is the measurement fixture's installed escape hook,
+/// which never returns here either — see [`install_measure_hook`].)
 ///
 /// **Non-reentrant by construction** (`TEST-P1-07-02-A` clause 5). `PSTATE.DAIF`
 /// is set by the architecture on exception entry and this function never clears
@@ -496,6 +517,20 @@ pub extern "C" fn tinyos_arm64_exception_entry(
     elr: u64,
     spsr: u64,
 ) -> ! {
+    // The fixture's escape hatch, consulted first and only for the slot the
+    // fixture deliberately faults through — see `install_measure_hook`.
+    #[cfg(feature = "fixture-measure")]
+    if slot == crate::vectors::VectorSlot::SYNCHRONOUS_EL1H.index() as u64 {
+        let hook = MEASURE_FAULT_HOOK.load(core::sync::atomic::Ordering::Acquire);
+        if hook != 0 {
+            // SAFETY: the value was stored from a real
+            // `extern "C" fn() -> !` by `install_measure_hook` and can only
+            // be that or zero; single core, so no tear.
+            let hook: extern "C" fn() -> ! = unsafe { core::mem::transmute(hook) };
+            hook();
+        }
+    }
+
     let frame = FaultFrame::from_entry(slot, esr, far, elr, spsr);
 
     // SAFETY: `DEBUG_UART_BASE` is the BCM2712 `uart10` window transcribed in

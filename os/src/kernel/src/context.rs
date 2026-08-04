@@ -1,24 +1,25 @@
-//! x86_64 context switch (`STORY-P0-02-02`): the standard callee-saved
-//! register/stack-pointer swap every cooperatively- or preemptively-scheduled
-//! kernel uses (the same technique Linux's `switch_to`/`__switch_to_asm` and
-//! every other production x86_64 kernel implement) — not a novel scheme,
-//! just this project's compact version of it.
+//! Context switch (`STORY-P0-02-02` on x86_64; the AArch64 half added by
+//! `STORY-P1-07-06`): the standard callee-saved register/stack-pointer swap
+//! every cooperatively- or preemptively-scheduled kernel uses (the same
+//! technique Linux's `switch_to`/`__switch_to_asm` and every other
+//! production kernel implement) — not a novel scheme, just this project's
+//! compact version of it, once per architecture behind one contract.
 //!
 //! A [`Context`] is nothing but a saved stack pointer: the callee-saved
-//! registers (`rbp`, `rbx`, `r12`-`r15`) and flags for a suspended task live
-//! *on that task's own stack*, pushed there by [`switch`] the moment it
-//! suspends and popped back off the moment it resumes. This is why
+//! registers (and flags, where the convention saves them) for a suspended
+//! task live *on that task's own stack*, pushed there by [`switch`] the
+//! moment it suspends and popped back off the moment it resumes. This is why
 //! [`Context`] itself needs no register fields — the stack already holds
 //! them, exactly as it would for any ordinary (if very long-lived) function
 //! call.
 
 /// A task's suspended execution state: the stack pointer at which its
-/// callee-saved registers and flags were last pushed by [`switch`], or (for
-/// a task that has never run) the pointer [`Context::new`] pre-populated so
-/// the *first* [`switch`] into it lands at the task's entry point.
+/// callee-saved registers were last pushed by [`switch`], or (for a task
+/// that has never run) the pointer [`Context::new`] pre-populated so the
+/// *first* [`switch`] into it lands at the task's entry point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Context {
-    rsp: u64,
+    stack_pointer: u64,
 }
 
 /// [`Context::new`] failure: the caller-provided stack is too small to hold
@@ -29,12 +30,23 @@ pub enum ContextError {
     StackTooSmall,
 }
 
-/// Number of 8-byte slots [`switch`] pushes/pops per context: `rflags`,
-/// `r15`, `r14`, `r13`, `r12`, `rbx`, `rbp`, and (for a freshly initialized
-/// task) the entry-point return address — see [`context_switch_asm`]'s push
-/// order, which [`Context::new`] must lay out identically.
+/// Number of 8-byte slots [`switch`] pushes/pops per context on x86_64:
+/// `rflags`, `r15`, `r14`, `r13`, `r12`, `rbx`, `rbp`, and (for a freshly
+/// initialized task) the entry-point return address — see
+/// [`context_switch_asm`]'s push order, which [`Context::new`] must lay out
+/// identically.
+#[cfg(target_arch = "x86_64")]
 const FRAME_SLOTS: usize = 8;
+#[cfg(target_arch = "x86_64")]
 const FRAME_BYTES: usize = FRAME_SLOTS * 8;
+
+/// Frame bytes on AArch64: the callee-saved file `x19`–`x28` plus `x29` and
+/// `x30`, stored as six 16-byte pairs — see the AArch64
+/// `context_switch_asm`, which [`Context::new`] must lay out identically.
+/// `x30` doubles as the resume address, which for a fresh task is its entry
+/// point.
+#[cfg(target_arch = "aarch64")]
+const FRAME_BYTES: usize = 12 * 8;
 
 impl Context {
     /// A context with no saved state — only valid as the "prev" side of the
@@ -42,7 +54,7 @@ impl Context {
     /// context that calls into the first task), since [`switch`] always
     /// overwrites it before it could otherwise be read.
     pub const fn zeroed() -> Self {
-        Context { rsp: 0 }
+        Context { stack_pointer: 0 }
     }
 
     /// Builds a fresh [`Context`] for a task that has never run: `stack`'s
@@ -69,6 +81,7 @@ impl Context {
     /// `stack` must remain valid, exclusively owned by this task, and
     /// unmoved for as long as any [`Context`] built from it is switched
     /// into — the returned `Context` stores a raw pointer derived from it.
+    #[cfg(target_arch = "x86_64")]
     pub unsafe fn new(stack: &mut [u8], entry: extern "C" fn() -> !) -> Result<Self, ContextError> {
         // 16 bytes of slack covers the alignment adjustment below, so a
         // `stack` just barely big enough for the frame itself is still
@@ -109,7 +122,47 @@ impl Context {
             base.add(7).write(entry as usize as u64); // return address
         }
 
-        Ok(Context { rsp: frame_base as u64 })
+        Ok(Context { stack_pointer: frame_base as u64 })
+    }
+
+    /// The AArch64 form of [`Context::new`]: the frame holds `x19`–`x28`
+    /// zeroed plus `x29 = 0` and `x30 = entry`, so the first [`switch`] into
+    /// it pops harmless registers and `ret`s straight into `entry` with `sp`
+    /// 16-byte aligned, as AAPCS64 requires at every function entry.
+    ///
+    /// # Safety
+    /// As the x86_64 form: `stack` must remain valid, exclusively owned by
+    /// this task, and unmoved for as long as any [`Context`] built from it
+    /// is switched into.
+    #[cfg(target_arch = "aarch64")]
+    pub unsafe fn new(stack: &mut [u8], entry: extern "C" fn() -> !) -> Result<Self, ContextError> {
+        if stack.len() < FRAME_BYTES + 16 {
+            return Err(ContextError::StackTooSmall);
+        }
+        // SAFETY: `stack` is a live, exclusively-owned slice per this
+        // function's own contract; `add(stack.len())` is one-past-the-end.
+        let top = unsafe { stack.as_mut_ptr().add(stack.len()) } as usize;
+        // AArch64 demands a 16-byte-aligned SP at all times it is used for
+        // access; `FRAME_BYTES` is a multiple of 16, so the frame base
+        // inherits the top's alignment.
+        let aligned_top = top & !0xF;
+        let frame_base = aligned_top - FRAME_BYTES;
+        if frame_base < stack.as_ptr() as usize {
+            return Err(ContextError::StackTooSmall);
+        }
+        // SAFETY: `frame_base..frame_base + FRAME_BYTES` lies within `stack`
+        // (checked above); every write is 8-byte aligned from a 16-aligned
+        // base.
+        unsafe {
+            let base = frame_base as *mut u64;
+            let mut slot = 0;
+            while slot < 11 {
+                base.add(slot).write(0); // x19..x28, x29
+                slot += 1;
+            }
+            base.add(11).write(entry as usize as u64); // x30: the resume address
+        }
+        Ok(Context { stack_pointer: frame_base as u64 })
     }
 }
 
@@ -117,10 +170,19 @@ impl Context {
 // OS's default convention — Windows x64 on this dev machine) so the calling
 // convention `context_switch_asm` actually implements is the same one on
 // every build target, including `cargo test`'s host toolchain.
+#[cfg(target_arch = "x86_64")]
 unsafe extern "sysv64" {
     fn context_switch_asm(prev_rsp: *mut u64, next_rsp: *mut u64);
 }
 
+// On AArch64 `extern "C"` *is* AAPCS64 everywhere, so no convention pinning
+// is needed — the two pointers arrive in `x0`/`x1` on every AArch64 build.
+#[cfg(target_arch = "aarch64")]
+unsafe extern "C" {
+    fn context_switch_asm(prev_sp: *mut u64, next_sp: *mut u64);
+}
+
+#[cfg(target_arch = "x86_64")]
 core::arch::global_asm!(
     r#"
     .section .text
@@ -148,6 +210,40 @@ context_switch_asm:
     "#
 );
 
+// The AArch64 twin (`STORY-P1-07-06`): six `stp`/`ldp` pairs for the
+// callee-saved file, `x30` last so a fresh frame's entry address is what the
+// final `ret` consumes. `sp` stays 16-byte aligned throughout, as the
+// architecture requires of every access through it.
+#[cfg(target_arch = "aarch64")]
+core::arch::global_asm!(
+    r#"
+    .section .text
+    .global context_switch_asm
+context_switch_asm:
+        sub  sp, sp, #0x60
+        stp  x19, x20, [sp, #0x00]
+        stp  x21, x22, [sp, #0x10]
+        stp  x23, x24, [sp, #0x20]
+        stp  x25, x26, [sp, #0x30]
+        stp  x27, x28, [sp, #0x40]
+        stp  x29, x30, [sp, #0x50]
+
+        mov  x2, sp
+        str  x2, [x0]
+        ldr  x2, [x1]
+        mov  sp, x2
+
+        ldp  x19, x20, [sp, #0x00]
+        ldp  x21, x22, [sp, #0x10]
+        ldp  x23, x24, [sp, #0x20]
+        ldp  x25, x26, [sp, #0x30]
+        ldp  x27, x28, [sp, #0x40]
+        ldp  x29, x30, [sp, #0x50]
+        add  sp, sp, #0x60
+        ret
+    "#
+);
+
 /// Suspends the currently-running task, saving its callee-saved
 /// registers/flags onto its own stack and recording the resulting stack
 /// pointer into `*prev`, then resumes `next` by loading its stack pointer
@@ -167,10 +263,11 @@ context_switch_asm:
 /// since) — switching into the same suspended `Context` from two places
 /// concurrently would alias one task's stack from two callers at once.
 pub unsafe fn switch(prev: *mut Context, next: *mut Context) {
-    // SAFETY: `Context`'s only field is the `rsp` this asm routine reads and
-    // writes; `prev`/`next` are valid per this function's own contract, and
-    // `context_switch_asm` touches memory only through those two pointers
-    // and the stack they each point into (both caller-guaranteed live).
+    // SAFETY: `Context`'s only field is the stack pointer this asm routine
+    // reads and writes; `prev`/`next` are valid per this function's own
+    // contract, and `context_switch_asm` touches memory only through those
+    // two pointers and the stack they each point into (both
+    // caller-guaranteed live).
     unsafe {
         context_switch_asm(prev as *mut u64, next as *mut u64);
     }
@@ -199,7 +296,7 @@ pub unsafe fn switch(prev: *mut Context, next: *mut Context) {
 /// (if interrupts are enabled) the IDT/GDT/TSS and their handlers, or the
 /// reload itself is an immediate, unrecoverable fault with nothing mapped to
 /// run a handler from.
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(target_arch = "x86_64", not(target_os = "windows")))]
 pub unsafe fn switch_address_space(prev: *mut Context, next: *mut Context, next_cr3: u64) {
     let current_cr3 = hal_x86_64::paging::read_cr3();
     if hal_x86_64::paging::cr3_reload_needed(current_cr3, next_cr3) {
