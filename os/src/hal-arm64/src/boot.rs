@@ -581,6 +581,42 @@ pub fn unmask_interrupts() {
     unsafe { core::arch::asm!("msr daifclr, #2", options(nomem, nostack, preserves_flags)) };
 }
 
+/// The `PSTATE` implementation of [`hal::interrupts::InterruptGate`]
+/// (`STORY-P1-07-10`): one `MRS` to learn what was there, one `MSR` to change
+/// it, and no policy of its own.
+///
+/// Every rule about *when* these run lives in
+/// [`hal::interrupts::with_interrupts_masked`], where a host test can hold it.
+/// That split is the point — `LE-71` was an ordering defect, and ordering is
+/// exactly what this type must not decide.
+#[cfg(target_arch = "aarch64")]
+pub struct PstateInterrupts;
+
+#[cfg(target_arch = "aarch64")]
+impl hal::interrupts::InterruptGate for PstateInterrupts {
+    fn mask(&self) -> hal::interrupts::InterruptState {
+        let daif: u64;
+        // SAFETY: reading `DAIF` is unconditionally permitted at EL1 and has
+        // no side effects; the `MSR` that follows only masks, as in
+        // `mask_interrupts`.
+        unsafe {
+            core::arch::asm!(
+                "mrs {daif}, daif",
+                "msr daifset, #2",
+                daif = out(reg) daif,
+                options(nomem, nostack, preserves_flags),
+            );
+        }
+        hal::interrupts::InterruptState::from_daif(daif)
+    }
+
+    fn restore(&self, state: hal::interrupts::InterruptState) {
+        if state.was_enabled() {
+            unmask_interrupts();
+        }
+    }
+}
+
 /// Parks the core in `wfe` forever.
 ///
 /// Not a halt loop out of laziness: with no scheduler and no resume path, a

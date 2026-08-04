@@ -36,6 +36,7 @@ The one thing that looks like scope creep and is not: **`STORY-P1-07-03`'s MMU**
 | [`STORY-P1-07-07`](../stories/STORY-P1-07-07.md) | The boot splash: "TinyOS" on HDMI via the firmware mailbox framebuffer, after the verdict, bounded, hostile-input-validated — UX, never evidence | In progress — host half Green, criteria 4 and 5 need the board |
 | [`STORY-P1-07-08`](../stories/STORY-P1-07-08.md) | The ACT LED: forced on at entry, 1 Hz in the park loop — execution as a naked-eye fact through the one device behind no suspect peripheral; an instrument, never evidence | In progress — every criterion Green on silicon 2026-08-03 |
 | [`STORY-P1-07-09`](../stories/STORY-P1-07-09.md) | The firmware's canvas: the captured 1920×1080 RGB565 simple-framebuffer painted through the existing Surface seam — the report as on-screen text; mailbox path untouched beside it | In progress — every criterion Green on silicon 2026-08-03 |
+| [`STORY-P1-07-10`](../stories/STORY-P1-07-10.md) | Interrupt masking becomes a scope rather than a one-way switch — the fixture's mask had no counterpart, so the tick died at the fixture and `-04` criterion 1 was unreachable on every board | In progress — host half Green 2026-08-04, board criterion owed |
 
 **Order matters and is not negotiable.** `-02` before `-03` and `-04`, for the same reason Handover 03 spent two paragraphs on: debugging an MMU configuration on a board that cannot report a translation fault is the failure shape the carve-out existed to avoid.
 

@@ -20,5 +20,6 @@
 
 pub mod actuation;
 pub mod device;
+pub mod interrupts;
 pub mod time;
 pub mod topology;

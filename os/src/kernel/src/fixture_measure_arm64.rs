@@ -224,12 +224,21 @@ fn emit_all<W: Write>(
 /// state, which is exactly this fixture's required contract.
 #[no_mangle]
 pub extern "C" fn tinyos_arm64_fixture_measure() -> bool {
-    // Interrupt-free for the whole run, like Tier 0. The tick resumes when
-    // the park loop unmasks nothing — masking is one-way here; the park
-    // loop's channels never depended on it being undone, and the tick line
-    // having accumulated its pre-fixture intervals is itself evidence.
-    hal_arm64::boot::mask_interrupts();
+    // Interrupt-free for the whole run, like Tier 0 — and only for the run.
+    //
+    // `LE-71`: this mask used to be one-way, on the stated reasoning that the
+    // tick line would have accumulated its intervals before the fixture
+    // started. On silicon that pre-fixture window admitted exactly one tick
+    // (`BOARD VERDICT 6`), and one tick is one timestamp, which is zero
+    // intervals — so the ratio `STORY-P1-07-04` criterion 1 depends on could
+    // never form, on any board. The region is a scope now: the park loop gets
+    // its tick back and the ratio accumulates live, where it is observable.
+    hal::interrupts::with_interrupts_masked(&hal_arm64::boot::PstateInterrupts, measure_run)
+}
 
+/// The measured run itself. Its caller owns the interrupt-free region, so
+/// nothing here masks, unmasks, or may assume which it was entered with.
+fn measure_run() -> bool {
     // SAFETY: the debug UART base from `hal_arm64::board`; single core, and
     // the boot path configured the device before this fixture ran.
     let uart = Pl011::new(unsafe { VolatileMmio::new(hal_arm64::board::DEBUG_UART_BASE) });

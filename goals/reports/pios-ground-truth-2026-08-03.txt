@@ -1377,3 +1377,70 @@ Consequences, to be carried into REPORT-2026-08-04-01:
     against aarch64 on a 2.4 GHz A76, and the build profile of the board image has not been
     confirmed identical in optimisation level. Record both with their provenance; do not derive
     a ratio from them in this Report.
+
+===== BOARD VERDICT 6 (TinyOS measure boot 2026-08-04, kernel8.img a0d1773c8f10 - LE-69 fix on board) =====
+transcription source: owner photograph of the HDMI canvas, full frame, single boot. Same image as
+VERDICT 5 except for the LE-69 GICC_PMR width fix.
+
+canvas, report rows:
+  TOS64-LINK/1 RP1=PRESENT ID=0x0109 PHY=0x600D84A2 LINK=DOWN BEACON=SKIPPED
+  TOS64-BEAT/1 SEQ=19 STATE=BEACONING FB=REFUSED
+  TOS64-MMU/1  SCTLR=0000000030D01805 OFF=75252841 ON=183419
+  TOS64-CONF/1 CNTVCT=PASS SPAN=153 CNTFRQ=54000000 CPUS=54
+  TOS64-PMU/1  DELTA=24000200 RATE=2400MHZ SOURCE=PMCCNTR
+  TOS64-TICK/1 COUNT=1 TVAL=540000 RMIN=NONE RMAX=NONE     <- white, NOT refused
+
+canvas, fixture transcript (deltas from VERDICT 5 only; all n=1000 dropped=0 warmup=100):
+  fixture-measure cycle_source_conformance ok span=5810
+  BEGIN ... cycle_source=pmccntr_el0 overhead_cycles=43 cycles_per_us=2400   (identical)
+  ref  fixed_integer_loop                      min=2842 p50=2902 p99=2941 p99_9=3022 max=3022
+  D07  pool_u64x64_alloc_free_round_trip       min=378  p50=379  p99=379  p99_9=379  max=3519  <- OUTLIER
+  D07  pool_u64x4_alloc_denied_..._per_op_of_64 min=489 p50=491  p99=491  p99_9=492  max=492
+  D04  context_switch_yield_roundtrip_2switches min=79  p50=80   p99=80   p99_9=80   max=80
+  D05  dispatch_select_highest_priority_ready  min=1532 p50=1532 p99=1532 p99_9=1536 max=1536
+  D05  dispatch_run_once_cooperative_round     min=1644 p50=1647 p99=1649 p99_9=1649 max=1653
+  D02  fault_brk_capture_escape_kernel_context min=120  p50=120  p99=120  p99_9=120  max=120
+  D07  pool_..._round_trip_per_op_of_8         min=479  p50=479  p99=479  p99_9=479  max=479
+  END metrics=8
+
+reading:
+
+  LE-69 IS FIXED, on the first boot carrying it. TOS64-TICK/1 no longer carries refused=gicc-pmr.
+  The discovered-width probe accepted BCM2712's four implemented priority bits, the distributor
+  and CPU interface came up, the virtual-timer PPI routed, CNTV_CTL_EL0 read back
+  enabled-and-unmasked, and an interrupt was delivered, vectored to slot 5, counted and retired.
+  TVAL=540000 = 54000000/100, the declared 100 Hz. The whole GIC ladder is proven except its
+  repetition. Criterion 1 of STORY-P1-07-04 is still NOT met: it asks for a ratio, and a ratio
+  needs two intervals.
+
+  NEW DEFECT, and it is structural rather than intermittent (see LE-71).
+  COUNT=1 is not a timer that stopped. It is a tick that was only ever allowed one opportunity.
+  fixture_measure masks interrupts and NOTHING unmasks them - hal_arm64::boot::unmask_interrupts()
+  exists with no callers anywhere in the tree. So the tick's entire lifetime is the window between
+  the daifclr that follows GIC bring-up and the fixture's mask: the 64-sample conformance run plus
+  the PMU probe, order ~10 ms, which at 100 Hz is one tick. One tick is one timestamp is ZERO
+  intervals, and ratio_bounds_per_mille returns None below two intervals deliberately ("a ratio
+  over silence would be a confident claim about nothing"). RMIN=NONE RMAX=NONE is a correct
+  function fed a truthful input.
+  Every layer was individually correct and the criterion was still unreachable - on this board and
+  on any other, however many times it was booted. The comment above the mask stated the premise
+  outright ("the tick line having accumulated its pre-fixture intervals is itself evidence") and
+  the premise was never measured until now. It also contradicts the 03A handover's own recorded
+  design: "the park loop's wfe waits wake 100x per second."
+
+  THE OUTLIER CORROBORATES IT. pool_u64x64_alloc_free_round_trip reads p99_9=379 max=3519 - a lone
+  ~9x excursion, absent from VERDICT 5 (max=383) where the tick never armed at all. A single tick
+  and a single outlier on the same boot, on the first boot where an interrupt could be delivered,
+  is the tick landing in the pre-mask window and being caught in that metric's samples. Not
+  proven; recorded as the most probable reading and as something STORY-P1-07-10 criterion 5 must
+  refute or confirm - if the outlier persists once the tick runs continuously OUTSIDE the fixture,
+  the masking is not doing what it claims.
+
+  Run-to-run stability is otherwise excellent and worth stating: across two boots, context switch
+  80/80, fault capture 120 vs 109, per_op_of_8 479 vs 480, round trip 379 vs 383, dispatch round
+  1647 vs 1645. The board repeats itself to within a few cycles on six of eight metrics.
+  fault_brk_capture moved 109 -> 120 (~10%), the largest honest drift; worth watching, not yet a
+  finding.
+
+  LINK/BEACON: unchanged and expected (verdicts 2-5). Host NIC was UP at 1 Gbps.
+  No TOS64-RESULT/1 row visible in the photographed frame; the packet capture remains owed.
