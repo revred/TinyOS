@@ -1244,3 +1244,136 @@ reading: criterion 5 of STORY-P1-09-15 GREEN in its success arm - the beat line 
   FEAT-P1-09's exit is now exactly one packet capture away: pktmon remains access-denied from an
   unelevated shell (retried tonight, same refusal as 08-03); the beacon-on-the-wire byte-compare
   belongs to an elevated session or Ti64Dink's capture path (FEAT-P2-10, which this unblocks).
+
+===== BOARD VERDICT 5 (TinyOS measure boot 2026-08-04 ~03:3x, kernel8.img 0c709197ed26 - STORY-P1-07-03/-04/-06 on board) =====
+transcription source: owner photograph of the HDMI canvas, full frame, single boot. Canvas is
+uppercase-rendered; the wire/UART text is lowercase. Transcribed here in the canvas's case for
+the report rows and in wire case for the MEAS transcript, matching prior verdicts.
+
+canvas, report rows:
+  TOS64-LINK/1 RP1=PRESENT ID=0x0109 PHY=0x600D84A2 LINK=DOWN BEACON=SKIPPED
+  TOS64-BEAT/1 SEQ=17 STATE=BEACONING FB=REFUSED
+  TOS64-MMU/1  SCTLR=0000000030D01805 OFF=75213055 ON=183180
+  TOS64-CONF/1 CNTVCT=PASS SPAN=168 CNTFRQ=54000000 CPUS=54
+  TOS64-PMU/1  DELTA=24000227 RATE=2400MHZ SOURCE=PMCCNTR
+  TOS64-TICK/1 REFUSED=GICC-PMR READBACK=000000F0            <- alert orange, the one refusal
+
+canvas, fixture transcript (1x scale, verbatim):
+  fixture-measure cycle_source_conformance ok span=5696
+  TOS64-MEAS/2 BEGIN tier=T1 arch=aarch64 platform=rpi5-bcm2712 qualification=none
+               cycle_source=pmccntr_el0 overhead_cycles=43 cycles_per_us=2400
+  TOS64-MEAS/2 METRIC domain=ref metric=fixed_integer_loop
+               n=1000 dropped=0 warmup=100 min=2857 p50=2891 p99=2933 p99_9=2966 max=2976 unit=cycles
+  TOS64-MEAS/2 METRIC domain=D07 metric=pool_u64x64_alloc_free_round_trip
+               n=1000 dropped=0 warmup=100 min=381 p50=383 p99=383 p99_9=383 max=383 unit=cycles
+  TOS64-MEAS/2 METRIC domain=D07 metric=pool_u64x4_alloc_denied_exhausted_per_op_of_64
+               n=1000 dropped=0 warmup=100 min=489 p50=490 p99=491 p99_9=491 max=492 unit=cycles
+  TOS64-MEAS/2 METRIC domain=D04 metric=context_switch_yield_roundtrip_2switches
+               n=1000 dropped=0 warmup=100 min=79 p50=80 p99=80 p99_9=80 max=80 unit=cycles
+  TOS64-MEAS/2 METRIC domain=D05 metric=dispatch_select_highest_priority_ready
+               n=1000 dropped=0 warmup=100 min=1519 p50=1525 p99=1525 p99_9=1525 max=1525 unit=cycles
+  TOS64-MEAS/2 METRIC domain=D05 metric=dispatch_run_once_cooperative_round
+               n=1000 dropped=0 warmup=100 min=1644 p50=1645 p99=1656 p99_9=1656 max=1657 unit=cycles
+  TOS64-MEAS/2 METRIC domain=D02 metric=fault_brk_capture_escape_kernel_context
+               n=1000 dropped=0 warmup=100 min=109 p50=109 p99=109 p99_9=109 max=109 unit=cycles
+  TOS64-MEAS/2 METRIC domain=D07 metric=pool_u64x64_alloc_free_round_trip_per_op_of_8
+               n=1000 dropped=0 warmup=100 min=480 p50=480 p99=480 p99_9=480 max=480 unit=cycles
+  TOS64-MEAS/2 END metrics=8
+  fixture-measure metrics=8
+
+laptop: Get-NetAdapter read Ethernet UP at 1 Gbps during the boot; linkwatch armed (pid 4140,
+        started 03:29:47). No TOS64-RESULT/1 row was visible in the photographed frame - the
+        verdict row is emitted after the transcript and the frame was captured mid-cycle.
+
+reading, criterion by criterion:
+
+  STORY-P1-07-03 (flat identity MMU, caches on) - criteria 2, 3, 4 GREEN.
+    SCTLR_EL1 = 0x30D01805: M (bit 0) = 1, C (bit 2) = 1, I (bit 12) = 1 - the MMU is on with
+    both caches enabled, read back from the register rather than assumed from the write.
+    The cache probe is decisive: off=75213055 cycles, on=183180 cycles, a ratio of 410x on the
+    same loop through the same memory. That is the whole argument of -03 in one pair of numbers:
+    timing taken through Device memory describes the bus, not the OS. Every measurement below
+    this line is taken with caches on and is therefore about TinyOS.
+
+  STORY-P1-07-04 (GIC-400 + virtual timer tick) - criteria 2, 3, 4, 5 GREEN; criterion 1 RED.
+    cntvct=pass span=168 over the sample window, cntfrq=54000000 - the 54 MHz architectural
+    counter, read raw. cpus=54 is cycles_per_us (tick.rs conformance_line documents
+    cpus=<factor|none>), i.e. 54 counter ticks per microsecond, consistent with cntfrq. It is
+    NOT a core count; recorded here because the field name invites that misreading. LE-27 closes
+    on this row.
+    pmu delta=24000227 rate=2400mhz source=pmccntr - PMCCNTR_EL0 counts, and it counts at the
+    A76's 2.4 GHz core clock, not the 54 MHz system counter. LE-15's recorded decision procedure
+    (probe PMCCNTR against the generic timer, choose by measurement) executed on silicon and
+    chose PMCCNTR. LE-15 closes with the measurement that decided it.
+    criterion 1 (tick count, rmin/rmax near 1000) has NO evidence: the tick never armed.
+
+  NEW DEFECT - GICC_PMR implemented width assumed, not discovered (see LE-69).
+    gic.rs declares PRIORITY_MASK_ALL = 0xF8 with the comment "GIC-400 implements 32 priority
+    levels, so the low three bits read as zero", writes 0xF8, and refuses unless
+    readback & 0xF8 == 0xF8. The board read back 0xF0. 0xF0 & 0xF8 = 0xF0 != 0xF8, so the
+    routing refused at the third rung and returned MaskNotHeld(0xF0) - the code behaving exactly
+    as written.
+    0xF0 is not a fault. GICv2 leaves unimplemented low-order priority bits RAZ/WI, and the
+    implemented bits are contiguous from bit 7 downward. A readback of 0xF0 means BCM2712's
+    GIC-400 implements FOUR priority bits (16 levels), not five (32 levels). The silicon is
+    conformant - GICv2 mandates a minimum of four - and the constant was wrong.
+    This is the first on-silicon instance of the assumed-constant class inside the GIC, and it
+    is the same disease the ethernet ladder cured three times over (outbound window, endpoint
+    BARs, inbound windows): state whose real value must be read from the device, not compiled in.
+    The fix is NOT 0xF8 -> 0xF0. That trades one board's measured value for another's and is
+    barred by the standing no-bench-tuned-constants rule. The width is discoverable: write all
+    ones, and the readback IS the widest legal open mask for that implementation. The gate then
+    checks conformance of shape (a contiguous run of implemented bits ending at bit 7, at least
+    four of them) instead of equality against a guess.
+
+  STORY-P1-07-06 (fixture_measure on the boot image) - board half GREEN, wire half PENDING.
+    The fixture ran to completion on real silicon: cycle-source conformance ok, span=5696, eight
+    metrics, n=1000 on every one, dropped=0 on every one, warmup=100 honoured throughout. The
+    measured phases in kernel::measure_phases drove the AArch64 fixture verbatim - the seam held
+    across architectures on first physical contact.
+    Distribution shape is the quiet result: p50 to max spreads are 1-2 cycles on six of eight
+    metrics (context switch 80/80, fault capture 109/109/109, pool round trip 383/383). With
+    IRQs masked for the fixture's duration and caches on, the board is measuring TinyOS and
+    almost nothing else. The reference loop is the exception (2857..2976, ~4% spread) and is the
+    honest noise floor to quote the others against.
+    OPEN QUESTION, do not resolve by assumption: metric 2 (pool_u64x64_alloc_free_round_trip)
+    reads 383 cycles and metric 8 (the same operation, ..._per_op_of_8) reads 480. If 480 is a
+    per-op figure the batched twin is SLOWER than the unbatched one, which would be a finding in
+    itself; if 480 is the batch total for eight ops it is 60 cycles/op against the host's 35
+    cycles/op release median. LE-24's board half cannot be written until the emitter's semantics
+    are read from measure_phases rather than inferred from the name.
+
+  FEAT-P1-09: LINK=DOWN BEACON=SKIPPED on the report row is the expected boot-time snapshot, as
+    in verdicts 2, 3 and 4 - autonegotiation takes seconds and the park-loop watch owns the
+    transition. STATE=BEACONING on the beat row is the live truth and agrees with the laptop's
+    1 Gbps. The exit criterion still needs the elevated packet capture; nothing in this boot
+    changes its standing either way.
+
+----- BOARD VERDICT 5, addendum (same session, resolved from source not assumption) -----
+
+The open question above is answered, and the answer is a result rather than a clarification.
+measure_phases.rs phase_pool_alloc_free_batched records `cycles / ROUND_TRIP_BATCH` (line 187),
+so metric 8's 480 is ALREADY per-op. The identical operation therefore measures:
+
+    pool_u64x64_alloc_free_round_trip              383 cycles/op   (unbatched)
+    pool_u64x64_alloc_free_round_trip_per_op_of_8  480 cycles/op   (batched, 8 ops per sample)
+
+Batching cannot make an operation slower. What it changes is the share of the calibration
+residue each op carries: unbatched, the whole residue is charged against one round trip;
+batched, it is divided by eight. The 97-cycle gap is thus residue the unbatched measurement was
+crediting to the pool - LE-24's exact thesis, observed on silicon instead of argued from
+arithmetic, and on the first board run of the batched twin.
+
+Consequences, to be carried into REPORT-2026-08-04-01:
+  - 480 cycles/op is the quotable board figure for the D07 round trip. 383 is not a result and
+    must not appear as one; it is the artefact the batched twin exists to expose.
+  - The same suspicion now attaches to every OTHER unbatched metric in this transcript. Six of
+    the eight have no batched twin: context switch (80), fault capture (109), dispatch select
+    (1525), dispatch round (1645), and the reference loop. Their absolute values carry an
+    unquantified residue of the same kind. Relative comparisons between them survive; absolute
+    per-operation claims do not, until each has a batched twin or the residue is bounded.
+  - The host-vs-board LE-24 comparison (host batched median 35 cycles/op release, this Windows
+    host, vs board 480) is NOT yet a like-for-like pair: host x86_64 release on a desktop CPU
+    against aarch64 on a 2.4 GHz A76, and the build profile of the board image has not been
+    confirmed identical in optimisation level. Record both with their provenance; do not derive
+    a ratio from them in this Report.

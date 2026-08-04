@@ -45,9 +45,37 @@ pub const VIRTUAL_TIMER_INTID: u32 = 27;
 /// that must **not** be retired with an `EOIR` write.
 pub const SPURIOUS_INTID: u32 = 1023;
 
-/// The priority mask value written: everything unmasked. GIC-400 implements
-/// 32 priority levels, so the low three bits read as zero.
-pub const PRIORITY_MASK_ALL: u32 = 0xF8;
+/// The probe written to `GICC_PMR` to open the mask: all ones. GICv2 leaves
+/// unimplemented low-order priority bits RAZ/WI, so the *readback* of an
+/// all-ones write is the widest open mask this particular implementation
+/// supports. The width is therefore discovered from the device on every
+/// boot, never compiled in — `LE-69`, raised when a constant asserting five
+/// implemented bits refused a conforming four-bit GIC-400 on BCM2712.
+pub const PRIORITY_MASK_PROBE: u32 = 0xFF;
+
+/// The fewest priority bits GICv2 permits a CPU interface to implement.
+/// Below this the device is not a conforming interface at all.
+pub const MIN_PRIORITY_BITS: u32 = 4;
+
+/// How many priority bits a `GICC_PMR` readback proves are implemented, or
+/// [`None`] if the readback is not a conforming width.
+///
+/// GICv2 requires the implemented bits to be a contiguous run ending at bit
+/// 7, so the unimplemented complement must be a low-order run of ones. A
+/// readback with holes is a register that did not hold, not a narrow one —
+/// a distinction an equality check against a fixed mask cannot draw.
+#[must_use]
+pub const fn priority_bits_implemented(readback: u32) -> Option<u32> {
+    let unimplemented = !readback & 0xFF;
+    if unimplemented & unimplemented.wrapping_add(1) != 0 {
+        return None;
+    }
+    let bits = 8 - unimplemented.count_ones();
+    if bits < MIN_PRIORITY_BITS {
+        return None;
+    }
+    Some(bits)
+}
 
 /// Why the tick interrupt could not be routed. Each variant carries the
 /// readback that convicted the register, for the report line — the decisive
@@ -117,9 +145,9 @@ pub fn enable_tick_interrupt<D: Mmio, C: Mmio>(gicd: &D, gicc: &C) -> Result<(),
         return Err(GicRefused::EnableNotHeld(enabled));
     }
 
-    gicc.write_u32(gicc::PMR, PRIORITY_MASK_ALL);
+    gicc.write_u32(gicc::PMR, PRIORITY_MASK_PROBE);
     let mask = gicc.read_u32(gicc::PMR);
-    if mask & PRIORITY_MASK_ALL != PRIORITY_MASK_ALL {
+    if priority_bits_implemented(mask).is_none() {
         return Err(GicRefused::MaskNotHeld(mask));
     }
 
@@ -200,7 +228,7 @@ mod tests {
             gicd.writes(),
             vec![(gicd::CTLR, 1), (gicd::ISENABLER0, 1 << VIRTUAL_TIMER_INTID)]
         );
-        assert_eq!(gicc.writes(), vec![(gicc::PMR, PRIORITY_MASK_ALL), (gicc::CTLR, 1)]);
+        assert_eq!(gicc.writes(), vec![(gicc::PMR, PRIORITY_MASK_PROBE), (gicc::CTLR, 1)]);
     }
 
     #[test]
@@ -259,6 +287,79 @@ mod tests {
         let gicd = LatchingBlock::new();
         let gicc = MaskedInterface { inner: LatchingBlock::new() };
         assert_eq!(enable_tick_interrupt(&gicd, &gicc), Err(GicRefused::MaskNotHeld(0)));
+    }
+
+    /// A CPU interface implementing only the top `bits` priority bits: the
+    /// unimplemented low-order bits are RAZ/WI, exactly as GICv2 specifies,
+    /// so a write of all ones reads back as the widest open mask.
+    struct NarrowInterface {
+        inner: LatchingBlock,
+        readback: u32,
+    }
+
+    impl NarrowInterface {
+        fn reading(readback: u32) -> Self {
+            NarrowInterface { inner: LatchingBlock::new(), readback }
+        }
+    }
+
+    impl Mmio for NarrowInterface {
+        fn read_u32(&self, offset: usize) -> u32 {
+            if offset == gicc::PMR {
+                // RAZ on the unimplemented bits, whatever was written.
+                return self.inner.read_u32(offset) & self.readback;
+            }
+            self.inner.read_u32(offset)
+        }
+        fn write_u32(&self, offset: usize, value: u32) {
+            self.inner.write_u32(offset, value);
+        }
+    }
+
+    /// `BOARD VERDICT 5`: BCM2712's GIC-400 reads back `0xF0` — four
+    /// implemented priority bits, the GICv2 minimum, not the five the
+    /// constant assumed. A conforming device must not be refused.
+    #[test]
+    fn a_four_bit_priority_implementation_routes_the_tick() {
+        let gicd = LatchingBlock::new();
+        let gicc = NarrowInterface::reading(0xF0);
+        assert_eq!(enable_tick_interrupt(&gicd, &gicc), Ok(()));
+    }
+
+    /// Every width GICv2 permits — four through eight implemented bits,
+    /// contiguous from bit 7 — is a device the tick may run on. The width
+    /// is discovered from the readback, never compiled in.
+    #[test]
+    fn every_conformant_priority_width_routes_the_tick() {
+        for readback in [0xF0, 0xF8, 0xFC, 0xFE, 0xFF] {
+            let gicd = LatchingBlock::new();
+            let gicc = NarrowInterface::reading(readback);
+            assert_eq!(
+                enable_tick_interrupt(&gicd, &gicc),
+                Ok(()),
+                "readback {readback:#04x} is a conformant priority width"
+            );
+        }
+    }
+
+    /// Fewer than four implemented bits is below the architectural floor:
+    /// the device is not a GICv2 CPU interface and the tick is refused
+    /// rather than run on a register nobody can reason about.
+    #[test]
+    fn a_priority_width_below_the_architectural_minimum_is_a_refusal() {
+        let gicd = LatchingBlock::new();
+        let gicc = NarrowInterface::reading(0xE0);
+        assert_eq!(enable_tick_interrupt(&gicd, &gicc), Err(GicRefused::MaskNotHeld(0xE0)));
+    }
+
+    /// A readback whose implemented bits are not one contiguous run ending
+    /// at bit 7 is a register that did not hold, not a narrow one — the
+    /// distinction the old equality check could not draw.
+    #[test]
+    fn a_priority_mask_with_holes_is_a_refusal() {
+        let gicd = LatchingBlock::new();
+        let gicc = NarrowInterface::reading(0xF4);
+        assert_eq!(enable_tick_interrupt(&gicd, &gicc), Err(GicRefused::MaskNotHeld(0xF4)));
     }
 
     #[test]
