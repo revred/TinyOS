@@ -177,6 +177,8 @@ pub fn link_line(discovery: &Discovery, beacon: BeaconField) -> ([u8; LINK_LINE_
                 LinkAbsent::EndpointVendor(word) => ("endpoint-vendor", u64::from(*word), 8),
                 LinkAbsent::BarSilent(word) => ("bar-silent", u64::from(*word), 8),
                 LinkAbsent::BarNotHeld(word) => ("bar-held", u64::from(*word), 8),
+                LinkAbsent::InboundNotHeld(word) => ("ibw-held", u64::from(*word), 8),
+                LinkAbsent::InboundRemapNotHeld(word) => ("ibw-remap", u64::from(*word), 8),
             };
             line.push(reason);
             line.push(" detail=0x");
@@ -554,6 +556,27 @@ mod tests {
         assert!(reprobe_due(&silent), "a refused BAR earns the second look");
     }
 
+    // TEST-P1-09-15-A clause 4: the inbound refusals speak their names.
+
+    #[test]
+    fn the_inbound_refusal_arms_speak_their_codes_details_and_names() {
+        let held = Discovery::LinkAbsent(LinkAbsent::InboundNotHeld(0xABCD_F01C));
+        assert_eq!(blink_code(&held), Some(21));
+        assert_eq!(blink_detail(&held), 0xF01C);
+        assert_eq!(
+            line_text(&held, BeaconField::Skipped),
+            "TOS64-LINK/1 rp1=absent reason=ibw-held detail=0xabcdf01c beacon=skipped\n"
+        );
+        let remap = Discovery::LinkAbsent(LinkAbsent::InboundRemapNotHeld(0xDEAD_DEAD));
+        assert_eq!(blink_code(&remap), Some(22));
+        assert_eq!(blink_detail(&remap), 0xDEAD);
+        assert_eq!(
+            line_text(&remap, BeaconField::Skipped),
+            "TOS64-LINK/1 rp1=absent reason=ibw-remap detail=0xdeaddead beacon=skipped\n"
+        );
+        assert!(reprobe_due(&held), "a refused inbound window earns the second look");
+    }
+
     #[test]
     fn the_clock_refusal_arms_speak_their_codes_details_and_names() {
         let dropped = Discovery::ClockRefused(ClockRefused::EnableNotHeld { ctrl: 0x0000_0400 });
@@ -592,7 +615,22 @@ mod tests {
                 // keeps its teeth.
                 offset if offset == pcie::config::EP_BARS[0] => 0x0041_0000,
                 offset if offset == pcie::config::EP_BARS[2] => 0x0040_0000,
-                _ => 0,
+                other => {
+                    // The inbound windows already hold their captured
+                    // dwords — the settled shape, so the inbound pass
+                    // performs zero writes (TEST-P1-09-15-A clause 3) and
+                    // the write panic below keeps its teeth.
+                    let mut window = 0;
+                    while window < pcie::inbound::WINDOWS.len() {
+                        for (offset, value) in pcie::inbound::window_dwords(window) {
+                            if offset == other {
+                                return value;
+                            }
+                        }
+                        window += 1;
+                    }
+                    0
+                }
             }
         }
 

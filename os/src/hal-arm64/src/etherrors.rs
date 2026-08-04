@@ -32,6 +32,8 @@ pub const fn blink_code(discovery: &Discovery) -> Option<u8> {
             LinkAbsent::EndpointVendor(_) => 15,
             LinkAbsent::BarSilent(_) => 19,
             LinkAbsent::BarNotHeld(_) => 20,
+            LinkAbsent::InboundNotHeld(_) => 21,
+            LinkAbsent::InboundRemapNotHeld(_) => 22,
         }),
         Discovery::ClockRefused(refused) => Some(match refused {
             ClockRefused::BlockSilent { .. } => 16,
@@ -71,6 +73,11 @@ pub const fn blink_detail(discovery: &Discovery) -> u16 {
             // The masks and addresses that convict a BAR live in the high
             // half (0xFFC0_0000's mask, 0x0041_0000's address).
             LinkAbsent::BarSilent(word) | LinkAbsent::BarNotHeld(word) => (*word >> 16) as u16,
+            // An inbound dword's decisive bits live in the low half — the
+            // size code (0x15, 0xF01C) and the remap's ACCESS_EN bit.
+            LinkAbsent::InboundNotHeld(word) | LinkAbsent::InboundRemapNotHeld(word) => {
+                *word as u16
+            }
         },
         Discovery::ClockRefused(refused) => match refused {
             // The halves that convict: poison spells its 0xDEAD high half
@@ -112,6 +119,8 @@ mod tests {
             Discovery::LinkAbsent(LinkAbsent::EndpointVendor(0)),
             Discovery::LinkAbsent(LinkAbsent::BarSilent(0xFFFF_FFF0)),
             Discovery::LinkAbsent(LinkAbsent::BarNotHeld(0xFFC0_0000)),
+            Discovery::LinkAbsent(LinkAbsent::InboundNotHeld(0xDEAD_DEAD)),
+            Discovery::LinkAbsent(LinkAbsent::InboundRemapNotHeld(0)),
             Discovery::ClockRefused(ClockRefused::BlockSilent { sel: 0xDEAD_0000 }),
             Discovery::ClockRefused(ClockRefused::EnableNotHeld { ctrl: 0 }),
             Discovery::ClockRefused(ClockRefused::NeverRan { ctrl: 0x800 }),
@@ -141,11 +150,13 @@ mod tests {
         assert_eq!(blink_code(&refusals[7]), Some(15), "endpoint-vendor counts 15");
         assert_eq!(blink_code(&refusals[8]), Some(19), "bar-silent counts 19");
         assert_eq!(blink_code(&refusals[9]), Some(20), "bar-held counts 20");
-        assert_eq!(blink_code(&refusals[10]), Some(16), "clk-silent counts 16");
-        assert_eq!(blink_code(&refusals[11]), Some(17), "clk-enable counts 17");
-        assert_eq!(blink_code(&refusals[12]), Some(18), "clk-stuck counts 18");
-        assert_eq!(blink_code(&refusals[13]), Some(7));
-        assert_eq!(blink_code(&refusals[16]), Some(10));
+        assert_eq!(blink_code(&refusals[10]), Some(21), "ibw-held counts 21");
+        assert_eq!(blink_code(&refusals[11]), Some(22), "ibw-remap counts 22");
+        assert_eq!(blink_code(&refusals[12]), Some(16), "clk-silent counts 16");
+        assert_eq!(blink_code(&refusals[13]), Some(17), "clk-enable counts 17");
+        assert_eq!(blink_code(&refusals[14]), Some(18), "clk-stuck counts 18");
+        assert_eq!(blink_code(&refusals[15]), Some(7));
+        assert_eq!(blink_code(&refusals[18]), Some(10));
         // Health — a known PHY in any link state — keeps the plain pulse.
         for link in [
             None,
@@ -190,6 +201,16 @@ mod tests {
             blink_detail(&Discovery::LinkAbsent(LinkAbsent::BarNotHeld(0xFFC0_0000))),
             0xFFC0,
             "a dropped assignment spells the readback's high half"
+        );
+        assert_eq!(
+            blink_detail(&Discovery::LinkAbsent(LinkAbsent::InboundNotHeld(0xABCD_F01C))),
+            0xF01C,
+            "an inbound dword spells its low half — where the size code lives"
+        );
+        assert_eq!(
+            blink_detail(&Discovery::LinkAbsent(LinkAbsent::InboundRemapNotHeld(0x0013_0000))),
+            0x0000,
+            "a remap spells its low half — where ACCESS_EN should be"
         );
         assert_eq!(
             blink_detail(&Discovery::ClockRefused(ClockRefused::BlockSilent { sel: 0xDEAD_0000 })),

@@ -90,6 +90,14 @@ pub enum LinkAbsent {
     /// device was told where to listen and did not repeat it back.
     /// Carries the masked readback (`STORY-P1-09-13`).
     BarNotHeld(u32),
+    /// An inbound `RC_BARn_CONFIG` dword's readback disagreed with the
+    /// written value — the window that would claim the GEM's descriptor
+    /// fetches did not hold. Carries the readback (`STORY-P1-09-15`).
+    InboundNotHeld(u32),
+    /// A `UBUS_BARn` remap dword's readback disagreed — a claimed inbound
+    /// TLP would have no CPU-side target. Carries the readback
+    /// (`STORY-P1-09-15`).
+    InboundRemapNotHeld(u32),
 }
 
 /// Outbound window 0, decoded from its five registers — a pure function of
@@ -311,14 +319,115 @@ fn assign_bar<M: Mmio>(rc: &M, bar: usize, mask: u32, address: u32) -> Result<()
     Ok(())
 }
 
+/// The root complex's inbound (DMA) windows (`STORY-P1-09-15`) — the third
+/// and last instance of one recurring disease: *state Linux programs and
+/// the firmware does not, which `establish` therefore must.* The GEM
+/// transmits by mastering inbound reads of its descriptor ring and frame
+/// buffer at PCI `0x10_0000_0000` ([`board::RP1_DMA_RAM_BASE`]'s captured
+/// `dma-ranges` translation); those TLPs are claimed by the
+/// `RC_BARn_CONFIG` windows, which Linux writes in
+/// `set_inbound_win_registers()` — an unclaimed descriptor fetch means the
+/// GEM never starts and the first transmit times out (`STATE=STOPPED
+/// REASON=TIMEOUT`, 2026-08-04 01:41). Every value is the 2026-08-04
+/// ~02:05 live capture's (`pios-ground-truth-2026-08-03.txt`, tail),
+/// derived from its `dma-ranges` triple and pinned raw by the tests. The
+/// `UBUS` remap pairs read programmed under Pi OS, so the Pi 5 takes the
+/// BCM7712-style path and both register families are written: twelve
+/// dwords total.
+pub mod inbound {
+    /// `PCIE_MISC_RC_BAR1/2/3_CONFIG_LO` — low 5 bits the encoded size,
+    /// the rest the PCI offset's low half. Offsets confirmed live.
+    pub const RC_BAR_LO: [usize; 3] = [0x402C, 0x4034, 0x403C];
+    /// `PCIE_MISC_RC_BAR1/2/3_CONFIG_HI` — the PCI offset's high half.
+    pub const RC_BAR_HI: [usize; 3] = [0x4030, 0x4038, 0x4040];
+    /// `PCIE_MISC_UBUS_BAR1/2/3_CONFIG_REMAP` — CPU target low half, bit 0
+    /// `ACCESS_EN`.
+    pub const UBUS_LO: [usize; 3] = [0x40AC, 0x40B4, 0x40BC];
+    /// `PCIE_MISC_UBUS_BAR1/2/3_CONFIG_REMAP_HI` — CPU target high half.
+    pub const UBUS_HI: [usize; 3] = [0x40B0, 0x40B8, 0x40C0];
+    /// `ACCESS_EN` — bit 0 of a `UBUS` remap enables the translation.
+    pub const UBUS_ACCESS_EN: u32 = 1;
+    /// The three windows the capture pinned, as the `dma-ranges` triples
+    /// they translate: `(pci_offset, size_bytes, cpu_target)` — the 4 MiB
+    /// RP1 peripheral alias, the 64 GiB DMA window the beacon's descriptor
+    /// and frame fetches ride, and the 4 KiB MSI page.
+    pub const WINDOWS: [(u64, u64, u64); 3] = [
+        (0x0, 4 << 20, 0x0000_001F_0000_0000),
+        (0x10_0000_0000, 64 << 30, 0x0),
+        (0xFF_FFFF_F000, 4 << 10, 0x0000_0010_0013_0000),
+    ];
+
+    /// `brcm_pcie_encode_ibar_size` (`pcie-brcmstb.c`, `rpi-6.12.y`,
+    /// fetched 2026-08-04), transcribed: `4KB..32KB → 0x1C + (log2 − 12)`;
+    /// `64KB..64GB → log2 − 15`; `0 = disabled`. Sizes here are powers of
+    /// two, so the log is the trailing-zero count.
+    pub const fn encode_size(bytes: u64) -> u32 {
+        if bytes == 0 {
+            return 0;
+        }
+        let log2 = bytes.trailing_zeros();
+        if log2 >= 12 && log2 <= 15 {
+            0x1C + (log2 - 12)
+        } else if log2 >= 16 && log2 <= 36 {
+            log2 - 15
+        } else {
+            0
+        }
+    }
+
+    /// The four dwords window `index` must hold, in write order: the
+    /// `RC_BAR` pair (offset low | size, offset high), then the `UBUS`
+    /// remap pair (CPU low | `ACCESS_EN`, CPU high) — the BCM7712-style
+    /// path the capture proved the Pi 5 takes.
+    pub const fn window_dwords(index: usize) -> [(usize, u32); 4] {
+        let (pci_offset, size, cpu_target) = WINDOWS[index];
+        [
+            (RC_BAR_LO[index], (pci_offset as u32 & !0x1F) | encode_size(size)),
+            (RC_BAR_HI[index], (pci_offset >> 32) as u32),
+            (UBUS_LO[index], cpu_target as u32 | UBUS_ACCESS_EN),
+            (UBUS_HI[index], (cpu_target >> 32) as u32),
+        ]
+    }
+}
+
+/// The inbound-window pass (`STORY-P1-09-15`): a window already answering
+/// its four pinned dwords is left untouched; otherwise each dword is
+/// written exactly once and believed only from its readback — the
+/// `RC_BAR` family refusing as [`LinkAbsent::InboundNotHeld`], the `UBUS`
+/// family as [`LinkAbsent::InboundRemapNotHeld`] — with nothing written
+/// past a refusal.
+pub fn open_inbound<M: Mmio>(rc: &M) -> Result<(), LinkAbsent> {
+    for window in 0..inbound::WINDOWS.len() {
+        let dwords = inbound::window_dwords(window);
+        if dwords.iter().all(|&(offset, value)| rc.read_u32(offset) == value) {
+            continue;
+        }
+        for (index, &(offset, value)) in dwords.iter().enumerate() {
+            rc.write_u32(offset, value);
+            let held = rc.read_u32(offset);
+            if held != value {
+                // Dwords 0–1 are the RC_BAR pair, 2–3 the UBUS remap pair.
+                return Err(if index < 2 {
+                    LinkAbsent::InboundNotHeld(held)
+                } else {
+                    LinkAbsent::InboundRemapNotHeld(held)
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 /// One full establishment pass: link gates, window (with the
-/// `STORY-P1-09-09` programming fallback), then the introduction. The
-/// window registers are controller-local, so their order relative to the
-/// enumeration is free; the *bus* traffic — the GEM identity read — happens
-/// only after all of this succeeds.
+/// `STORY-P1-09-09` programming fallback), the introduction, then the
+/// inbound windows (`STORY-P1-09-15`) — both ends of the outbound path and
+/// the whole of the inbound one. The window registers are controller-local,
+/// so their order relative to the enumeration is free; the *bus* traffic —
+/// the GEM identity read — happens only after all of this succeeds.
 pub fn establish<M: Mmio>(rc: &M) -> Result<OutboundWindow, LinkAbsent> {
     let window = probe_or_program(rc)?;
     enumerate(rc)?;
+    open_inbound(rc)?;
     Ok(window)
 }
 
@@ -863,5 +972,229 @@ mod tests {
         assert_eq!(status::PORT_IS_RC, 0x80);
         assert_eq!(status::DL_ACTIVE, 0x20);
         assert_eq!(status::PHY_LINK_UP, 0x10);
+    }
+
+    // TEST-P1-09-15-A clause 1: the size encoding is the driver's own
+    // function, pinned as a pure transcription.
+
+    #[test]
+    fn the_inbound_size_encoding_is_the_brcmstb_transcription() {
+        // brcm_pcie_encode_ibar_size: 4KB..32KB → 0x1C + (log2 − 12).
+        assert_eq!(inbound::encode_size(4 << 10), 0x1C);
+        assert_eq!(inbound::encode_size(8 << 10), 0x1D);
+        assert_eq!(inbound::encode_size(16 << 10), 0x1E);
+        assert_eq!(inbound::encode_size(32 << 10), 0x1F);
+        // 64KB..64GB → log2 − 15.
+        assert_eq!(inbound::encode_size(64 << 10), 0x01);
+        assert_eq!(inbound::encode_size(4 << 20), 0x07, "the peripheral alias's 4 MiB");
+        assert_eq!(inbound::encode_size(64 << 30), 0x15, "the DMA window's 64 GiB");
+        // 0 = disabled.
+        assert_eq!(inbound::encode_size(0), 0);
+    }
+
+    // TEST-P1-09-15-A clause 1: the twelve dwords are the capture's, raw,
+    // and every offset is the live-confirmed register.
+
+    #[test]
+    fn the_inbound_dwords_are_the_captured_twelve() {
+        assert_eq!(
+            inbound::window_dwords(0),
+            [(0x402C, 0x0000_0007), (0x4030, 0), (0x40AC, 0x0000_0001), (0x40B0, 0x0000_001F)],
+            "window 1: PCI 0x0, 4 MiB, CPU 0x1F_0000_0000 — the RP1 peripheral alias"
+        );
+        assert_eq!(
+            inbound::window_dwords(1),
+            [(0x4034, 0x0000_0015), (0x4038, 0x0000_0010), (0x40B4, 0x0000_0001), (0x40B8, 0)],
+            "window 2: PCI 0x10_0000_0000, 64 GiB, CPU 0x0 — the beacon's DMA window"
+        );
+        assert_eq!(
+            inbound::window_dwords(2),
+            [
+                (0x403C, 0xFFFF_F01C),
+                (0x4040, 0x0000_00FF),
+                (0x40BC, 0x0013_0001),
+                (0x40C0, 0x0000_0010),
+            ],
+            "window 3: PCI 0xFF_FFFF_F000, 4 KiB, CPU 0x10_0013_0000 — the MSI page"
+        );
+        // The DMA window is the counterpart of the translation the transmit
+        // path already applies to every buffer address.
+        assert_eq!(inbound::WINDOWS[1].0, board::RP1_DMA_RAM_BASE);
+        for window in 0..inbound::WINDOWS.len() {
+            for (offset, _) in inbound::window_dwords(window) {
+                assert!(offset < board::PCIE2_SIZE, "offset {offset:#x} escapes the window");
+                assert_eq!(offset % 4, 0, "offset {offset:#x} is not word-aligned");
+            }
+        }
+    }
+
+    /// An inbound-register double: latching map over the twelve offsets,
+    /// answering `unprogrammed` until written; records every access.
+    struct InboundRc {
+        latched: RefCell<Vec<(usize, u32)>>,
+        /// Which offsets refuse to latch (readback stays `unprogrammed`).
+        dead: Vec<usize>,
+        unprogrammed: u32,
+        log: RefCell<Vec<(char, usize, u32)>>,
+    }
+
+    impl InboundRc {
+        fn new() -> Self {
+            InboundRc {
+                latched: RefCell::new(Vec::new()),
+                dead: Vec::new(),
+                unprogrammed: 0,
+                log: RefCell::new(Vec::new()),
+            }
+        }
+
+        fn settled() -> Self {
+            let rc = InboundRc::new();
+            for window in 0..inbound::WINDOWS.len() {
+                for (offset, value) in inbound::window_dwords(window) {
+                    rc.latched.borrow_mut().push((offset, value));
+                }
+            }
+            rc
+        }
+
+        fn writes(&self) -> Vec<(usize, u32)> {
+            self.log
+                .borrow()
+                .iter()
+                .filter(|(kind, ..)| *kind == 'w')
+                .map(|(_, offset, value)| (*offset, *value))
+                .collect()
+        }
+    }
+
+    impl Mmio for InboundRc {
+        fn read_u32(&self, offset: usize) -> u32 {
+            self.log.borrow_mut().push(('r', offset, 0));
+            self.latched
+                .borrow()
+                .iter()
+                .rev()
+                .find(|(latched, _)| *latched == offset)
+                .map(|(_, value)| *value)
+                .unwrap_or(self.unprogrammed)
+        }
+
+        fn write_u32(&self, offset: usize, value: u32) {
+            self.log.borrow_mut().push(('w', offset, value));
+            if !self.dead.contains(&offset) {
+                self.latched.borrow_mut().push((offset, value));
+            }
+        }
+    }
+
+    // TEST-P1-09-15-A clause 2: twelve writes, pinned order, each believed
+    // from its readback.
+
+    #[test]
+    fn an_unprogrammed_inbound_set_is_written_as_the_twelve_dwords_in_order() {
+        let rc = InboundRc::new();
+        open_inbound(&rc).expect("a latching controller settles");
+        let mut expected = Vec::new();
+        for window in 0..inbound::WINDOWS.len() {
+            expected.extend(inbound::window_dwords(window));
+        }
+        assert_eq!(rc.writes(), expected, "twelve dwords, window by window, pair by pair");
+    }
+
+    // TEST-P1-09-15-A clause 3: a settled pass writes nothing.
+
+    #[test]
+    fn a_settled_inbound_set_sees_zero_writes() {
+        let rc = InboundRc::settled();
+        open_inbound(&rc).expect("a settled controller passes");
+        assert_eq!(rc.writes(), vec![], "a window already holding its dwords is left untouched");
+    }
+
+    // TEST-P1-09-15-A clause 2: a dropped RC_BAR readback refuses as its own
+    // arm, and nothing later is written.
+
+    #[test]
+    fn a_dropped_rc_bar_dword_refuses_with_the_readback() {
+        let mut rc = InboundRc::new();
+        rc.unprogrammed = 0xDEAD_DEAD;
+        rc.dead.push(0x4034); // window 2's RC_BAR2_CONFIG_LO never latches.
+        assert_eq!(open_inbound(&rc), Err(LinkAbsent::InboundNotHeld(0xDEAD_DEAD)));
+        let writes = rc.writes();
+        assert_eq!(writes.last(), Some(&(0x4034, 0x0000_0015)), "the refusal is the last write");
+        assert!(
+            !writes.iter().any(|(offset, _)| *offset == 0x4038),
+            "nothing is written past a refusal"
+        );
+    }
+
+    // TEST-P1-09-15-A clause 2: a dropped UBUS readback is the other arm.
+
+    #[test]
+    fn a_dropped_ubus_dword_refuses_with_the_readback() {
+        let mut rc = InboundRc::new();
+        rc.dead.push(0x40AC); // window 1's UBUS remap never latches.
+        assert_eq!(open_inbound(&rc), Err(LinkAbsent::InboundRemapNotHeld(0)));
+        let writes = rc.writes();
+        assert_eq!(writes.last(), Some(&(0x40AC, 0x0000_0001)));
+        assert!(
+            !writes.iter().any(|(offset, _)| *offset == 0x40B0),
+            "the remap's high half is never written past the refusal"
+        );
+    }
+
+    /// A full-establishment double: healthy link and window, both vendors,
+    /// settled BARs, latching inbound registers — so the one establish-level
+    /// assertion is the seat: the inbound pass runs after the enumeration.
+    struct EstablishRc {
+        inbound: InboundRc,
+    }
+
+    impl Mmio for EstablishRc {
+        fn read_u32(&self, offset: usize) -> u32 {
+            match offset {
+                register::STATUS => status::PORT_IS_RC | status::PHY_LINK_UP | status::DL_ACTIVE,
+                register::WIN0_LO | register::WIN0_HI => 0,
+                register::WIN0_BASE_LIMIT => 0x03F0_0000,
+                register::WIN0_BASE_HI | register::WIN0_LIMIT_HI => 0x1F,
+                config::RC_VENDOR => 0x2712_14E4,
+                config::RC_COMMAND | config::EP_COMMAND => 0,
+                config::EP_VENDOR => 0x0001_1DE4,
+                offset if config::EP_BARS.contains(&offset) => {
+                    let bar = config::EP_BARS.iter().position(|&b| b == offset).unwrap();
+                    config::BAR_ADDRESSES[bar]
+                }
+                offset => self.inbound.read_u32(offset),
+            }
+        }
+
+        fn write_u32(&self, offset: usize, value: u32) {
+            self.inbound.write_u32(offset, value);
+        }
+    }
+
+    // TEST-P1-09-15-A clause 3: the seat — establish runs the inbound pass,
+    // strictly after the enumeration's memory-enable.
+
+    #[test]
+    fn establish_opens_the_inbound_windows_after_the_enumeration() {
+        let rc = EstablishRc { inbound: InboundRc::new() };
+        establish(&rc).expect("a healthy latching controller establishes");
+        let writes = rc.inbound.writes();
+        let enable_at = writes
+            .iter()
+            .position(|(offset, _)| *offset == config::EP_COMMAND)
+            .expect("the enumeration's memory-enable happened");
+        let first_inbound = writes
+            .iter()
+            .position(|(offset, _)| *offset == inbound::window_dwords(0)[0].0)
+            .expect("the inbound pass happened");
+        assert!(enable_at < first_inbound, "inbound windows open strictly after enumeration");
+        let inbound_writes: Vec<(usize, u32)> = writes[first_inbound..].to_vec();
+        let mut expected = Vec::new();
+        for window in 0..inbound::WINDOWS.len() {
+            expected.extend(inbound::window_dwords(window));
+        }
+        assert_eq!(inbound_writes, expected, "the pass is the twelve dwords and nothing more");
     }
 }
