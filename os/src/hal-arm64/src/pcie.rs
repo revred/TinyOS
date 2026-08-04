@@ -82,6 +82,14 @@ pub enum LinkAbsent {
     /// thing behind the link is not the RP1 this slice knows. Carries the
     /// raw vendor/device dword (`STORY-P1-09-10`).
     EndpointVendor(u32),
+    /// A BAR's all-ones sizing probe did not answer its silicon-pinned
+    /// mask — no BAR there, a floating answer, or a different device.
+    /// Carries the masked readback (`STORY-P1-09-13`).
+    BarSilent(u32),
+    /// A BAR assignment readback disagreed with the written address — the
+    /// device was told where to listen and did not repeat it back.
+    /// Carries the masked readback (`STORY-P1-09-13`).
+    BarNotHeld(u32),
 }
 
 /// Outbound window 0, decoded from its five registers — a pure function of
@@ -214,6 +222,20 @@ pub mod config {
     pub const EP_VENDOR: usize = EXT_CFG_DATA;
     /// The endpoint's command/status dword, same mask discipline.
     pub const EP_COMMAND: usize = EXT_CFG_DATA + 0x04;
+    /// The endpoint's three BAR dwords, through the data window
+    /// (`STORY-P1-09-13`).
+    pub const EP_BARS: [usize; 3] = [EXT_CFG_DATA + 0x10, EXT_CFG_DATA + 0x14, EXT_CFG_DATA + 0x18];
+    /// Bits `[3:0]` of a memory BAR are read-only type flags; every
+    /// comparison masks them.
+    pub const BAR_FLAG_MASK: u32 = 0xF;
+    /// The all-ones sizing masks, pinned from silicon: the Pi OS dmesg's
+    /// own probe (16 KiB, 4 MiB, 64 KiB — 09A conviction capture).
+    pub const BAR_MASKS: [u32; 3] = [0xFFFF_C000, 0xFFC0_0000, 0xFFFF_0000];
+    /// The bus addresses the working system runs with — raw BAR dwords
+    /// captured live (`setpci 0x10/0x14/0x18`, 09A). BAR1 is the 4 MiB
+    /// peripheral window at bus zero, which is exactly where the outbound
+    /// window sends CPU `0x1F_0000_0000`.
+    pub const BAR_ADDRESSES: [u32; 3] = [0x0041_0000, 0x0000_0000, 0x0040_0000];
     /// ECAM index for bus 1, device 0, function 0: `1 << 20`.
     pub const RP1_INDEX: u32 = 1 << 20;
     /// `primary=00, secondary=01, subordinate=01`, latency 0 — the lspci
@@ -252,8 +274,40 @@ pub fn enumerate<M: Mmio>(rc: &M) -> Result<(), LinkAbsent> {
     if endpoint as u16 != config::RPI_VENDOR {
         return Err(LinkAbsent::EndpointVendor(endpoint));
     }
+    // `STORY-P1-09-13`: the address nobody wrote. The conviction capture
+    // proved the working inbound chain differs from this function's output
+    // in exactly one register class — the BARs, which Linux assigns and
+    // the firmware does not. Sized by the architectural probe, assigned
+    // from the capture, believed from mask and readback, and strictly
+    // before the memory-enable below.
+    for bar in 0..3 {
+        assign_bar(rc, config::EP_BARS[bar], config::BAR_MASKS[bar], config::BAR_ADDRESSES[bar])?;
+    }
     let command = rc.read_u32(config::EP_COMMAND);
     rc.write_u32(config::EP_COMMAND, (command & 0xFFFF) | config::COMMAND_ENABLE);
+    Ok(())
+}
+
+/// One BAR's size-and-assign (`STORY-P1-09-13`). A BAR already holding its
+/// pinned address is left untouched — the all-ones probe is destructive to
+/// a live window, and the re-probe loop must never blink one. Otherwise:
+/// probe, believe the mask, assign, believe the readback. BAR1's happy
+/// readback is zero, so its belief is the conjunction of both gates.
+fn assign_bar<M: Mmio>(rc: &M, bar: usize, mask: u32, address: u32) -> Result<(), LinkAbsent> {
+    let current = rc.read_u32(bar) & !config::BAR_FLAG_MASK;
+    if current == address {
+        return Ok(());
+    }
+    rc.write_u32(bar, 0xFFFF_FFFF);
+    let probed = rc.read_u32(bar) & !config::BAR_FLAG_MASK;
+    if probed != mask {
+        return Err(LinkAbsent::BarSilent(probed));
+    }
+    rc.write_u32(bar, address);
+    let held = rc.read_u32(bar) & !config::BAR_FLAG_MASK;
+    if held != address {
+        return Err(LinkAbsent::BarNotHeld(held));
+    }
     Ok(())
 }
 
@@ -550,12 +604,31 @@ mod tests {
     /// write-1-to-clear status halves in both command registers.
     struct EnumerableRc {
         endpoint_vendor: u32,
+        /// Latched BAR register contents; an all-ones write reads back as
+        /// the sizing mask, any other value as itself — the architectural
+        /// BAR behaviour (`STORY-P1-09-13`).
+        bars: RefCell<[u32; 3]>,
         log: RefCell<Vec<(char, usize, u32)>>,
     }
 
     impl EnumerableRc {
         fn new(endpoint_vendor: u32) -> Self {
-            EnumerableRc { endpoint_vendor, log: RefCell::new(Vec::new()) }
+            // Cold silicon: the firmware leaves the BARs holding neither
+            // zero nor the pinned addresses (the dmesg probe found BAR1
+            // unassigned) — so the rung must size and assign all three.
+            Self::with_bars(endpoint_vendor, [0xEEE0_0000; 3])
+        }
+
+        fn with_bars(endpoint_vendor: u32, bars: [u32; 3]) -> Self {
+            EnumerableRc {
+                endpoint_vendor,
+                bars: RefCell::new(bars),
+                log: RefCell::new(Vec::new()),
+            }
+        }
+
+        fn bar_index(offset: usize) -> Option<usize> {
+            config::EP_BARS.iter().position(|&bar| bar == offset)
         }
 
         fn writes(&self) -> Vec<(usize, u32)> {
@@ -571,6 +644,10 @@ mod tests {
     impl Mmio for EnumerableRc {
         fn read_u32(&self, offset: usize) -> u32 {
             self.log.borrow_mut().push(('r', offset, 0));
+            if let Some(index) = Self::bar_index(offset) {
+                let value = self.bars.borrow()[index];
+                return if value == 0xFFFF_FFFF { config::BAR_MASKS[index] } else { value };
+            }
             match offset {
                 config::RC_VENDOR => 0x2712_14E4,
                 config::RC_COMMAND => 0xABCD_0000, // hostile W1C status half
@@ -582,10 +659,15 @@ mod tests {
 
         fn write_u32(&self, offset: usize, value: u32) {
             self.log.borrow_mut().push(('w', offset, value));
+            if let Some(index) = Self::bar_index(offset) {
+                self.bars.borrow_mut()[index] = value;
+            }
         }
     }
 
-    // TEST-P1-09-10-A clause 2: exact, ordered, masked.
+    // TEST-P1-09-10-A clause 2 / TEST-P1-09-13-A clause 3: exact, ordered,
+    // masked — and the BAR probe/assign pairs sit strictly between the
+    // endpoint gate and the memory-enable.
 
     #[test]
     fn the_introduction_is_exact_ordered_and_masks_the_status_half() {
@@ -599,10 +681,116 @@ mod tests {
                 // Status half zeroed: 0xABCD would clear W1C bits if echoed.
                 (config::RC_COMMAND, 0x0000_0006),
                 (config::EXT_CFG_INDEX, config::RP1_INDEX),
+                // TEST-P1-09-13-A clauses 1–3: per BAR, the all-ones probe
+                // then the captured address, in order, before the enable.
+                (config::EP_BARS[0], 0xFFFF_FFFF),
+                (config::EP_BARS[0], 0x0041_0000),
+                (config::EP_BARS[1], 0xFFFF_FFFF),
+                (config::EP_BARS[1], 0x0000_0000),
+                (config::EP_BARS[2], 0xFFFF_FFFF),
+                (config::EP_BARS[2], 0x0040_0000),
                 // Endpoint command keeps its own low half (0x0400) plus ours.
                 (config::EP_COMMAND, 0x0000_0406),
             ]
         );
+    }
+
+    // TEST-P1-09-13-A clause 3: a settled pass never blinks a live window.
+
+    #[test]
+    fn already_assigned_bars_see_zero_bar_writes() {
+        let rc = EnumerableRc::with_bars(0x0001_1DE4, config::BAR_ADDRESSES);
+        enumerate(&rc).expect("the settled pass succeeds");
+        let writes = rc.writes();
+        assert_eq!(writes.len(), 5, "bridge setup, index, enable — nothing at the BARs");
+        assert!(
+            !writes.iter().any(|(offset, _)| config::EP_BARS.contains(offset)),
+            "a BAR already holding its address is never probed: {writes:?}"
+        );
+    }
+
+    // TEST-P1-09-13-A clause 1: a BAR that answers no mask refuses before
+    // any assignment.
+
+    #[test]
+    fn a_bar_that_answers_no_mask_refuses_before_assignment() {
+        struct FloatingBars {
+            log: RefCell<Vec<(usize, u32)>>,
+        }
+        impl Mmio for FloatingBars {
+            fn read_u32(&self, offset: usize) -> u32 {
+                match offset {
+                    config::RC_VENDOR => 0x2712_14E4,
+                    config::RC_COMMAND => 0,
+                    config::EP_VENDOR => 0x0001_1DE4,
+                    offset if config::EP_BARS.contains(&offset) => 0xFFFF_FFFF,
+                    other => panic!("unexpected read {other:#x}"),
+                }
+            }
+            fn write_u32(&self, offset: usize, value: u32) {
+                self.log.borrow_mut().push((offset, value));
+            }
+        }
+        let rc = FloatingBars { log: RefCell::new(Vec::new()) };
+        assert_eq!(
+            enumerate(&rc),
+            Err(LinkAbsent::BarSilent(0xFFFF_FFF0)),
+            "a floating probe answer is the mask arm, flag bits masked",
+        );
+        let writes = rc.log.borrow();
+        // Bridge setup, index, then exactly one probe at BAR0 — no
+        // assignment, no second BAR, no enable.
+        assert_eq!(writes.last(), Some(&(config::EP_BARS[0], 0xFFFF_FFFF)));
+        assert!(!writes.iter().any(|(offset, _)| *offset == config::EP_COMMAND));
+        assert!(!writes.iter().any(|(offset, _)| *offset == config::EP_BARS[1]));
+    }
+
+    // TEST-P1-09-13-A clause 2: an assignment that does not hold refuses
+    // with the readback.
+
+    #[test]
+    fn an_assignment_that_does_not_hold_refuses_with_the_readback() {
+        struct StickyMask {
+            probed: core::cell::Cell<bool>,
+        }
+        impl Mmio for StickyMask {
+            fn read_u32(&self, offset: usize) -> u32 {
+                match offset {
+                    config::RC_VENDOR => 0x2712_14E4,
+                    config::RC_COMMAND => 0,
+                    config::EP_VENDOR => 0x0001_1DE4,
+                    offset if offset == config::EP_BARS[0] => {
+                        // Answers the probe honestly, then never latches
+                        // the assignment — the readback stays the mask.
+                        if self.probed.get() {
+                            config::BAR_MASKS[0]
+                        } else {
+                            0xEEE0_0000
+                        }
+                    }
+                    other => panic!("unexpected read {other:#x}"),
+                }
+            }
+            fn write_u32(&self, offset: usize, value: u32) {
+                if offset == config::EP_BARS[0] && value == 0xFFFF_FFFF {
+                    self.probed.set(true);
+                }
+            }
+        }
+        let rc = StickyMask { probed: core::cell::Cell::new(false) };
+        assert_eq!(enumerate(&rc), Err(LinkAbsent::BarNotHeld(config::BAR_MASKS[0])));
+    }
+
+    // TEST-P1-09-13-A clause 1: the masks and addresses are the capture's.
+
+    #[test]
+    fn the_bar_constants_are_the_conviction_capture() {
+        assert_eq!(config::EP_BARS, [0x8010, 0x8014, 0x8018]);
+        assert_eq!(config::BAR_MASKS, [0xFFFF_C000, 0xFFC0_0000, 0xFFFF_0000]);
+        assert_eq!(config::BAR_ADDRESSES, [0x0041_0000, 0x0000_0000, 0x0040_0000]);
+        // BAR1 is the peripheral window, and it must sit exactly where the
+        // outbound window sends CPU traffic: PCI bus zero.
+        assert_eq!(config::BAR_ADDRESSES[1], window_program::LO);
     }
 
     #[test]

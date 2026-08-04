@@ -175,6 +175,8 @@ pub fn link_line(discovery: &Discovery, beacon: BeaconField) -> ([u8; LINK_LINE_
                 LinkAbsent::WindowSpan(limit) => ("window-span", *limit, 10),
                 LinkAbsent::RootVendor(word) => ("root-vendor", u64::from(*word), 8),
                 LinkAbsent::EndpointVendor(word) => ("endpoint-vendor", u64::from(*word), 8),
+                LinkAbsent::BarSilent(word) => ("bar-silent", u64::from(*word), 8),
+                LinkAbsent::BarNotHeld(word) => ("bar-held", u64::from(*word), 8),
             };
             line.push(reason);
             line.push(" detail=0x");
@@ -478,6 +480,27 @@ mod tests {
         );
     }
 
+    // TEST-P1-09-13-A clause 4: the BAR refusals speak their names.
+
+    #[test]
+    fn the_bar_refusal_arms_speak_their_codes_details_and_names() {
+        let silent = Discovery::LinkAbsent(LinkAbsent::BarSilent(0xFFFF_FFF0));
+        assert_eq!(blink_code(&silent), Some(19));
+        assert_eq!(blink_detail(&silent), 0xFFFF);
+        assert_eq!(
+            line_text(&silent, BeaconField::Skipped),
+            "TOS64-LINK/1 rp1=absent reason=bar-silent detail=0xfffffff0 beacon=skipped\n"
+        );
+        let held = Discovery::LinkAbsent(LinkAbsent::BarNotHeld(0xFFC0_0000));
+        assert_eq!(blink_code(&held), Some(20));
+        assert_eq!(blink_detail(&held), 0xFFC0);
+        assert_eq!(
+            line_text(&held, BeaconField::Skipped),
+            "TOS64-LINK/1 rp1=absent reason=bar-held detail=0xffc00000 beacon=skipped\n"
+        );
+        assert!(reprobe_due(&silent), "a refused BAR earns the second look");
+    }
+
     #[test]
     fn the_clock_refusal_arms_speak_their_codes_details_and_names() {
         let dropped = Discovery::ClockRefused(ClockRefused::EnableNotHeld { ctrl: 0x0000_0400 });
@@ -510,6 +533,12 @@ mod tests {
                 pcie::register::WIN0_BASE_HI | pcie::register::WIN0_LIMIT_HI => 0x1F,
                 pcie::config::RC_VENDOR => 0x2712_14E4,
                 pcie::config::EP_VENDOR => 0x0001_1DE4,
+                // The BARs already hold their pinned addresses — the
+                // settled shape, so the BAR rung performs zero writes
+                // (TEST-P1-09-13-A clause 3) and the write panic below
+                // keeps its teeth.
+                offset if offset == pcie::config::EP_BARS[0] => 0x0041_0000,
+                offset if offset == pcie::config::EP_BARS[2] => 0x0040_0000,
                 _ => 0,
             }
         }
