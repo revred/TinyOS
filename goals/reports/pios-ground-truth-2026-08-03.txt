@@ -1514,3 +1514,59 @@ reading:
 
   MMU ratio this boot: 74380464 / 183645 = ~405x, consistent with verdicts 5 (410x) and 6.
   LINK/BEACON row unchanged and expected. No TOS64-RESULT/1 in frame; the capture is still owed.
+
+===== BOARD VERDICT 8 (TinyOS mmu-fault boot 2026-08-04, kernel8.img fde0f2ce3f91 - STORY-P1-07-03 criterion 5) =====
+transcription source: owner photograph of the HDMI canvas, full frame, single boot. Alert-orange
+frame on the blue canvas; no report rows, no measurement transcript, no TOS64-RESULT - the fault
+preempts the verdict by design, which is the criterion rather than a shortfall.
+
+canvas, verbatim:
+  TOS64-FAULT/1 SLOT=CUR_EL_SPX/SYNC INDEX=04
+  TOS64-FAULT/1 ESR=0000000096000005 CLASS=DATA-ABORT EC=25 IL=32
+  TOS64-FAULT/1 STATUS=TRANSLATION LEVEL=1 WNR=READ ISV=NO SIZE=UNKNOWN S1PTW=NO
+  TOS64-FAULT/1 FAR=0000002000000000 ELR=000000000008EF08 SPSR=0000000040000345
+  TOS64-FAULT/1 HALTED REASON=NO-RESUME-PATH
+
+reading - every field decoded from the raw register rather than trusted from its label:
+
+  ESR_EL1 = 0x96000005.
+    EC   = ESR[31:26] = 0x25 -> Data Abort taken WITHOUT a change in Exception level, i.e. EL1
+           faulting into EL1. Matches CLASS=DATA-ABORT and matches the slot below; a fault from
+           EL0 would have carried EC=0x24 and a different vector.
+    IL   = ESR[25] = 1 -> 32-bit instruction. Rendered as IL=32.
+    ISS  = ESR[24:0] = 0x0000005.
+      DFSC  = ISS[5:0] = 0b000101 -> Translation fault, level 1.  STATUS/LEVEL agree.
+      WnR   = ISS[6]  = 0 -> read.                                 WNR=READ agrees.
+      ISV   = ISS[24] = 0 -> no valid syndrome, so SIZE is honestly UNKNOWN rather than guessed.
+      S1PTW = ISS[7]  = 0 -> not a stage-1 page-table walk fault.
+    The whole line is internally consistent and consistent with the fixture's intent.
+
+  FAR_EL1 = 0x0000_0020_0000_0000 = 0x20_0000_0000, exactly the unmapped guard address the
+  fixture reads, to the bit. This is criterion 5's core claim: the flat identity map does NOT
+  cover that address, the hardware said so, and the OS could name which address and why.
+
+  SLOT = CUR_EL_SPX/SYNC INDEX=04 - the current-EL-with-SP_ELx synchronous vector, which is the
+  correct entry for an EL1h data abort. The vector table routes to the right slot.
+
+  SPSR_EL1 = 0x40000345.
+    M[3:0] = 0b0101 -> EL1h, confirming the exception was taken from EL1 using SP_EL1.
+    I (bit 7) = 0 -> IRQs were UNMASKED at the moment of the fault.
+    This is independent corroboration of STORY-P1-07-10 from a completely different code path:
+    the LE-71 scope fix means the core runs with interrupts enabled, and a register captured by
+    the fault handler on the fault image says so without being asked.
+    F (bit 6) = 1, A (bit 8) = 1, D (bit 9) = 1 - FIQ, SError and Debug masked, as the drop to
+    EL1 configured them.
+
+  HALTED REASON=NO-RESUME-PATH is the fail-safe rule working. Slot 5 (the tick) is the vector
+  table's ONE resumable entry by STORY-P1-07-04's design; slot 4 has no resume path, so the
+  handler reported and halted rather than looping on the faulting instruction or silently
+  resuming into undefined behaviour. Fail-safe over keep-trying, on silicon.
+
+verdicts:
+  STORY-P1-07-03 criterion 5 GREEN. With criteria 2, 3 and 4 Green at BOARD VERDICT 5, every
+  acceptance criterion of the flat-identity-MMU Story now has silicon evidence.
+  STORY-P1-07-02's decoded-ESR clause is also satisfied here, on the proven canvas channel
+  rather than the serial one that has never produced a byte (LE-47).
+  FEAT-P1-07's ordering rule is vindicated rather than merely obeyed: -02 before -03 existed so
+  that an MMU would never be debugged on a board that cannot report a translation fault. This
+  frame is what that rule was protecting, and it arrived first time.

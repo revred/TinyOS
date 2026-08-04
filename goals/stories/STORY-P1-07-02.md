@@ -1,6 +1,6 @@
 # STORY-P1-07-02 — AArch64 Exception Vectors: a Fault Prints a Decoded `ESR_EL1` Instead of Hanging
 
-Status: **In progress — host-testable half Green 2026-07-28 (115 host tests in `hal-arm64`, from 64); acceptance criterion 2 blocked on a board, and there is no version of this Story that passes without it. Not Verified.**
+Status: **In progress — host-testable half Green 2026-07-28 (115 host tests in `hal-arm64`, from 64). **Acceptance criterion 2 Green on silicon** — `BOARD VERDICT 8` (mmu-fault boot 2026-08-04, kernel `fde0f2ce3f91`) put a fully decoded fault frame on the canvas from a real exception: `SLOT=CUR_EL_SPX/SYNC INDEX=04`, `ESR=0x96000005` broken into `EC=0x25` / `IL=32` / `DFSC` translation-level-1 / `WnR=read` / `ISV=no`, `FAR` and `ELR` and `SPSR` raw beside their decode, and `HALTED REASON=NO-RESUME-PATH`. `SIZE=UNKNOWN` where `ISV=0` is the honest-absence behaviour surviving silicon rather than a guess. The evidence channel is the canvas, not serial (`LE-47`). Not Verified.**
 Feature: [`FEAT-P1-07`](../features/FEAT-P1-07.md)
 Introduced in: [`session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md`](../../session/hand-2026-07-28/17-raspberry-pi-5-bring-up-plan.md) §5
 
