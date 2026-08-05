@@ -1,172 +1,163 @@
-# TinyDB — an Ultra-Fast Store Beside the Real-Time Kernel, and What It May Never Do
+# SharCrust on the Board — the Real-Time Proving Ground, and What It May Never Do
 
-Status: **Design note, 2026-08-05. No code, no Feature, no Story.** Written at the owner's
-request so the scope is settled before anything is built, and deliberately stopping short of
-decomposition — `agent.md`'s just-in-time rule cuts against specifying an application tier
-while the board has not yet dispatched a task.
+Status: **Design note, 2026-08-05, revised the same day after reading `internal/Sharc.Probe`.
+No code, no Feature, no Story.** Written so the scope is settled before anything is built, and
+deliberately stopping short of decomposition — `agent.md`'s just-in-time rule cuts against
+specifying an application tier while the board has not yet dispatched a task.
 
-Prerequisite: **the kernel must run on silicon first.** See `session/hand-2026-08-05/04A` §3.
-This document describes the first thing to run *after* that, and is written now only because
-the design constraints bear on how the dispatch work is shaped.
+Prerequisite: **`FEAT-P1-11` must be board-proven first.** One dispatch round, from the park
+loop, with interrupts live. This document describes the first thing to run *after* that.
+
+**Revision note.** The first version of this document proposed a new fixed-slot hash table
+built from scratch. That was written without having read `internal/Sharc.Probe`. The owner's
+direction is to make **SharCrust — the homegrown Rust SQLite-format engine, stripped of
+external dependencies — the proving ground for the RT layer**, and that is a better target:
+feasibility proven against a stand-in proves the stand-in, while feasibility proven against
+the engine that will actually run proves the thing.
 
 ---
 
-## 1. Why a database is the right first application
+## 1. Why a real storage engine is the right feasibility probe
 
 Every timing number this project holds comes from `fixture_measure`: phases run by a harness,
-single core, interrupts masked inside the measured region, nothing contending for anything.
-Those measure **the mechanism**. They cannot fail in an interesting way.
+single core, interrupts masked inside the measured region, nothing contending. Those measure
+**the mechanism**, and they cannot fail in an interesting way.
 
-A store with deterministic operations, running under a live scheduler, measures **the system**
-— and it can fail. If p99.9 on a point read blows out once dispatch is real, that is a finding
-about TinyOS rather than about a benchmark. `EPIC-P1` is *Determinism Proof*, and a proof needs
-something that could have come out the other way.
+A storage engine with bounded operations, running under a live scheduler, measures **the
+system** — and it can fail. If p99.9 on a page read blows out once dispatch is real, that is a
+finding about TinyOS. `EPIC-P1` is *Determinism Proof*, and a proof needs something that could
+have come out the other way.
 
-It is also the right shape for a first application because it exercises exactly the subsystems
-that have never executed on hardware: tasks, dispatch, priority-inheriting locks, WCET budgets,
-and fixed-pool memory. **"Run the kernel on the board" and "run TinyDB as the first service" are
-the same work approached from opposite ends** — this end supplies a reason and a falsifiable
-target instead of a hello-world.
+**And the SQLite file format is a surprisingly good real-time target**, which is not obvious
+until stated: a B-tree lookup is `O(depth)` with a known page size, so bounding the database
+size bounds the depth, which bounds the read. Reads are structurally boundable. Writes with
+page splits are not, which is why §4 excludes them from the first stage rather than hoping.
 
-## 2. The shape: a table, not an engine
+## 2. What can come to the board, in what order
 
-**Open-addressed, fixed-capacity, allocation-free.** Compile-time `CAPACITY`, compile-time
-`KEY_BYTES` and `VALUE_BYTES`, one contiguous array of slots. No tree, no page cache, no
-planner, no journal.
+`internal/Sharc.Probe/sharcrust/` is layered, and the layers have very different distances to
+travel. Measured, not guessed — imports per module today:
 
-This is the same shape the project has already converged on twice — `SpoorJournal`'s
-fixed-slot append-only ring, and the `.rac`-style mmap substrate earmarked for Phase 6 model
-loading. Convergence from three directions is usually a sign the shape is real rather than
-convenient.
+```
+format.rs      external=0  std=0     ← already clean
+records.rs     external=0  std=0     ← already clean
+schema.rs      external=0  std=1
+error.rs       external=0  std=1
+primitives.rs  external=2  std=0     ← uuid + rust_decimal, for GUID/Decimal codecs
+```
 
-**A probe budget is the central design decision.** Linear probing with a hard
-`MAX_PROBE` constant: a lookup that has not resolved within `MAX_PROBE` slots **refuses**. It
-does not probe further, does not rehash, does not grow. That single rule is what converts a
-hash table from "amortised O(1)" — a statement about averages that says nothing about the run
-that mattered — into a bounded operation with a stated worst case.
+**Two external imports and two `std` imports** stand between the format layer and something
+that compiles `no_std` with no allocator. That is the whole distance for stage 1.
 
-## 3. What TinyDB may do
+| Stage | What moves | Distance | Bounded? |
+|---|---|---|---|
+| **1. Format core** | varints, serial types, record codec, header parse | Replace `uuid`/`rust_decimal` with internal codecs; drop 2 `std` imports | Yes — pure functions over `&[u8]`, no state |
+| **2. Fixed-pool pager + read cursor** | `pager`, `btree` read path | Replace a growable page cache with `N` compile-time page buffers | Yes — `O(depth)`, depth bounded by database size |
+| **3. Measurement under the scheduler** | the RT feasibility answer | `measure_phases` entries, board capture | This is the deliverable |
+| **Not staged** | `btree_writer`, `overflow`, `freelist`, `crypto`, `intelligence`, `scanner` | — | No — see §4 |
 
-Each operation below is O(1) with a worst case bounded by a compile-time constant, and each
-stamps a spoor.
+**Stage 1 is testable entirely on the host** and is where the "no external dependencies" work
+actually lands. Stage 2 is the first thing that needs the board. Stage 3 is the point of the
+exercise.
+
+## 3. What it may do on the board
+
+Each operation bounded by a compile-time constant, each stamping a spoor.
 
 | Operation | Bound | Notes |
 |---|---|---|
-| `get(key)` | ≤ `MAX_PROBE` slot reads | Returns a value copy; no reference escapes the table. |
-| `put(key, value)` | ≤ `MAX_PROBE` slot reads + 1 write | Refuses past the load-factor bound. |
-| `delete(key)` | ≤ `MAX_PROBE` + 1 write | Tombstone; slot reused by the next `put`. |
-| `scan(cursor, budget)` | exactly `budget` slots | Caller states the budget; the call returns a cursor to resume. **There is no unbounded scan.** |
-| `len()`, `capacity()`, `load()` | O(1) | Counters, not traversals. |
+| Decode a record | Bytes in the cell | Pure function over a slice; no state, no allocation. |
+| Read a page | One fixed buffer | From a pool of `N`; a pool miss with all buffers pinned **refuses**. |
+| B-tree point lookup | `≤ MAX_DEPTH` page reads | Depth bounded by a compile-time database-size ceiling, refused past it. |
+| Cursor step with budget | Exactly `budget` cells | Caller states the budget and gets a cursor back. **No unbounded scan.** |
 
-**Every refusal is a spoor, not a silence.** A `put` past the load bound, a `get` that exhausts
-its probe budget, a `scan` that hits its budget mid-table — each is a recorded outcome
-(`Capped`, `Failed`) with the reason on the wire. A store that quietly degrades is a store that
-lies about the run that mattered, which is the same rule the spoor ring already holds itself to.
+**Every refusal is a spoor, not a silence.** A depth overrun, an exhausted page pool, a
+truncated cell — each is a recorded outcome (`Capped`, `Failed`) with its reason on the wire.
+A store that quietly degrades lies about the run that mattered, which is the rule the spoor
+ring already holds itself to.
 
-## 4. What TinyDB may never do
+## 4. What it may never do
 
-These are exclusions, not deferrals. Each one, if admitted, would break a guarantee the project
-currently machine-enforces.
+Exclusions, not deferrals. Each one, if admitted, breaks a guarantee the project currently
+machine-enforces.
 
-- **No allocation, of any kind.** Not merely no heap: the assurance spine forbids
-  `#[global_allocator]`, `extern crate alloc` **and `use alloc::`** anywhere in the image, and
-  withdraws the `G11` evidence loudly if it appears. So no `Vec`, no `Box`, no `BTreeMap`, no
-  `String`. If the existing implementation is `std`- or `alloc`-based, **that port is the real
-  cost of this work and should be scoped before anything is committed to.**
-- **No growth and no rehash.** Capacity is a compile-time constant. A full table refuses.
-  Rehashing is an unbounded operation wearing an amortised disguise, and there is no point in a
-  real-time system at which "usually fast" is the property being sold.
+- **No allocation, of any kind.** The assurance spine forbids `#[global_allocator]`,
+  `extern crate alloc` **and `use alloc::`** anywhere in the image, and withdraws `G11` loudly
+  if any appears. So no `Vec`, no `Box`, no `String` — which is precisely why stage 1 is a
+  dependency-strip and not a straight vendoring.
+- **No write path in the first stage.** `btree_writer` does INSERT with page split, and a page
+  split is unbounded work wearing an amortised disguise. `sharcrust/specs/write-ops-roadmap.md`
+  is honest that overflow-write, freelist management, UPDATE, DELETE and rebalance are
+  specified and not built; none of them may reach the board before its bound is stated.
 - **No unbounded operation whatsoever** — no full scans, no joins, no sorts, no aggregates, no
-  iterators that outlive a call. Every entry point takes its own budget or has a constant one.
-- **No blocking.** No waits, no retries against a deadline, no I/O. Fail-safe over keep-trying.
-- **No query language and no planner.** A planner is a variable-latency component by
-  construction. Callers name slots, not intentions.
+  cursor that outlives its call. Every entry point carries a budget or a constant.
+- **No blocking, no I/O, no waiting on a device.** Fail-safe over keep-trying.
+- **No query planner.** A planner is a variable-latency component by construction. Callers name
+  pages and keys, not intentions.
 - **No persistence, and not because it is hard.** TinyOS cannot read the SD card or NVMe on
-  this board at all; `RamVolume` lives in `shell` and is Tier 0, never compiled for the target.
-  TinyDB is RAM-backed and its contents die with the boot. **Saying so is a scope statement, not
-  an apology** — and it means no durability claim may be made for it in any Report.
-- **No parsing of external bytes.** Keys and values arrive from in-image callers (`C1`). The
-  moment a key arrives from off-board, this becomes a hostile-input surface under `PD-12` and
-  `BND-03` and needs its own contracts. It does not have them.
-- **No randomised hashing.** A per-boot hash seed would make the probe count — and therefore
-  the WCET — vary between boots, which defeats the whole point. The consequence is that
-  **TinyDB is vulnerable to hash flooding by construction**, and that is acceptable *only*
-  while every key originates in-image. This is the exclusion most likely to be forgotten when
-  someone later wants to key on a network-supplied identifier, so it is stated loudest.
+  this board at all. The database is a byte range in RAM, and its contents die with the boot.
+  **That is a scope statement, not an apology**, and no durability claim may be made.
+- **No parsing of a database file from off-board.** A `.arc` arriving over the wire is external
+  bytes and makes this a hostile-input surface under `PD-12`/`BND-03` — with a *file-format
+  parser* as the attack surface, which is the single most CVE-prone shape in this whole design.
+  In-image byte ranges only, until that Feature exists with its own adversarial tests.
+- **No crypto in the first stages.** `aes-gcm`, `pbkdf2` and `ed25519-dalek` are external
+  dependencies and, more importantly, unbounded-ish work with no stated WCET here.
 
 ## 5. Where it runs, stated honestly
 
-**At EL1, in the kernel's own protection domain, initially.** There is no `EL0` on this path —
-the exception-level module treats it as "the impossible entry" — and there are no per-task
-address spaces. So the first TinyDB is *not* a contained `C3` application, and **no containment
-evidence may be claimed for it.** It is a workload that proves the scheduler, not an isolation
-demonstration.
+**At EL1, in the kernel's own protection domain.** There is no `EL0` on this path — the
+exception-level module treats it as *"the impossible entry"* — and there are no per-task
+address spaces. So this is **not** a contained `C3` application and **no containment evidence
+may be claimed for it.** It is a workload that proves the scheduler, not an isolation
+demonstration. A legitimate first step and an illegitimate final one.
 
-That is a legitimate first step and an illegitimate final one. The staging:
+## 6. The licence question, which blocks stage 1
 
-1. **EL1, kernel domain** — the RT feasibility probe. Measurable, falsifiable, uncontained.
-2. **EL0 with per-task address spaces** — when `EPIC-P1`'s isolation work lands, TinyDB becomes
-   the first genuine `C3` subject, and the containment claims become testable rather than
-   assumed.
-3. **Persistence** — only after a block-device service exists with its own `BND-07` evidence.
+`internal/` is git-ignored, correctly and for the same reason `external/npcap188/` is: a
+proprietary tree inside an MIT repository survives untracked exactly until someone types
+`git add`. Vendoring SharCrust's format core into `os/src/` **moves code across that line into
+a public MIT image.**
 
-## 6. The measurement contract
+And the two statements about that code do not currently agree:
 
-TinyDB is not finished when it works. It is finished when its cost is **stated**, in the same
-envelope and by the same discipline as everything else:
+```
+sharcrust/Cargo.toml   license = "MIT"
+Sharc.Probe/README.md  "Proprietary and confidential. Not licensed for redistribution."
+```
 
-- `tinydb_get_hit`, `tinydb_get_miss_at_probe_bound`, `tinydb_put_new`, `tinydb_put_replace`,
-  `tinydb_delete`, `tinydb_scan_of_N` — each `n=1000 warmup=100`, through `measure_phases`,
-  landing beside the spoor costs in the `TOS64-MEAS/2` envelope.
+Both cannot hold for code vendored into TinyOS. The owner holds both copyrights so this is
+settleable by decision rather than negotiation — but it must be settled **explicitly and in
+writing before a line moves**, and the resolution belongs in `external/README.md`'s sibling
+for `internal/`. This is the same discipline that caught the Npcap boundary before a
+`git add external/` could have staged a source-available tree into an MIT repository.
+
+## 7. The measurement contract
+
+Not finished when it works — finished when its cost is **stated**, in the same envelope and by
+the same discipline as everything else:
+
+- `sharc_record_decode`, `sharc_page_read`, `sharc_btree_lookup_at_depth_bound`,
+  `sharc_cursor_step_of_N` — each `n=1000 warmup=100` through `measure_phases`, landing beside
+  the spoor costs in the `TOS64-MEAS/2` envelope.
 - **Batched where the operation is small**, per `LE-24`: the batched twin is the quotable
-  figure and the unbatched one is residue-contaminated. That lesson was learned after the fact
-  once; here it is applied before the first number is quoted.
-- **The miss-at-probe-bound case is the WCET case** and is the number that matters. An average
-  `get` tells you nothing about whether a deadline holds.
-- Until those numbers exist off the wire, no claim about TinyDB's determinism may be made, and
-  the Story says so.
+  figure and the unbatched one is residue-contaminated. Applied *before* the first number is
+  quoted rather than after, which is the lesson that row cost this project a Report.
+- **The depth-bound lookup is the WCET case** and is the number that matters. An average
+  lookup says nothing about whether a deadline holds.
+- Until those exist off the wire, no determinism claim may be made for this layer.
 
-## 7. What this document does not decide
+## 8. What this document does not decide
 
-- ~~Whether the owner's existing Rust database can be ported under §4's constraints.~~
-  **Answered 2026-08-05 by reading it.** The engine is `SharCrust`
-  (`internal/Sharc.Probe/sharcrust/`) — a genuine from-scratch Rust implementation of the
-  SQLite file format: pager, B-tree read and write with page splits, overflow, freelist,
-  AES-256-GCM per-page crypto, ~791 tests. It is also, unambiguously, a `std` crate:
-
-  ```
-  serde · serde_json · rust_decimal · uuid · aes-gcm · hmac · sha2
-  pbkdf2 · rand · zeroize · ed25519-dalek        +  use std:: across the engine
-  ```
-
-  Every one of those needs `alloc` at minimum, and §4's first exclusion forbids `use alloc::`
-  outright. **So this is not a port with a cost — it is a different crate that would share
-  SharCrust's semantics and none of its code.** Anything built under this document is new
-  code; SharCrust's value to TinyOS is on the host side (below), not on the board.
-- The host-side archive's *contents*. Its **boundary**, however, is decided here, because an
-  earlier recommendation to put it "in `xtask`" was wrong and would have broken CI.
-
-  `internal/` is git-ignored — correctly, and with the same reasoning `external/npcap188/`
-  carries: proprietary code inside an MIT repository survives untracked exactly until someone
-  types `git add`. A clean clone therefore has no `internal/Sharc.Probe`, so **any
-  `xtask → sharcrust` path dependency fails on the runner.** `CONTEXT.md` flags the sharper
-  version of the same hazard itself: SharCrust's dev-dependencies reach into a sibling
-  `MAKER.aiKit` checkout, with the explicit warning to *"cut or vendor this before building
-  SharCrust inside any other repository's CI."*
-
-  **So the boundary is a file, not a Cargo dependency: TinyOS emits, Sharc.Probe ingests.**
-  TinyOS stays MIT and buildable from a clean clone, the proprietary engine stays out of its
-  dependency graph, and the archive lives where its engine already lives.
-
-  What that buys is larger than a query language. A `.arc` is SQLite-format, so a spoor
-  archive is immediately readable by machinery that already exists — `probe_cli`, PySharc, and
-  **`sharc_mcp`, an MCP server built for LLM agents**, with `hot_trace`, `hot_impact`,
-  `hot_history`, `hot_time_travel` and `hot_epoch_diff` already implemented over it. Sharc's
-  `epoch` already means *a snapshot generation you can diff against another*, and the board
-  already stamps a boot epoch. *"What changed between boot `0x04B328BC` and boot
-  `0x04C7D0FF`?"* becomes a tool call rather than a grep — which is the framing that started
-  this ("a spoor is to a physical system what a token is to a language model") actually
-  cashing out. Still gated behind `LE-76`: archiving today's text transcript would bake in
-  records with no sequence, no epoch and invisible loss.
-- Any Feature or Story decomposition. This is a scope note so that the boundary is settled
+- **Any Feature or Story decomposition.** This is a scope note so the boundary is settled
   before code exists — not a plan, and explicitly not a commitment to build.
+- **The host-side archive's contents.** Its *boundary* is decided: **a file, not a Cargo
+  dependency.** TinyOS emits, Sharc.Probe ingests. A clean clone has no `internal/`, so any
+  `xtask → sharcrust` path dependency fails on the runner — and `CONTEXT.md` flags the sharper
+  version itself, warning to cut or vendor SharCrust's `kit-step` dev-dependency *"before
+  building SharCrust inside any other repository's CI."*
+- **The archive is still gated behind `LE-76`**: ingesting today's text transcript would bake
+  in records with no sequence, no epoch and invisible loss. Once spoor records carry the
+  envelope, a `.arc` archive is readable by `probe_cli`, PySharc and **`sharc_mcp`** — whose
+  `hot_epoch_diff` and `hot_time_travel` already do, for datasets, exactly what the board's
+  boot epoch invites for runs.
