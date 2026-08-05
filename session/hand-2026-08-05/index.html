@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TinyOS Handovers — 4 August 2026</title>
+<title>TinyOS Handovers — 5 August 2026</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -96,6 +96,10 @@
   <li class="entry">
     <span class="num">01A</span><a href="01A-the-need-for-speed-and-what-must-not-be-traded-for-it.md">The need for speed, and what must not be traded for it</a>
     <p>Written at the owner&#39;s request on the framing that the project now has <em>a verifiable development cycle worth a 10&times; improvement, with TDD and no loss of quality</em>. <strong>&sect;2 &mdash; where the speed actually comes from:</strong> evidence replaced transcription; ground truth captured <em>before</em> design (twenty minutes of SSH sized <code>STORY-P1-10-05</code> correctly and corrected a wrong risk statement already made out loud); a capture no longer has to be lucky; and gates that cost less than the failures they catch. The benchmark is real &mdash; <code>STORY-P1-10-05</code> ran observation &rarr; ground truth &rarr; design &rarr; TDD &rarr; gates &rarr; Story &rarr; commit &rarr; image in about an hour, with the owner only inserting a card and applying power. <strong>&sect;3 &mdash; what must not be traded, each with this session&#39;s receipt:</strong> prove the Red (14 tests failed against a neutered implementation); never substitute a constant for a discovery (<code>LE-69</code> refused a <em>conforming</em> device, and a wrong temperature still reads like a temperature); state what you did not measure (<code>LE-74</code>&#39;s caution was right and far too gentle &mdash; the board measured two consecutive epochs <strong>151 counter ticks apart</strong>); a gate that cannot see its subject is not a gate (<code>LE-72</code>); widen a vocabulary, never stretch one (and note <code>ACT</code> now has <strong>one verb of headroom</strong>). <strong>&sect;5 &mdash; the mandate, and it is not what <code>FEAT-P1-10</code>&#39;s Story list implies:</strong> <code>hal-arm64</code> references <em>none</em> of <code>sched</code>, <code>dispatch</code>, <code>lock</code> or <code>wcet</code> &mdash; <strong>the board has never run TinyOS&#39;s kernel.</strong> There are no call sites to wire because nothing calls them. The real next milestone is one task dispatched once on silicon, with the tick driving the dispatch round, observed through the stream built for exactly that. First, though: boot <code>f06bfa8ac7ec</code> and read the thermal rung, and write <code>REPORT-2026-08-04-01</code>, which is release-blocking.</p>
+  </li>
+  <li class="entry">
+    <span class="num">02A</span><a href="02A-the-report-that-closes-the-tier-debt.md">The report that closes the tier debt</a>
+    <p>Executes 01A &sect;5&#39;s second short item: <strong><a href="../../goals/reports/REPORT-2026-08-04-01.md"><code>REPORT-2026-08-04-01</code></a> is filed</strong> &mdash; the first hardware Report in the project&#39;s history, covering <code>TEST-P1-07-03-A</code>, <code>-04-A</code> and <code>-06-A</code> from the 2026-08-04/05 board verdicts, machine-parsed wire records quoted as such and canvas transcriptions quoted with their provenance stated. <strong><code>LE-09</code>, <code>LE-15</code>, <code>LE-24</code> and <code>LE-27</code> close on it.</strong> <code>FEAT-P1-07</code> stops reading <code>Specified</code>; <code>STORY-P1-07-06</code> records criteria 2&ndash;6 discharged with criterion 1 held open &mdash; no board-emitted envelope has yet been machine-parsed off the wire. The tier exists; per <code>ADR 0005</code> it is a tier and not a bound. The thermal boot and the kernel-on-silicon milestone remain exactly as 01A states them.</p>
   </li>
 </ol>
 

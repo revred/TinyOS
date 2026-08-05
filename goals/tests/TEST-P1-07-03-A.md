@@ -126,4 +126,7 @@ Host unit tests (`#[cfg(test)]` in `os/src/hal-arm64/src/`) plus a Tier 1 hardwa
 
 ## Reports
 
-To be filed when the Story goes Green.
+[`REPORT-2026-08-04-01`](../reports/REPORT-2026-08-04-01.md) — the silicon evidence:
+`SCTLR=0x30D01805` read back, the 410× cache probe (`BOARD VERDICT 5`), and the decoded
+level-1 translation fault at `FAR=0x20_0000_0000` with `HALTED REASON=NO-RESUME-PATH`
+(`BOARD VERDICT 8`).

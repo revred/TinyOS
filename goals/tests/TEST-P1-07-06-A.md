@@ -125,8 +125,13 @@ Recorded rather than silently absorbed:
 
 ### The board captures (to be quoted verbatim when the Tier 1 run happens)
 
-Pending. The parsed envelope (`parse-meas` output), the packet-capture lines it came from,
-and the canvas transcript land here, via the ground-truth file first.
+Landed via the ground-truth file:
+[`pios-ground-truth-2026-08-03.txt`](../reports/pios-ground-truth-2026-08-03.txt)
+`BOARD VERDICT 5`–`7` hold the full envelope transcripts (canvas, provenance stated) and
+`BOARD VERDICT 10`–`13` the machine-parsed wire records; quoted with that provenance split in
+[`REPORT-2026-08-04-01`](../reports/REPORT-2026-08-04-01.md). **Still pending: a `parse-meas`
+run over a wire capture of the envelope itself** — clause 1's strongest form, held open in the
+Story's status.
 
 ## Test type
 
@@ -140,4 +145,7 @@ Host unit tests (`#[cfg(test)]` in `os/src/hal/src/`, `os/src/xtask/src/`) plus 
 
 ## Reports
 
-To be filed when the Story goes Green. **`LE-09` closes on that Report and on nothing earlier.**
+[`REPORT-2026-08-04-01`](../reports/REPORT-2026-08-04-01.md) — filed 2026-08-05 from the
+2026-08-04/05 board verdicts. **`LE-09` closed on it and on nothing earlier**, with `LE-15`,
+`LE-24` and `LE-27` beside it. Clauses 2–8 discharged; clause 1's machine-parsed wire capture
+of the envelope remains open.

@@ -122,4 +122,7 @@ Host unit tests (`#[cfg(test)]` in `os/src/hal-arm64/src/`, `os/src/hal/src/time
 
 ## Reports
 
-To be filed when the Story goes Green.
+[`REPORT-2026-08-04-01`](../reports/REPORT-2026-08-04-01.md) — the silicon evidence:
+`CNTVCT=PASS CNTFRQ=54000000`, `PMCCNTR` at 2400 MHz (the `LE-15` decision executed on the
+device), and `COUNT=1816 RMIN=999 RMAX=1000` after `LE-69`/`LE-71` were cured
+(`BOARD VERDICT 5`–`7`).
