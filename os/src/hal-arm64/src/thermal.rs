@@ -40,6 +40,9 @@
 //!   arithmetic, so refining it costs an edit to Ti64Dink rather than a card
 //!   swap and a power cycle.
 
+// Only the board path and the tests name these: the host stub returns zero
+// without consulting a constant, so an ungated import is dead on a host build.
+#[cfg(any(target_arch = "aarch64", test))]
 use crate::board;
 
 // `VolatileMmio` exists only on the board: it is the one part of this module
@@ -93,10 +96,10 @@ mod tests {
     /// bounds, or the read walks off a mapping that was sized for one register.
     #[test]
     fn the_temperature_register_lies_inside_the_mapped_page() {
-        assert!(
-            board::AVS_TEMP_STATUS_OFFSET + 4 <= board::AVS_MONITOR_SIZE,
-            "the read must not leave the page the map covers"
-        );
+        // A property of two constants, so it is checked when they are compiled
+        // rather than when this test runs: a read that leaves the mapped page
+        // should fail the build, not a test run somebody might not do.
+        const { assert!(board::AVS_TEMP_STATUS_OFFSET + 4 <= board::AVS_MONITOR_SIZE) };
     }
 
     /// The AVS monitor must share the Device gigabyte the identity map already

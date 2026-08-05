@@ -499,6 +499,10 @@ const SUBCOMMANDS: &[Subcommand] = &[
         summary: "Fast: header, field count and id uniqueness on every hand-edited spine TSV",
     },
     Subcommand {
+        name: "check-lints",
+        summary: "Host clippy per package, so one crate's failure cannot hide the next crate's",
+    },
+    Subcommand {
         name: "check-boot-images",
         summary: "Build EVERY AArch64 image variant (featureless + each fixture) and clippy them",
     },
@@ -881,6 +885,19 @@ fn main() -> ExitCode {
                 }
             }
         }
+        // `LE-77`. `cargo clippy --workspace` stops at the first crate that
+        // fails, so on this bench `kernel`'s Windows-unbuildable bin hid every
+        // later crate — including the unused import that reached CI.
+        "check-lints" => match check_lints() {
+            Ok(count) => {
+                println!("lint-check: {count} package(s) linted individually — no crate can mask another");
+                ExitCode::SUCCESS
+            }
+            Err(message) => {
+                eprintln!("xtask: lint check failed: {message}");
+                ExitCode::FAILURE
+            }
+        },
         // `LE-72`. The one gate in this table that compiles anything for the
         // board, and the reason it is a gate rather than a build step: three
         // pushes went out green-by-local-gates and red on the runner because
@@ -1255,6 +1272,53 @@ fn qemu_x86_64(
 }
 
 /// `STORY-P1-07-05`: builds the bootable AArch64 image, flattens it to a
+/// Lints every package for the HOST, one at a time (`LE-77`).
+///
+/// One `cargo clippy` invocation per package rather than one `--workspace` run,
+/// because cargo stops at the first failing crate and everything after it goes
+/// unlinted. That is not hypothetical: `kernel`'s `[[bin]]` cannot compile on a
+/// Windows host, so a workspace run died there and an `unused_import` in
+/// `hal-arm64` — a crate alphabetically and topologically later — reached CI.
+///
+/// Every package is attempted even after one fails, and the failures are
+/// reported together, so a session sees all of them in one run instead of
+/// peeling them off one push at a time.
+fn check_lints() -> Result<usize, String> {
+    let os_root = os_root()?;
+    let mut failed: Vec<&str> = Vec::new();
+    for target in boot_images::HOST_LINT_TARGETS {
+        println!("lint: {} (host)", target.package);
+        let mut clippy = Command::new("cargo");
+        clippy.current_dir(&os_root).arg("clippy").arg("-p").arg(target.package);
+        // `--lib --tests`, never `--all-targets`. Several crates carry fixture
+        // BINS that name `hal_x86_64` items gated `cfg(not(windows))`, so on
+        // this host they cannot build at all and `--all-targets` would make
+        // this gate fail permanently for reasons unrelated to the code under
+        // review. A gate that always fails is a gate nobody runs — `LE-72`'s
+        // lesson applied to itself. Those bins are linted by CI's Linux
+        // workspace run; what this gate exists to catch is the LIBRARY warning
+        // that reached CI because a workspace run stopped before it.
+        if target.bin_only {
+            clippy.arg("--all-targets");
+        } else {
+            clippy.arg("--lib").arg("--tests");
+        }
+        let status = clippy
+            .arg("--")
+            .arg("-D")
+            .arg("warnings")
+            .status()
+            .map_err(|e| format!("failed to invoke cargo clippy: {e}"))?;
+        if !status.success() {
+            failed.push(target.package);
+        }
+    }
+    if !failed.is_empty() {
+        return Err(format!("clippy refused: {}", failed.join(", ")));
+    }
+    Ok(boot_images::HOST_LINT_TARGETS.len())
+}
+
 /// Builds every AArch64 image variant and lints them for the target (`LE-72`).
 ///
 /// Returns how many variants were built. Every invocation is the same

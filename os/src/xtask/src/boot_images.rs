@@ -92,6 +92,42 @@ pub const CLIPPY_TARGETS: &[ClippyTarget] = &[
     ClippyTarget { package: "pi5-image", lib_only: false },
 ];
 
+/// Packages whose HOST lint must be checked one at a time (`LE-77`).
+///
+/// `cargo clippy --workspace --all-targets` looks like it covers everything and
+/// on this bench it does not: `kernel`'s `[[bin]]` names `hal_x86_64` items that
+/// are `cfg(not(windows))`, so on a Windows host that target fails to compile,
+/// cargo stops, and **every package after it goes unlinted**. An `unused_import`
+/// in `hal-arm64` reached CI that way — the one place it could still be caught.
+///
+/// Linting per package means one crate's failure reports itself instead of
+/// hiding the next crate's. `kernel` is scoped to `--lib` for the same reason
+/// `CLIPPY_TARGETS` scopes it: its bin is the x86_64 Tier 0 guest, and on a
+/// Windows host it cannot build at all.
+pub const HOST_LINT_TARGETS: &[HostLintTarget] = &[
+    HostLintTarget { package: "hal", bin_only: false },
+    HostLintTarget { package: "hal-arm64", bin_only: false },
+    HostLintTarget { package: "hal-x86_64", bin_only: false },
+    HostLintTarget { package: "kernel", bin_only: false },
+    HostLintTarget { package: "exec", bin_only: false },
+    HostLintTarget { package: "shell", bin_only: false },
+    HostLintTarget { package: "motion", bin_only: false },
+    HostLintTarget { package: "xtask", bin_only: true },
+];
+
+/// One package linted for the host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HostLintTarget {
+    /// Cargo package name.
+    pub package: &'static str,
+    /// This package has **no library target**, so `--lib` is an error rather
+    /// than a narrowing. True only for `xtask`, which is a binary and whose
+    /// binary builds on every host — unlike the fixture bins in `exec`,
+    /// `shell` and `kernel`, which are `cfg(not(windows))` and are left to
+    /// CI's Linux workspace run.
+    pub bin_only: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -144,6 +180,27 @@ mod tests {
         assert!(linted("kernel"), "kernel is the crate LE-72 was raised over");
         assert!(linted("pi5-image"), "and pi5-image holds the link seam");
         assert!(linted("hal-arm64"));
+    }
+
+    /// The crate the masking hid must be in the per-package host list, or this
+    /// gate would not have caught what CI caught.
+    #[test]
+    fn the_host_lint_list_covers_the_crate_the_workspace_run_never_reached() {
+        let linted = |p| HOST_LINT_TARGETS.iter().any(|t| t.package == p);
+        assert!(linted("hal-arm64"), "the crate whose unused import reached CI");
+        assert!(linted("kernel"));
+        assert!(linted("shell"));
+    }
+
+    /// `kernel`'s bin is the x86_64 Tier 0 guest and does not build on a Windows
+    /// host. Scoping it is what lets the rest of the list run at all; widening
+    /// `lib_only` to anything else would be hiding a failure rather than
+    /// scoping a lint.
+    #[test]
+    fn only_the_bin_only_crate_is_marked_as_one() {
+        for target in HOST_LINT_TARGETS {
+            assert_eq!(target.bin_only, target.package == "xtask", "{}", target.package);
+        }
     }
 
     /// The one narrowing that is legitimate, pinned so it stays the only one:
