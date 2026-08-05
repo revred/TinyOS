@@ -49,20 +49,48 @@ owner's total involvement was inserting a card twice, applying power, and typing
 | Ti64Dink one-shot | **Gone.** `--until epoch-change\|rung=X\|text=Y`, `--text`, `--any`. |
 | Spoor cost unmeasured | **Gone.** Three metrics in the envelope, `STORY-P1-10-02` criterion 6 discharged. |
 
-## 3. The mandate — the board has never run the kernel
+## 3. The mandate — the kernel runs, but it does not run the machine
 
-Unchanged from `01A` §5 and now the only thing standing between this project and an operating
-system on hardware:
+### Correction, filed 2026-08-05 against my own claim
+
+**`01A` §5 and `03A` §3 say "the board has never run TinyOS's kernel". That is wrong**, and it
+was wrong in two handovers and two commit messages before the register was checked properly.
+
+The grep it rested on —
 
 ```
 grep -rn "sched::|dispatch::|kernel::lock|wcet::" os/src/hal-arm64/src/*.rs   →   nothing
 ```
 
-`hal-arm64` references **none** of them. The board boots, installs vectors, maps memory, arms a
-100 Hz tick, runs a measurement fixture and **parks**. The scheduler, the dispatcher, the
-priority-inheriting locks and the WCET budgets have never executed on silicon — they are Tier 0,
-QEMU and x86_64 only. `FEAT-P1-10` enumerates "wire the existing call sites into the AArch64
-path", which understates it: there are no call sites to wire, because nothing calls them.
+— asked the wrong crate. `hal-arm64` does not call them; **`kernel::fixture_measure_arm64`
+does**, and that runs on the board. `kernel::context` carries a `#[cfg(target_arch = "aarch64")]`
+context switch, and the evidence has been in every measure envelope since `BOARD VERDICT 5`:
+
+```
+D04  context_switch_yield_roundtrip_2switches   min=78     ← on silicon
+D05  dispatch_select_highest_priority_ready     min=1534   ← on silicon
+D05  dispatch_run_once_cooperative_round        min=1657   ← on silicon
+```
+
+A task is created, a context is switched, a dispatch round runs — on the Pi 5, a thousand times
+per boot. This is the prose-versus-register class (`LE-30`, `LE-65`, `LE-70`, `LE-73`) with a
+handover as the prose and the board's own envelope as the register.
+
+### What is actually missing
+
+**The kernel runs; it does not run the machine.** Dispatch happens only *inside*
+`fixture_measure`: a timed region, interrupts masked by `STORY-P1-07-10`'s scope, results
+discarded when the fixture returns. The board then falls into `hal-arm64`'s park loop, where the
+tick increments a counter and **no task owns anything**.
+
+So the mandate, stated correctly and much narrower than I had it:
+
+**A dispatch round driven by the tick, with interrupts live, outside any measured region,
+stamping a `Dispatch` spoor from a running system rather than from a fixture.**
+
+That is a smaller piece of work than "port the kernel", and the reason it is smaller is that
+the hard parts — the AArch64 context switch, the scheduler, the dispatcher — are already
+proven on this hardware with numbers attached.
 
 **Smallest honest increment: one task created, one dispatch round, one `Dispatch` spoor off
 silicon.** Then the tick drives the dispatch round and the board stops being parked and starts
