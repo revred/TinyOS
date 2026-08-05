@@ -21,6 +21,15 @@ work/**/*.PDF
 # to pin; the version is recorded in external/README.md instead.
 external/npcap188/
 
+# Closed-source working checkouts (internal/Sharc.Probe and siblings).
+# PROPRIETARY AND CONFIDENTIAL per their own headers — committing any of it
+# into this MIT-licensed repository would be unlicensed redistribution and
+# would falsely imply an MIT grant, the exact npcap188 hazard again. Ignored
+# rather than left untracked, because untracked survives exactly until
+# someone types `git add internal/`. Each checkout is its own git clone;
+# its history and remote live there, never here.
+internal/
+
 # Common editor/OS cruft
 .DS_Store
 Thumbs.db
