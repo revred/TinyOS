@@ -15,6 +15,22 @@ external dependencies — the proving ground for the RT layer**, and that is a b
 feasibility proven against a stand-in proves the stand-in, while feasibility proven against
 the engine that will actually run proves the thing.
 
+**Scope, narrowed by the owner 2026-08-05: `sharcrust/` is the only slice under
+consideration, and it runs at the USER LAYER.** Two consequences that shape everything below.
+
+`internal/Sharc.Probe/native/rust/` — the probe runtime, the MCP server, the C ABI, the CLI,
+PySharc — is **entirely out of scope for the board**. It runs on bundled SQLite through the
+`sharcrust = rusqlite` alias, it is a host product, and nothing in it is a candidate for
+TinyOS. When this document says SharCrust it means the engine crate and never the runtime
+around it.
+
+And **the engine is an application, not a kernel subsystem.** It does not get vendored into
+`kernel` or `hal-arm64`; it is a separate crate that TinyOS *runs*. That is the whole point of
+using it as a feasibility probe: a storage engine embedded in the kernel would be measuring the
+kernel with itself inside, while an engine running as the first user-layer workload measures
+whether the OS can *carry* one. The staging in §5 is therefore about how much isolation exists
+underneath it at each step, not about whether it is ever kernel code. It is not.
+
 ---
 
 ## 1. Why a real storage engine is the right feasibility probe
@@ -104,13 +120,32 @@ machine-enforces.
 - **No crypto in the first stages.** `aes-gcm`, `pbkdf2` and `ed25519-dalek` are external
   dependencies and, more importantly, unbounded-ish work with no stated WCET here.
 
-## 5. Where it runs, stated honestly
+## 5. Where it runs — a user-layer application, on an OS that has no user layer yet
 
-**At EL1, in the kernel's own protection domain.** There is no `EL0` on this path — the
-exception-level module treats it as *"the impossible entry"* — and there are no per-task
-address spaces. So this is **not** a contained `C3` application and **no containment evidence
-may be claimed for it.** It is a workload that proves the scheduler, not an isolation
-demonstration. A legitimate first step and an illegitimate final one.
+The engine is **an application TinyOS runs**, never kernel code. But the honest position today
+is that the machine it would run on has nowhere to put it:
+
+```
+EL0                     "the impossible entry" — nothing runs there
+per-task address spaces  none
+protection domains       one, the kernel's own
+```
+
+So the first stage runs **at EL1 in the kernel's protection domain** — as a *task*, dispatched
+by the scheduler, but with no isolation beneath it. That is a legitimate first step and an
+illegitimate final one, and it must never be described as anything else: **no containment
+evidence may be claimed, and this is not a `C3` subject.** It is a workload that proves the
+scheduler can carry a real one.
+
+| Stage | Isolation underneath | What it proves |
+|---|---|---|
+| **1** | None — EL1, kernel domain, one task | The scheduler carries a real workload with bounded operations |
+| **2** | `EL0` + per-task address spaces | The engine becomes the first genuine `C3` subject, and containment claims become testable |
+| **3** | A block-device service with `BND-07` evidence | Persistence, which stage 1 explicitly does not have |
+
+The gap between stage 1 and stage 2 is `EPIC-P1`'s isolation work and is not this document's
+to schedule. What matters here is that **the engine's placement never changes** — it is a
+user-layer application at every stage, and only the floor beneath it rises.
 
 ## 6. The licence question, which blocks stage 1
 
