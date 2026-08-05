@@ -88,6 +88,7 @@ internal static class Program
         var strict = false;
         string? device = null;
         string? textPath = null;
+        var anyFrames = false;
         var liveSeconds = 0;
         string? untilSpec = null;
         var timeoutSeconds = DefaultUntilTimeout;
@@ -117,6 +118,13 @@ internal static class Program
                 // transcription of a photograph.
                 case "--text" when i + 1 < args.Length:
                     textPath = args[++i];
+                    break;
+                // Watch the wire before TinyOS exists: the Pi 5 bootloader's
+                // netboot traffic is DHCP and TFTP over IPv4/UDP, so the 0x88B5
+                // filter that keeps every other capture clean is exactly what
+                // hides this one.
+                case "--any":
+                    anyFrames = true;
                     break;
                 // Exit non-zero unless at least one frame decoded, so a run can
                 // gate a Report rather than merely inform a reader.
@@ -156,6 +164,23 @@ internal static class Program
 
         // A watch with no file goes live; a watch WITH a file evaluates the
         // file (the degenerate case a scripted test can drive with no board).
+        if (anyFrames)
+        {
+            var anyDevice = device ?? PickEthernet();
+            if (anyDevice is null)
+            {
+                Console.Error.WriteLine("ti64dink: no capture device found; try --list");
+                return 2;
+            }
+            var window = liveSeconds > 0 ? liveSeconds : 60;
+            Console.WriteLine($"ti64dink: --any, listening {window}s on {anyDevice}");
+            Console.WriteLine("  (every EtherType, headers kept — this is the bootloader lane)");
+            Console.WriteLine();
+            var raw = Live.CaptureAny(anyDevice, window, out var rawSeen);
+            ReportAny(raw, rawSeen);
+            return raw.Count == 0 && strict ? 1 : 0;
+        }
+
         if (liveSeconds > 0 || (watch is not null && path is null))
         {
             var chosen = device ?? PickEthernet();
@@ -810,6 +835,72 @@ internal static class Program
     ];
     private static readonly string[] Outcomes =
         ["Ok", "Empty", "Chose", "Capped", "Failed", "Skipped", "Superseded", "Partial"];
+
+    /// Summarises an unfiltered capture: who spoke, what EtherType, and any
+    /// readable text in the payload.
+    ///
+    /// Deliberately a summary and not a protocol decoder. Writing a DHCP and
+    /// TFTP parser to answer "what does the bootloader ask for" would be
+    /// building the thing the answer is supposed to size — the same
+    /// design-before-ground-truth mistake the netboot investigation exists to
+    /// avoid. Ethernet addresses, EtherType, length and printable strings are
+    /// enough to read a DHCP DISCOVER's vendor class and a TFTP read request's
+    /// filename, which is the whole question.
+    private static void ReportAny(List<byte[]> frames, int seen)
+    {
+        Console.WriteLine($"ti64dink: {seen} frame(s) captured");
+        Console.WriteLine();
+
+        var byType = new Dictionary<ushort, int>();
+        var talkers = new Dictionary<string, int>();
+        var strings = new List<string>();
+
+        foreach (var f in frames)
+        {
+            var etherType = (ushort)((f[12] << 8) | f[13]);
+            byType[etherType] = byType.GetValueOrDefault(etherType) + 1;
+            var src = string.Join(':', f[6..12].Select(b => b.ToString("x2")));
+            talkers[src] = talkers.GetValueOrDefault(src) + 1;
+
+            // Printable runs of 4+, relaxed from the envelope rule: a TFTP
+            // filename carries no `=` and is exactly what we are here to read.
+            var at = 14;
+            while (at < f.Length)
+            {
+                if (f[at] < 0x20 || f[at] > 0x7E) { at++; continue; }
+                var start = at;
+                while (at < f.Length && f[at] >= 0x20 && f[at] <= 0x7E) at++;
+                if (at - start < 4) continue;
+                var text = Encoding.ASCII.GetString(f, start, at - start).Trim();
+                if (text.Length >= 4 && !strings.Contains(text)) strings.Add(text);
+            }
+        }
+
+        Console.WriteLine("---- EtherTypes ----");
+        foreach (var (type, count) in byType.OrderByDescending(e => e.Value))
+        {
+            var name = type switch
+            {
+                0x0800 => "IPv4 (DHCP/TFTP live here)",
+                0x0806 => "ARP",
+                0x86DD => "IPv6",
+                0x88B5 => "TOS64 (the board's own)",
+                _ => "",
+            };
+            Console.WriteLine($"    0x{type:X4}  {count,5} frame(s)  {name}");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("---- source MACs ----");
+        foreach (var (mac, count) in talkers.OrderByDescending(e => e.Value))
+        {
+            Console.WriteLine($"    {mac}  {count,5} frame(s)");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"---- readable strings ---- ({strings.Count} distinct)");
+        foreach (var text in strings) Console.WriteLine("    " + text);
+    }
 
     /// The TOS64-MEAS/2 envelope alone, in the order the board emits it.
     ///

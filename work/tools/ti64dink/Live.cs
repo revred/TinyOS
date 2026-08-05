@@ -103,6 +103,53 @@ internal static class Live
     internal static List<byte[]> Capture(string device, int seconds, out int framesSeen) =>
         Capture(device, seconds, sighted: null, out framesSeen);
 
+    /// Captures EVERY frame, not just TOS64 ones, returning each WITH its
+    /// 14-byte Ethernet header intact.
+    ///
+    /// For watching what the Pi 5 bootloader does before TinyOS exists: its
+    /// netboot traffic is DHCP and TFTP over IPv4/UDP (EtherType 0x0800), so
+    /// the 0x88B5 filter that makes every other capture clean is precisely
+    /// what blinds this one. The header is kept because here the addresses and
+    /// the EtherType ARE the evidence - which MAC asked, and for what.
+    internal static List<byte[]> CaptureAny(string device, int seconds, out int framesSeen)
+    {
+        var errbuf = new byte[ErrbufSize];
+        var handle = pcap_open_live(device, 65536, 1, 100, errbuf);
+        if (handle == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("pcap_open_live: " + Str(errbuf));
+        }
+
+        var frames = new List<byte[]>();
+        framesSeen = 0;
+        var deadline = DateTime.UtcNow.AddSeconds(seconds);
+        try
+        {
+            while (DateTime.UtcNow < deadline)
+            {
+                IntPtr headerPtr = IntPtr.Zero, dataPtr = IntPtr.Zero;
+                var rc = pcap_next_ex(handle, ref headerPtr, ref dataPtr);
+                if (rc == 0) continue;
+                if (rc < 0) break;
+                if (headerPtr == IntPtr.Zero || dataPtr == IntPtr.Zero) continue;
+
+                var header = Marshal.PtrToStructure<PcapPktHdr>(headerPtr);
+                var caplen = (int)header.CapLen;
+                if (caplen < 14) continue;
+
+                var frame = new byte[caplen];
+                Marshal.Copy(dataPtr, frame, 0, caplen);
+                framesSeen++;
+                frames.Add(frame);
+            }
+        }
+        finally
+        {
+            pcap_close(handle);
+        }
+        return frames;
+    }
+
     /// The `--until` shape: same capture, but each payload is offered to
     /// `sighted` as it arrives and the capture ends EARLY the moment the
     /// predicate returns true. The deadline still stands — a condition that

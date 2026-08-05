@@ -100,3 +100,107 @@ One bench session: one Pi OS boot (questions 1, and §6 of the
 [runbook](pi5-board-session-runbook.md) — the `NOPASSWD` probe prep — in the
 same boot), one EEPROM write, two power cycles with a capture running. Perhaps
 twenty minutes, none of it code.
+
+---
+
+## Answers from the bench, 2026-08-05
+
+Three of the five questions are closed on this board, one is closed with a
+correction to its own premise, and the fifth is untested. Evidence is the
+`tos64-probe` output and two `ti64dink --any` captures taken across live
+reboots.
+
+### Q1 — what `BOOT_ORDER` does this EEPROM hold? **Answered.**
+
+```
+bootloader 2026/05/26, version 086b83e3332d… (release), capabilities 0x0000007f
+[all]
+BOOT_UART=1
+BOOT_ORDER=0xf461          ← as found
+NET_INSTALL_AT_POWER_ON=1
+eth0 MAC   88:a2:9e:11:4e:cc
+serial     d7bd1a077bf18f79
+```
+
+`0xf461` reads right-to-left: **SD, USB, NVMe, restart**. Network (`0x2`) was
+**not in the sequence at all**, so this board had never once attempted a netboot
+— the capability was present and simply never exercised. `NET_INSTALL_AT_POWER_ON=1`
+is the network *installer*, a different feature, and was a red herring.
+
+**Changed to `BOOT_ORDER=0xf12`** — network, then SD, then restart — with the
+prior config backed up to `/home/revanur/eeprom-backup.txt` and applied through
+`rpi-eeprom-config --apply`. Note the running EEPROM continues to report the old
+value until the next boot: the A/B update commits at boot, so *verify after
+reboot, not after apply*.
+
+### Q4 — does a failed netboot always fall back to SD? **Answered, and it was the right question to ask first.**
+
+**Yes, twice, unattended.** With `0xf12` live and no DHCP or TFTP server
+anywhere on the link, the board attempted the network, failed, fell through to
+the card and reached a Pi OS login in **~41 s**, then repeated the same
+behaviour on a second reboot (**~27 s** to SSH).
+
+This is the bench-safety result the whole investigation was gated on: **a
+missing or bad netboot image now costs a reboot, not a card swap.** Nothing may
+depend on netboot before this is established, and now it is.
+
+### Q2 — does the bootloader require DHCP, or can the client side be static? **Answered.**
+
+It issues a **PXE-style DHCP DISCOVER**, captured off the wire:
+
+```
+source MAC 88:a2:9e:11:4e:cc, 32 frames
+vendor class:  PXEClient:Arch:00000:UNDI:002001
+```
+
+Worth noting `Arch:00000` — the architecture code is the legacy x86 value, not
+an AArch64 one. A server that dispatches on architecture must not expect `00011`
+from this board.
+
+### Q3 — what file set does the firmware request over TFTP? **Not answerable yet, and the question's premise needed correcting.**
+
+**No TFTP traffic appeared at all.** The investigation paired Q3 with "capture
+the TFTP file set", but the bootloader never reaches TFTP: without a DHCP
+*offer* it has no server address and no boot file to ask for, so the exchange
+stops at DISCOVER.
+
+So Q3 is not an observation that can be made before building anything — it is
+gated behind a **minimal DHCP responder** that answers this MAC with a
+`next-server` and a boot file name. That responder is small and is now
+well-specified by Q2's capture. The sequencing in this document was wrong and is
+corrected here rather than quietly worked around.
+
+### Q5 — does netboot coexist with the TOS64 wire? **Untested.**
+
+Both captures were taken while the board booted Pi OS, so no `0x88B5` frames
+appeared. The question stands.
+
+## What remains to end the card swap
+
+One component: a **minimal DHCP responder plus TFTP server** on the laptop,
+answering `88:a2:9e:11:4e:cc`. Per the standing rule it is C# under
+`work/tools/`. Q2 sizes it and Q4 makes it safe to experiment with. After it
+exists, deploying a TinyOS build is `xtask pi5` plus a reboot, with the firmware
+doing the loading — and **rule 9 is never engaged, because TinyOS neither parses
+nor admits anything.**
+
+## Hazard found while answering these — do not repeat
+
+**Reading the AVS monitor's debugfs regmap reset the board.**
+
+```
+/sys/kernel/debug/regmap/dummy-avs-monitor@0x000000107d542000/registers
+```
+
+The syscon region is `0xf0000` bytes, so that file materialises ~983,000
+register reads. The SSH connection dropped mid-read and `/proc/uptime` showed
+110 s afterwards — the machine had restarted. `head -c` does not help; the
+kernel generates the content before anything truncates it.
+
+This also removed the last route to a raw AVS reading under Linux: `/dev/mem`
+returns `EINVAL` under Pi OS's `STRICT_DEVMEM`, and the regmap path is now
+known-dangerous. The `LE-75` calibration therefore stands as **published
+constants corroborated on this board, not independently derived** — the raw
+datum falls monotonically as the die warms and TinyOS's derived 40.9→46.7 °C
+brackets Linux's 38.05 °C idle sensibly, which is corroboration and is not the
+same thing as a two-point fit.
