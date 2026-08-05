@@ -410,7 +410,7 @@ internal static class Program
 
         try
         {
-            File.WriteAllLines(textPath, text);
+            File.WriteAllLines(textPath, EnvelopeForParser(text));
             Console.WriteLine();
             Console.WriteLine($"    written to {textPath} — parse with:");
             Console.WriteLine($"      cargo run -p xtask -- parse-meas --file={textPath}");
@@ -810,6 +810,33 @@ internal static class Program
     ];
     private static readonly string[] Outcomes =
         ["Ok", "Empty", "Chose", "Capped", "Failed", "Skipped", "Superseded", "Partial"];
+
+    /// The TOS64-MEAS/2 envelope alone, in the order the board emits it.
+    ///
+    /// Two transformations, both of which have to be defensible because this
+    /// file becomes evidence that `xtask parse-meas` reads.
+    ///
+    /// FILTERED to `TOS64-MEAS/2` lines. The board cycles one transcript line
+    /// per beat and interleaves its `TOS64-PRESENT/1` beacon between them, so a
+    /// raw harvest is two streams braided together. The beacon is still printed
+    /// to the console - it is FEAT-P1-09's own evidence - but it is not part of
+    /// a measurement envelope and the parser is right to refuse it.
+    ///
+    /// ROTATED so BEGIN comes first. A capture starts wherever the cycle
+    /// happened to be, so a harvest is a ROTATION of the emission order, not a
+    /// shuffle of it. Rotating back is exact and preserves every relative
+    /// position; it is not a sort, and nothing is reordered within the run.
+    /// If no BEGIN was captured the lines are written untouched, so the parser
+    /// refuses an incomplete envelope rather than being handed a plausible one.
+    private static List<string> EnvelopeForParser(List<string> text)
+    {
+        var envelope = text.FindAll(line => line.StartsWith("TOS64-MEAS/2", StringComparison.Ordinal));
+        var begin = envelope.FindIndex(line => line.Contains(" BEGIN ", StringComparison.Ordinal));
+        if (begin <= 0) return envelope;
+        var rotated = envelope.GetRange(begin, envelope.Count - begin);
+        rotated.AddRange(envelope.GetRange(0, begin));
+        return rotated;
+    }
 
     /// Renders an AVS monitor temperature word (LE-75).
     ///
