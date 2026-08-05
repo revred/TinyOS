@@ -53,6 +53,13 @@ pub enum Rung {
     ParkIteration = 6,
     /// A synchronous exception was taken and reported (`STORY-P1-07-02`).
     FaultTaken = 7,
+    /// The SoC die temperature was sampled (`LE-75`).
+    ///
+    /// The cost field carries the AVS monitor's **raw register word**, not a
+    /// temperature. The board does not convert, because the raw-to-millicelsius
+    /// calibration is unverified on this hardware and a converted value would
+    /// arrive as a confident number nobody could tell was wrong.
+    ThermalSample = 8,
 }
 
 impl Rung {
@@ -72,6 +79,7 @@ impl Rung {
             5 => Some(Rung::FixtureMeasure),
             6 => Some(Rung::ParkIteration),
             7 => Some(Rung::FaultTaken),
+            8 => Some(Rung::ThermalSample),
             _ => None,
         }
     }
@@ -103,7 +111,10 @@ impl Rung {
     pub const fn is_boot_certificate(self) -> bool {
         match self {
             Rung::MmuEnabled | Rung::GicRouted | Rung::TickArmed | Rung::FixtureMeasure => true,
-            Rung::BeaconTransmitted | Rung::ParkIteration | Rung::FaultTaken => false,
+            Rung::BeaconTransmitted
+            | Rung::ParkIteration
+            | Rung::FaultTaken
+            | Rung::ThermalSample => false,
         }
     }
 
@@ -127,6 +138,10 @@ impl Rung {
             | Rung::FixtureMeasure => (Category::Boot, Action::Create),
             Rung::ParkIteration => (Category::Boot, Action::Select),
             Rung::FaultTaken => (Category::Fault, Action::Fault),
+            // The one rung that records what the machine *is* rather than what
+            // it did: `Observe` because reading changes nothing, and nothing
+            // yet acts on the reading.
+            Rung::ThermalSample => (Category::Thermal, Action::Observe),
         }
     }
 }
@@ -577,6 +592,7 @@ mod tests {
             Rung::FixtureMeasure,
             Rung::ParkIteration,
             Rung::FaultTaken,
+            Rung::ThermalSample,
         ] {
             assert_eq!(Rung::from_bits(rung.to_bits()), Some(rung));
         }
@@ -588,7 +604,7 @@ mod tests {
     #[test]
     fn an_unknown_rung_is_refused_not_guessed() {
         assert_eq!(Rung::from_bits(0), None);
-        assert_eq!(Rung::from_bits(8), None);
+        assert_eq!(Rung::from_bits(9), None);
         assert_eq!(Rung::from_bits(u16::MAX), None);
     }
 
@@ -603,6 +619,7 @@ mod tests {
         assert_eq!(Rung::FixtureMeasure.to_bits(), 5);
         assert_eq!(Rung::ParkIteration.to_bits(), 6);
         assert_eq!(Rung::FaultTaken.to_bits(), 7);
+        assert_eq!(Rung::ThermalSample.to_bits(), 8);
     }
 
     /// A fault must describe itself the same way on both architectures, or a
@@ -1065,7 +1082,9 @@ mod tests {
         for rung in [Rung::MmuEnabled, Rung::GicRouted, Rung::TickArmed, Rung::FixtureMeasure] {
             assert!(rung.is_boot_certificate(), "{rung:?} happens once and establishes state");
         }
-        for rung in [Rung::BeaconTransmitted, Rung::ParkIteration, Rung::FaultTaken] {
+        for rung in
+            [Rung::BeaconTransmitted, Rung::ParkIteration, Rung::FaultTaken, Rung::ThermalSample]
+        {
             assert!(!rung.is_boot_certificate(), "{rung:?} repeats, so it is stream not birth");
         }
     }

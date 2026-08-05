@@ -1603,6 +1603,21 @@ mod glue {
                     crate::spoor::Verdict::Ok,
                     beat_seq,
                 );
+                // `LE-75`: the machine says how hot it is, once per beat. One
+                // `ldr` from the AVS monitor, stamped **raw** — the board does
+                // not convert, because the raw-to-millicelsius calibration is
+                // unverified on this hardware and a converted value would
+                // arrive as a confident number nobody could tell was wrong.
+                //
+                // Sensing only. Nothing here drives the fan or caps a clock,
+                // and that separation is deliberate: an actuator fed by a
+                // sensor nobody has validated turns a measurement error into a
+                // physical one.
+                crate::spoor::stamp(
+                    crate::spoor::Rung::ThermalSample,
+                    crate::spoor::Verdict::Ok,
+                    crate::thermal::read_raw(),
+                );
                 if beaconing {
                     if let Some((speed, full_duplex)) = speed_config {
                         let mut payload = [0u8; gem::SPOOR_FRAME_CAPACITY - 14];

@@ -179,6 +179,48 @@ pub const GICC_BASE: u64 = 0x0000_0010_7FFF_A000;
 /// The CPU-interface window: two pages (the second is the GICv2 alias page).
 pub const GICC_SIZE: usize = 0x2000;
 
+/// The AVS monitor, which owns the SoC die temperature (`LE-75`).
+///
+/// **Transcribed from this board, not recalled.** Captured over SSH from the
+/// running Pi OS on 2026-08-05 (`goals/reports/pios-ground-truth-2026-08-03.txt`):
+///
+/// ```text
+/// /proc/device-tree/soc@107c000000/avs-monitor@7d542000
+///     compatible : brcm,bcm2711-avs-monitor syscon simple-mfd
+///     reg        : 7d542000  size 000f0000
+///     status     : okay
+/// soc@107c000000/ranges : child 0x0 -> parent 0x10_0000_0000, size 0x8000_0000
+/// ```
+///
+/// `0x7d54_2000 + 0x10_0000_0000` = this constant, which is exactly what Linux
+/// resolved the platform device to: `107d542000.avs-monitor`. The address is
+/// therefore corroborated twice from the same capture rather than derived once.
+///
+/// It sits in the same Device gigabyte as [`GICD_BASE`], so the identity map
+/// already reaches it and no mapping change was needed — checked, not assumed.
+///
+/// BCM2712 reuses BCM2711's AVS monitor, which is why the `compatible` string
+/// says `bcm2711` on a Pi 5.
+pub const AVS_MONITOR_BASE: u64 = 0x0000_0010_7D54_2000;
+
+/// One page of the AVS monitor is all this code touches.
+///
+/// The device tree declares `0xf0000`, and mapping a 960 KiB window to read one
+/// register would hand a fault a much larger space to land in silently.
+pub const AVS_MONITOR_SIZE: usize = 0x1000;
+
+/// Offset of the read-only temperature status word within [`AVS_MONITOR_BASE`].
+///
+/// **This is the one value in this block that is not corroborated by the
+/// capture**, because reading it needed root on the Pi and the session did not
+/// have it. It is the offset the `bcm2711_thermal` driver uses, and it is
+/// treated as a *hypothesis the board will confirm or refute*: the raw word is
+/// put on the spoor stream unconverted, so a wrong offset shows up on the wire
+/// as a value that does not behave like a temperature, rather than as a
+/// plausible number nobody questions. That is the whole reason the board does
+/// not convert — see `hal_arm64::thermal`.
+pub const AVS_TEMP_STATUS_OFFSET: usize = 0x200;
+
 #[cfg(test)]
 mod tests {
     use super::*;

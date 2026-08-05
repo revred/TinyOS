@@ -80,6 +80,22 @@ pub enum Category {
     /// the auditor filtering for "what did a session try and get refused"
     /// must never have to guess which category it was folded into.
     Shell,
+    /// The machine's own physical state — today the SoC die temperature read
+    /// from the AVS monitor (`LE-75`).
+    ///
+    /// A new variant on exactly the grounds `Fault`, `Actuation` and `Shell`
+    /// took theirs, and the argument is if anything stronger here: every other
+    /// category records something the *software* did, and this one records
+    /// something the *hardware is*. Folding a die temperature into `Boot`
+    /// because it happens to be stamped by the boot crate, or into `Memory`
+    /// because it is a register read, would make the one category an operator
+    /// most needs — "was the machine in a state where I should trust these
+    /// numbers?" — the one they have to guess at.
+    ///
+    /// It matters for a real-time OS specifically: a throttled core invalidates
+    /// every timing figure measured on it, so thermal state is not an
+    /// environmental footnote but a precondition of the evidence.
+    Thermal,
 }
 
 impl Category {
@@ -95,6 +111,7 @@ impl Category {
             Category::Fault => 7,
             Category::Actuation => 8,
             Category::Shell => 9,
+            Category::Thermal => 10,
         }
     }
 
@@ -110,6 +127,7 @@ impl Category {
             7 => Ok(Category::Fault),
             8 => Ok(Category::Actuation),
             9 => Ok(Category::Shell),
+            10 => Ok(Category::Thermal),
             _ => Err(SpoorError::UnknownCategory),
         }
     }
@@ -207,6 +225,16 @@ pub enum Action {
     /// paired with [`Outcome::Failed`] — the request did not succeed, and
     /// the refusal is the audited fact.
     VerbDenied,
+    /// A sensor was read and its value recorded — the machine observing
+    /// itself rather than deciding anything (`LE-75`).
+    ///
+    /// Every other action in this vocabulary is something the system *did*:
+    /// created, boosted, blocked, chose, refused. An observation changes
+    /// nothing, and giving it `Select` (which the park loop uses for "chose
+    /// what to do this pass") would let a reader believe a decision was taken
+    /// on the strength of the reading. It was not — reading and acting are
+    /// separate rungs on purpose, and today only the first exists.
+    Observe,
 }
 
 impl Action {
@@ -226,6 +254,7 @@ impl Action {
             Action::Actuate => 11,
             Action::Deadline => 12,
             Action::VerbDenied => 13,
+            Action::Observe => 14,
         }
     }
 
@@ -245,6 +274,7 @@ impl Action {
             11 => Ok(Action::Actuate),
             12 => Ok(Action::Deadline),
             13 => Ok(Action::VerbDenied),
+            14 => Ok(Action::Observe),
             _ => Err(SpoorError::UnknownAction),
         }
     }
@@ -522,11 +552,17 @@ mod tests {
     // (STORY-P0-06-01 acceptance criterion 2).
     #[test]
     fn decode_rejects_an_unknown_category_nibble() {
-        // Category 0..=9 are valid (7 = `Fault`, added by `STORY-P1-02-01`;
+        // Category 0..=10 are valid (7 = `Fault`, added by `STORY-P1-02-01`;
         // 8 = `Actuation`, added by `STORY-P1-06-01`; 9 = `Shell`, added by
-        // `LE-56`'s shell audit lane); 10 is not yet assigned.
-        let bits = 10u64 << CAT_SHIFT;
+        // `LE-56`'s shell audit lane; 10 = `Thermal`, added by `LE-75` when the
+        // board turned out to have no thermal awareness at all); 11 is not yet
+        // assigned. The nibble's remaining range is 11..=15.
+        let bits = 11u64 << CAT_SHIFT;
         assert_eq!(Spoor::decode(bits), Err(SpoorError::UnknownCategory));
+        // And the newest assigned value must decode, or the boundary above is
+        // testing nothing: an off-by-one here would refuse every thermal
+        // record on the wire while this test still passed.
+        assert!(Spoor::decode(10u64 << CAT_SHIFT).is_ok(), "Thermal is assigned");
     }
 
     #[test]
@@ -540,16 +576,18 @@ mod tests {
 
     #[test]
     fn decode_rejects_an_unknown_action_nibble() {
-        // Action 0..=13 are valid (7 = `Fault`, 8 = `Terminate`, added by
+        // Action 0..=14 are valid (7 = `Fault`, 8 = `Terminate`, added by
         // `STORY-P1-02-01`; 9 = `Restart`, 10 = `Degrade`, added by
         // `STORY-P1-04-02`; 11 = `Actuate`, 12 = `Deadline`, added by
         // `STORY-P1-06-01`; 13 = `VerbDenied`, added by `LE-56`'s shell
-        // audit lane); 14 is not yet assigned. The nibble's remaining range
-        // is 14..=15, so the vocabulary has two verbs of headroom before
-        // the `ACT` field itself has to widen — worth watching, since
-        // widening it is a wire-format change to every stored spoor.
-        let bits = 14u64 << ACT_SHIFT;
+        // audit lane; 14 = `Observe`, added by `LE-75`); 15 is not yet
+        // assigned. **The nibble now has ONE verb of headroom left**, and the
+        // next addition after that is a wire-format change to every spoor ever
+        // stored. That is no longer a distant concern and this comment is the
+        // place it gets noticed.
+        let bits = 15u64 << ACT_SHIFT;
         assert_eq!(Spoor::decode(bits), Err(SpoorError::UnknownAction));
+        assert!(Spoor::decode(14u64 << ACT_SHIFT).is_ok(), "Observe is assigned");
     }
 
     #[test]

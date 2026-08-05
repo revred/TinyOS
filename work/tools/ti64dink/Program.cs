@@ -493,8 +493,14 @@ internal static class Program
         }
 
         decoded++;
-        var rung = category == "Boot" || category == "Fault" ? Rung(target) : $"target={target}";
-        return $"[{seq}] {category,-9} {actor,-7} {action,-9} {outcome,-8} {rung,-22} cost={cost}";
+        var rung = category is "Boot" or "Fault" or "Thermal" ? Rung(target) : $"target={target}";
+        // The cost field is a raw AVS register word for a thermal sample, not a
+        // number of cycles. Conversion is the HOST's job by design: the board
+        // emits and does not interpret, and the calibration below is unverified
+        // on this hardware, so it is labelled as a reading of the register
+        // rather than presented as a measured temperature.
+        var detail = category == "Thermal" ? Thermal(cost) : $"cost={cost}";
+        return $"[{seq}] {category,-9} {actor,-7} {action,-9} {outcome,-8} {rung,-22} {detail}";
     }
 
     private static string? Name(string[] table, int index) =>
@@ -503,15 +509,40 @@ internal static class Program
     // Mirrors kernel::spoor. Order is the discriminant order, so a value added
     // to the kernel and not here shows as REFUSED rather than as a wrong name.
     private static readonly string[] Categories =
-        ["Scheduling", "Lock", "Wcet", "Dispatch", "Exec", "Memory", "Boot", "Fault", "Actuation", "Shell"];
+    [
+        "Scheduling", "Lock", "Wcet", "Dispatch", "Exec", "Memory", "Boot", "Fault",
+        "Actuation", "Shell", "Thermal"
+    ];
     private static readonly string[] Actors = ["Kernel", "Exec", "Session"];
     private static readonly string[] Actions =
     [
         "Create", "Boost", "Restore", "Block", "Select", "Overrun", "ResetBudget",
-        "Fault", "Terminate", "Restart", "Degrade", "Actuate", "Deadline", "VerbDenied"
+        "Fault", "Terminate", "Restart", "Degrade", "Actuate", "Deadline", "VerbDenied",
+        "Observe"
     ];
     private static readonly string[] Outcomes =
         ["Ok", "Empty", "Chose", "Capped", "Failed", "Skipped", "Superseded", "Partial"];
+
+    /// Renders an AVS monitor temperature word (LE-75).
+    ///
+    /// The raw register is printed FIRST and always, because it is the only
+    /// part of this line that is measured. The celsius figure is derived with
+    /// the bcm2711_thermal slope/offset, which has NOT been verified against
+    /// this board - so it is marked and must not be quoted as evidence until a
+    /// paired capture against thermal_zone0 confirms it.
+    ///
+    /// If the register offset is wrong, this is where it shows: a word that
+    /// does not drift the way a die temperature drifts, or validity bits that
+    /// never set, is visible here rather than hidden behind a plausible number.
+    private static string Thermal(uint raw)
+    {
+        var data = raw & 0x3FF;
+        var valid = (raw & (1u << 16)) != 0 || (raw & (1u << 10)) != 0;
+        // bcm2711_thermal: millicelsius = -487 * data + 410040. UNVERIFIED here.
+        var milli = -487.0 * data + 410040.0;
+        var flag = valid ? "" : " INVALID";
+        return $"avs=0x{raw:X8} data={data}{flag} ~{milli / 1000.0:F1}C(unverified)";
+    }
 
     /// Mirrors kernel::spoor_stream::Rung. Wire-visible and append-only.
     private static string Rung(int target) => target switch
@@ -523,6 +554,7 @@ internal static class Program
         5 => "rung=FixtureMeasure",
         6 => "rung=ParkIteration",
         7 => "rung=FaultTaken",
+        8 => "rung=ThermalSample",
         _ => $"rung=UNKNOWN({target})",
     };
 }

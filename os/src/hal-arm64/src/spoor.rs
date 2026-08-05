@@ -43,6 +43,9 @@ pub enum Rung {
     ParkIteration = 6,
     /// A synchronous exception was taken and reported (`STORY-P1-07-02`).
     FaultTaken = 7,
+    /// The SoC die temperature was sampled; the cost field carries the AVS
+    /// monitor's raw register word, unconverted (`LE-75`).
+    ThermalSample = 8,
 }
 
 /// What a rung reports, mirroring `kernel::spoor_stream::Verdict`.
@@ -186,6 +189,7 @@ mod tests {
             (Rung::FixtureMeasure, KernelRung::FixtureMeasure),
             (Rung::ParkIteration, KernelRung::ParkIteration),
             (Rung::FaultTaken, KernelRung::FaultTaken),
+            (Rung::ThermalSample, KernelRung::ThermalSample),
         ];
         for (ours, theirs) in pairs {
             assert_eq!(
@@ -194,7 +198,7 @@ mod tests {
                 "{ours:?} and {theirs:?} must carry the same wire value"
             );
         }
-        assert_eq!(pairs.len(), 7, "a rung added on either side must be added here too");
+        assert_eq!(pairs.len(), 8, "a rung added on either side must be added here too");
     }
 
     #[test]
@@ -222,6 +226,7 @@ mod tests {
             Rung::FixtureMeasure,
             Rung::ParkIteration,
             Rung::FaultTaken,
+            Rung::ThermalSample,
         ] {
             assert!(
                 KernelRung::from_bits(rung as u16).is_some(),

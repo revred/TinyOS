@@ -106,6 +106,7 @@ fn category_name(category: Category) -> &'static str {
         Category::Fault => "fault",
         Category::Actuation => "actuation",
         Category::Shell => "shell",
+        Category::Thermal => "thermal",
     }
 }
 
@@ -133,6 +134,7 @@ fn action_name(action: Action) -> &'static str {
         Action::Actuate => "actuate",
         Action::Deadline => "deadline",
         Action::VerbDenied => "verb-denied",
+        Action::Observe => "observe",
     }
 }
 

@@ -41,6 +41,7 @@ pub mod rp1_clocks;
 pub mod rp1_gpio;
 pub mod spoor;
 pub mod stat_led;
+pub mod thermal;
 pub mod tick;
 pub mod timer;
 pub mod transcript;
