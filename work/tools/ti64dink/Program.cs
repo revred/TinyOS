@@ -89,6 +89,8 @@ internal static class Program
         string? device = null;
         string? textPath = null;
         var liveSeconds = 0;
+        string? untilSpec = null;
+        var timeoutSeconds = DefaultUntilTimeout;
         for (var i = 0; i < args.Length; i++)
         {
             switch (args[i])
@@ -121,6 +123,16 @@ internal static class Program
                 case "--strict":
                     strict = true;
                     break;
+                // Wait for a board event instead of guessing a window: the
+                // capture ends the moment the condition is sighted, and the
+                // exit code says which of "sighted" and "timed out" happened.
+                case "--until" when i + 1 < args.Length:
+                    untilSpec = args[++i];
+                    break;
+                case "--timeout" when i + 1 < args.Length && int.TryParse(args[i + 1], out var t):
+                    timeoutSeconds = t;
+                    i++;
+                    break;
                 default:
                     if (path is null && !args[i].StartsWith('-')) path = args[i];
                     break;
@@ -130,7 +142,21 @@ internal static class Program
         List<Frame> frames;
         var text = new List<string>();
 
-        if (liveSeconds > 0)
+        Watch? watch = null;
+        if (untilSpec is not null)
+        {
+            watch = Watch.Parse(untilSpec);
+            if (watch is null)
+            {
+                Console.Error.WriteLine($"ti64dink: --until does not understand `{untilSpec}`");
+                Console.Error.WriteLine("  conditions: epoch-change | rung=<Name> | text=<substring>");
+                return 2;
+            }
+        }
+
+        // A watch with no file goes live; a watch WITH a file evaluates the
+        // file (the degenerate case a scripted test can drive with no board).
+        if (liveSeconds > 0 || (watch is not null && path is null))
         {
             var chosen = device ?? PickEthernet();
             if (chosen is null)
@@ -138,8 +164,15 @@ internal static class Program
                 Console.Error.WriteLine("ti64dink: no capture device found; try --list");
                 return 2;
             }
-            Console.WriteLine($"ti64dink: listening {liveSeconds}s on {chosen}");
-            var payloads = Live.Capture(chosen, liveSeconds, out var seen);
+            // `--until` owns the window when both are given: `--live N` states
+            // a window, `--until` states a condition bounded by a deadline, and
+            // the deadline is the larger discipline.
+            var window = watch is not null ? timeoutSeconds : liveSeconds;
+            Console.WriteLine(watch is not null
+                ? $"ti64dink: watching for {watch.Describe} on {chosen} (timeout {window}s)"
+                : $"ti64dink: listening {window}s on {chosen}");
+            var startedAt = DateTime.UtcNow;
+            var payloads = Live.Capture(chosen, window, watch is null ? null : watch.Offer, out var seen);
             Console.WriteLine($"ti64dink: {seen} TOS64 frame(s) captured");
             Console.WriteLine();
             // Each captured payload is decoded on its own: a TOS64 frame may be
@@ -150,6 +183,16 @@ internal static class Program
             {
                 frames.AddRange(DecodeAll(payload));
                 HarvestText(payload, text);
+            }
+            if (watch is not null)
+            {
+                var waited = (DateTime.UtcNow - startedAt).TotalSeconds;
+                Console.WriteLine(watch.Sighted
+                    ? $"until: SIGHTED {watch.Describe} after {waited:F1}s"
+                    : $"until: TIMEOUT — {watch.Describe} not seen within {window}s");
+                Console.WriteLine();
+                // The evidence below still prints either way; the exit code at
+                // the bottom of Main is the machine-readable half.
             }
         }
         else
@@ -166,6 +209,17 @@ internal static class Program
             Console.WriteLine();
             frames = DecodeAll(bytes);
             HarvestText(bytes, text);
+            if (watch is not null)
+            {
+                // The degenerate `--until` over a file: no waiting, but the
+                // same condition logic and the same exit code, so a scripted
+                // test can exercise the watch with no board on the bench.
+                watch.Offer(bytes);
+                Console.WriteLine(watch.Sighted
+                    ? $"until: SIGHTED {watch.Describe} in this capture"
+                    : $"until: {watch.Describe} is not in this capture");
+                Console.WriteLine();
+            }
         }
         if (frames.Count == 0)
         {
@@ -179,12 +233,119 @@ internal static class Program
             Console.WriteLine("If the board is beaconing, the likely cause is the capture, not the board:");
             Console.WriteLine("  * pktmon etl2txt needs -v 3 to include frame bytes;");
             Console.WriteLine("  * the filter must be `pktmon filter add -d 0x88B5`.");
-            return strict ? 1 : 0;
+            return watch is { Sighted: false } ? 1 : (strict ? 1 : 0);
         }
 
         Report(frames);
         ReportText(text, textPath);
-        return 0;
+        return watch is { Sighted: false } ? 1 : 0;
+    }
+
+    /// `--until`'s default deadline. Two minutes: longer than a boot plus a
+    /// full announcement period by an order of magnitude, short enough that a
+    /// wrong condition fails a script rather than parking a bench overnight.
+    /// A UX bound, not a measured one — override with `--timeout`.
+    private const int DefaultUntilTimeout = 120;
+
+    /// One `--until` condition: what to look for, whether it has been seen.
+    ///
+    /// The three primitives are the ones `hand-2026-08-05/01A` §4 asked for by
+    /// name — an epoch change, a rung appearing, a value crossing a bound (the
+    /// last via `text=`, since every envelope value rides a text line). An
+    /// unknown condition or rung name is refused at parse, not guessed at.
+    private sealed class Watch
+    {
+        private enum Kind { EpochChange, Rung, Text }
+
+        private readonly Kind _kind;
+        private readonly int _target;
+        private readonly string _needle = "";
+        private uint? _firstEpoch;
+        private readonly List<string> _scratch = [];
+
+        internal bool Sighted { get; private set; }
+        internal string Describe { get; private init; } = "";
+
+        private Watch(Kind kind, int target, string needle, string describe)
+        {
+            _kind = kind;
+            _target = target;
+            _needle = needle;
+            Describe = describe;
+        }
+
+        internal static Watch? Parse(string spec)
+        {
+            if (spec == "epoch-change")
+            {
+                return new Watch(Kind.EpochChange, 0, "", "epoch-change (a reboot)");
+            }
+            if (spec.StartsWith("rung=", StringComparison.Ordinal))
+            {
+                var name = spec["rung=".Length..];
+                foreach (var (target, known) in Rungs)
+                {
+                    if (known == name)
+                    {
+                        return new Watch(Kind.Rung, target, "", $"rung={name}");
+                    }
+                }
+                return null; // an unknown rung is refused, not guessed
+            }
+            if (spec.StartsWith("text=", StringComparison.Ordinal) && spec.Length > "text=".Length)
+            {
+                var needle = spec["text=".Length..];
+                return new Watch(Kind.Text, 0, needle, $"text containing `{needle}`");
+            }
+            return null;
+        }
+
+        /// Offers one payload (or a whole file's bytes); returns Sighted so
+        /// the live loop can stop at the moment the condition is met.
+        internal bool Offer(byte[] payload)
+        {
+            if (Sighted) return true;
+            switch (_kind)
+            {
+                case Kind.EpochChange:
+                    foreach (var frame in DecodeAll(payload))
+                    {
+                        // An undeclared epoch is an absence, not boot zero —
+                        // it neither sets the baseline nor fires the change.
+                        if (frame.Epoch == EpochUndeclared) continue;
+                        if (_firstEpoch is null) _firstEpoch = frame.Epoch;
+                        else if (frame.Epoch != _firstEpoch) Sighted = true;
+                    }
+                    break;
+                case Kind.Rung:
+                    foreach (var frame in DecodeAll(payload))
+                    {
+                        // Retained frames replay records already sent; a watch
+                        // that fired on a re-announcement would report an old
+                        // event as a fresh one.
+                        if (frame.Retained) continue;
+                        foreach (var bits in frame.Records)
+                        {
+                            var cat = (int)((bits >> 60) & 0xF);
+                            var carriesRung = cat is 6 or 7 or 10; // Boot, Fault, Thermal
+                            if (carriesRung && (int)((bits >> 32) & 0xFFFF) == _target)
+                            {
+                                Sighted = true;
+                            }
+                        }
+                    }
+                    break;
+                case Kind.Text:
+                    _scratch.Clear();
+                    HarvestText(payload, _scratch);
+                    foreach (var line in _scratch)
+                    {
+                        if (line.Contains(_needle, StringComparison.Ordinal)) Sighted = true;
+                    }
+                    break;
+            }
+            return Sighted;
+        }
     }
 
     /// Harvests every TOS64 envelope line from a payload or a capture blob.
@@ -301,6 +462,13 @@ internal static class Program
         Console.WriteLine("  ti64dink --live 30 --text env.txt   also harvest the TOS64-MEAS/2");
         Console.WriteLine("                                      envelope the board transmits as text");
         Console.WriteLine("                                      frames, for `xtask parse-meas`");
+        Console.WriteLine();
+        Console.WriteLine("  ti64dink --until <cond> [--timeout 120]   wait for a board event instead");
+        Console.WriteLine("                                            of guessing a window; exits 0 the");
+        Console.WriteLine("                                            moment it is sighted, 1 on timeout");
+        Console.WriteLine("      epoch-change        a reboot (the boot epoch changed)");
+        Console.WriteLine("      rung=<Name>         a fresh record with that rung (e.g. rung=ThermalSample)");
+        Console.WriteLine("      text=<substring>    a TOS64 text line containing <substring>");
         Console.WriteLine();
         Console.WriteLine("Capture on Windows (elevated, until Npcap is installed):");
         Console.WriteLine("  pktmon filter remove");
@@ -664,17 +832,27 @@ internal static class Program
         return $"avs=0x{raw:X8} data={data}{flag} ~{milli / 1000.0:F1}C(unverified)";
     }
 
-    /// Mirrors kernel::spoor_stream::Rung. Wire-visible and append-only.
-    private static string Rung(int target) => target switch
+    /// Mirrors kernel::spoor_stream::Rung. Wire-visible and append-only. One
+    /// table for both directions: the decoder renders from it and `--until
+    /// rung=<Name>` resolves against it, so the two cannot drift apart.
+    private static readonly (int Target, string Name)[] Rungs =
+    [
+        (1, "MmuEnabled"),
+        (2, "GicRouted"),
+        (3, "TickArmed"),
+        (4, "BeaconTransmitted"),
+        (5, "FixtureMeasure"),
+        (6, "ParkIteration"),
+        (7, "FaultTaken"),
+        (8, "ThermalSample"),
+    ];
+
+    private static string Rung(int target)
     {
-        1 => "rung=MmuEnabled",
-        2 => "rung=GicRouted",
-        3 => "rung=TickArmed",
-        4 => "rung=BeaconTransmitted",
-        5 => "rung=FixtureMeasure",
-        6 => "rung=ParkIteration",
-        7 => "rung=FaultTaken",
-        8 => "rung=ThermalSample",
-        _ => $"rung=UNKNOWN({target})",
-    };
+        foreach (var (known, name) in Rungs)
+        {
+            if (known == target) return $"rung={name}";
+        }
+        return $"rung=UNKNOWN({target})";
+    }
 }

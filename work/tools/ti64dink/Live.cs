@@ -100,7 +100,17 @@ internal static class Live
     /// Payloads only — the 14-byte Ethernet header is stripped here so the
     /// decoder receives exactly what it receives from a file, and cannot come
     /// to depend on the capture source.
-    internal static List<byte[]> Capture(string device, int seconds, out int framesSeen)
+    internal static List<byte[]> Capture(string device, int seconds, out int framesSeen) =>
+        Capture(device, seconds, sighted: null, out framesSeen);
+
+    /// The `--until` shape: same capture, but each payload is offered to
+    /// `sighted` as it arrives and the capture ends EARLY the moment the
+    /// predicate returns true. The deadline still stands — a condition that
+    /// never happens must end as a reported timeout, never as a hung bench
+    /// (fail-safe over keep-trying; the caller reads which of the two
+    /// happened from whether the predicate ever fired, not from elapsed time).
+    internal static List<byte[]> Capture(
+        string device, int seconds, Func<byte[], bool>? sighted, out int framesSeen)
     {
         var errbuf = new byte[ErrbufSize];
         // 65536 snaplen so nothing is ever truncated; promiscuous because the
@@ -136,7 +146,9 @@ internal static class Live
                 if (etherType != Tos64EtherType) continue;
 
                 framesSeen++;
-                payloads.Add(frame[14..]);
+                var payload = frame[14..];
+                payloads.Add(payload);
+                if (sighted is not null && sighted(payload)) break;
             }
         }
         finally

@@ -38,8 +38,9 @@ use crate::context::{self, Context};
 use crate::measure::{Calibration, Environment, Metric, Report, Samples};
 use crate::measure_phases::{
     phase_context_switch, phase_dispatch_round, phase_dispatch_select, phase_pool_alloc_free,
-    phase_pool_alloc_free_batched, phase_pool_denial, phase_reference_loop, CALIBRATION_SAMPLES,
-    CONFORMANCE_SAMPLES, SAMPLES, STACK_SIZE, WARMUP,
+    phase_pool_alloc_free_batched, phase_pool_denial, phase_reference_loop, phase_spoor_announce,
+    phase_spoor_drain, phase_spoor_stamp, CALIBRATION_SAMPLES, CONFORMANCE_SAMPLES, SAMPLES,
+    STACK_SIZE, WARMUP,
 };
 use core::fmt::Write;
 use hal::time::{conformance, CycleSource, Timebase};
@@ -171,7 +172,7 @@ impl Write for BoardSink {
     }
 }
 
-const METRICS: usize = 8;
+const METRICS: usize = 11;
 
 struct Measured {
     domain: &'static str,
@@ -288,8 +289,7 @@ fn measure_run() -> bool {
     let samples: &mut Samples<SAMPLES> = unsafe { &mut *core::ptr::addr_of_mut!(SAMPLE_BUFFER) };
 
     let mut ok = conformance_ok;
-    let mut collected: [Option<Measured>; METRICS] =
-        [None, None, None, None, None, None, None, None];
+    let mut collected: [Option<Measured>; METRICS] = [const { None }; METRICS];
 
     ok &= phase_reference_loop(&source, &calibration, samples);
     ok &= collect(&mut collected, 0, "REF", "fixed_integer_loop", samples);
@@ -321,6 +321,18 @@ fn measure_run() -> bool {
     ok &= phase_pool_alloc_free_batched(&source, &calibration, samples);
     ok &=
         collect(&mut collected, 7, "D07", "pool_u64x64_alloc_free_round_trip_per_op_of_8", samples);
+
+    // `STORY-P1-10-02` criterion 6: the observability substrate's own cost,
+    // through the same harness as everything it observes. The timed regions
+    // stop at the RAM buffer — the GEM transmit is not in any of them.
+    ok &= phase_spoor_stamp(&source, &calibration, samples);
+    ok &= collect(&mut collected, 8, "D07", "spoor_stamp_park_rung_per_op_of_8", samples);
+
+    ok &= phase_spoor_drain(&source, &calibration, samples);
+    ok &= collect(&mut collected, 9, "D07", "spoor_drain_full_ring_frame_of_181", samples);
+
+    ok &= phase_spoor_announce(&source, &calibration, samples);
+    ok &= collect(&mut collected, 10, "D07", "spoor_announce_certificate_frame_of_3", samples);
 
     let environment = Environment {
         tier: "T1",

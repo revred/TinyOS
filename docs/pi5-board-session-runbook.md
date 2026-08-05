@@ -165,3 +165,38 @@ re-image the card from scratch, verify `kernel8.img`'s sha256 against the tool's
 printout, and confirm the card's first partition is FAT32 (not exFAT). The transcript
 of *any* speaking run — even a failing one — is worth committing as an asset; a board
 that talks is a board that can be debugged.
+
+## 6. The ground-truth card: one-time prep for unattended captures (2026-08-05)
+
+`hand-2026-08-05/01A` §4 friction 2: the Pi OS ground-truth card gates `sudo` on a
+password, which blocked the one thing the thermal work still needs — a paired
+raw-register/`thermal_zone0` reading (`LE-75` calibration, `TEST-P1-10-05-A`
+clause 7) — and makes every future SSH ground-truth capture attended. The cure is a
+**one-time** change made the next time the Pi OS card is booted, after which every
+capture runs unattended.
+
+**Least authority, not blanket `NOPASSWD`.** The only step that needs root is the
+`/dev/mem` mmap probe; everything else the captures read (`thermal_zone0`, sysfs,
+`dmesg` via group membership) does not. So the probe gets a fixed root-owned home
+and `NOPASSWD` covers exactly that path:
+
+```
+# on the Pi, over ssh revanur@raspberrypi.local, once:
+sudo install -o root -g root -m 0755 /tmp/rp1rd /usr/local/bin/tos64-probe
+echo 'revanur ALL=(root) NOPASSWD: /usr/local/bin/tos64-probe' | \
+  sudo tee /etc/sudoers.d/010-tos64-probe
+sudo visudo -c    # refuse to leave the session until this prints "parsed OK"
+```
+
+Rules, so this stays an instrument and never becomes a hole:
+
+1. **The probe binary is root-owned at a fixed path.** `NOPASSWD` on anything under
+   `/tmp` or `/home` would let any code running as `revanur` edit what root runs;
+   `install` to `/usr/local/bin` first is the entire difference.
+2. **`visudo -c` before logout.** A syntax error in a sudoers drop-in locks `sudo`
+   out entirely, and this bench has no keyboard on the Pi to recover with.
+3. **Scope stays one binary.** The day a capture needs a second privileged read,
+   extend the probe, not the sudoers line.
+4. This card is the **ground-truth instrument** (`tos64-cardswap pios`), reachable
+   only over the direct cable's link-local address; it holds nothing but a stock
+   Pi OS and the probes. The TOS64 card is untouched by any of this.

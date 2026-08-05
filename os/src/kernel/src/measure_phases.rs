@@ -18,6 +18,9 @@ use crate::dispatch;
 use crate::measure::{Calibration, Samples, Stopwatch};
 use crate::mem::Pool;
 use crate::sched::{OverrunPolicy, Priority, Scheduler, TaskState, WcetBudgetTicks};
+use crate::spoor::Outcome;
+use crate::spoor_stream::{Rung, SpoorStream, ANNOUNCE_EVERY, BOARD_STREAM_CAPACITY};
+use crate::spoor_wire::MAX_PAYLOAD;
 use hal::time::CycleSource;
 
 /// Every phase's sample capacity — one shared buffer, cleared between
@@ -377,4 +380,184 @@ pub fn phase_dispatch_round<S: CycleSource>(
         }
     }
     ok
+}
+
+/// Stamps timed per sample of [`phase_spoor_stamp`], divided out — the same
+/// eight as [`ROUND_TRIP_BATCH`], for the same reason: a single stamp is a
+/// ring append and costs less than the calibrated subtraction resolves, so an
+/// unbatched figure would be mostly residue (`LE-24`'s lesson, applied before
+/// the number is ever quoted rather than after).
+pub const SPOOR_STAMP_BATCH: usize = 8;
+
+/// `STORY-P1-10-02` criterion 6: the per-stamp cost of the spoor substrate,
+/// measured through the same harness as everything else instead of asserted.
+///
+/// Steady state, deliberately: the certificate is closed by a first untimed
+/// stamp so the once-per-boot retain path is not what gets measured, and the
+/// ring is allowed to wrap because on a running board it does. The timed
+/// region is [`SpoorStream::stamp`] alone — what a call site pays at the
+/// moment it stamps, with no drain and no wire in it.
+#[inline(never)]
+pub fn phase_spoor_stamp<S: CycleSource>(
+    source: &S,
+    calibration: &Calibration,
+    samples: &mut Samples<SAMPLES>,
+) -> bool {
+    let mut stream: SpoorStream<BOARD_STREAM_CAPACITY> = SpoorStream::new();
+    stream.seed_epoch(0x5EED_0000_0000_0001);
+    // Close the certificate: a park rung is not a boot rung, so from here on
+    // every stamp takes the steady-state path the park loop pays.
+    stream.stamp(Rung::ParkIteration, Outcome::Ok, 0);
+    for index in 0..(WARMUP + SAMPLES) {
+        let watch = Stopwatch::start(source);
+        for _ in 0..SPOOR_STAMP_BATCH {
+            stream.stamp(Rung::ParkIteration, Outcome::Ok, 0);
+        }
+        let cycles = watch.stop(calibration);
+        if index >= WARMUP {
+            samples.record(cycles / SPOOR_STAMP_BATCH as u64);
+        }
+    }
+    // The stream must have accounted every stamp: one to close the
+    // certificate, then the batches — a sequence that disagrees means the
+    // phase measured something other than what it claims.
+    stream.next_sequence() == (1 + (WARMUP + SAMPLES) * SPOOR_STAMP_BATCH) as u64
+}
+
+/// `STORY-P1-10-02` criterion 6: the per-drain cost, at the drain's bounded
+/// worst case — a full ring of [`BOARD_STREAM_CAPACITY`] records packed into
+/// one maximum-size frame.
+///
+/// The timed region is [`SpoorStream::drain`] alone: journal walk, record
+/// packing and header encode into a RAM buffer. **The GEM transmit is not in
+/// it** — what the wire costs is `hal-arm64`'s to measure and is not claimed
+/// here. Worst case rather than steady state because the park loop's budget
+/// has to survive the worst drain, and a one-record average would understate
+/// exactly the pass that matters.
+#[inline(never)]
+pub fn phase_spoor_drain<S: CycleSource>(
+    source: &S,
+    calibration: &Calibration,
+    samples: &mut Samples<SAMPLES>,
+) -> bool {
+    let mut stream: SpoorStream<BOARD_STREAM_CAPACITY> = SpoorStream::new();
+    stream.seed_epoch(0x5EED_0000_0000_0001);
+    let mut frame = [0u8; MAX_PAYLOAD];
+    let mut ok = true;
+    for index in 0..(WARMUP + SAMPLES) {
+        for _ in 0..BOARD_STREAM_CAPACITY {
+            stream.stamp(Rung::ParkIteration, Outcome::Ok, 0);
+        }
+        let watch = Stopwatch::start(source);
+        let drained = stream.drain(&mut frame);
+        let cycles = watch.stop(calibration);
+        // A full ring must produce exactly the maximum frame; anything else
+        // means the phase did not measure the worst case it names.
+        if drained != Ok(Some(MAX_PAYLOAD)) {
+            ok = false;
+        }
+        if index >= WARMUP {
+            samples.record(cycles);
+        }
+    }
+    ok
+}
+
+/// `STORY-P1-10-04`'s follow-on cost (`STORY-P1-10-02` criterion 6's third
+/// number): re-announcing the retained boot certificate.
+///
+/// The stream carries the real boot prologue — the three rungs every board
+/// verdict since 10 has shown — and only the **emitting** call is timed; the
+/// [`ANNOUNCE_EVERY`]` - 1` refusals between announcements are walked
+/// untimed, because the park loop pays them too but they are a counter
+/// decrement, not the cost this metric names.
+#[inline(never)]
+pub fn phase_spoor_announce<S: CycleSource>(
+    source: &S,
+    calibration: &Calibration,
+    samples: &mut Samples<SAMPLES>,
+) -> bool {
+    let mut stream: SpoorStream<BOARD_STREAM_CAPACITY> = SpoorStream::new();
+    stream.seed_epoch(0x5EED_0000_0000_0001);
+    stream.stamp(Rung::MmuEnabled, Outcome::Ok, 0);
+    stream.stamp(Rung::GicRouted, Outcome::Ok, 0);
+    stream.stamp(Rung::TickArmed, Outcome::Ok, 0);
+    // Close the certificate the way a real boot does: with the first park
+    // pass. Three retained records, exactly the shape on the wire.
+    stream.stamp(Rung::ParkIteration, Outcome::Ok, 0);
+    let mut frame = [0u8; MAX_PAYLOAD];
+    // The very first call emits (a fresh stream owes its announcement);
+    // consume it so every iteration below starts at the top of the period.
+    let mut ok = matches!(stream.announce(&mut frame), Ok(Some(_)));
+    for index in 0..(WARMUP + SAMPLES) {
+        for _ in 0..(ANNOUNCE_EVERY - 1) {
+            if !matches!(stream.announce(&mut frame), Ok(None)) {
+                ok = false;
+            }
+        }
+        let watch = Stopwatch::start(source);
+        let announced = stream.announce(&mut frame);
+        let cycles = watch.stop(calibration);
+        if !matches!(announced, Ok(Some(_))) {
+            ok = false;
+        }
+        if index >= WARMUP {
+            samples.record(cycles);
+        }
+    }
+    ok
+}
+
+#[cfg(test)]
+mod spoor_phase_tests {
+    use super::*;
+    use core::cell::Cell;
+
+    /// Deterministic monotone source: every read advances a fixed step, so
+    /// calibration is exact and a phase's control flow — not the host's
+    /// clock — decides whether these tests pass.
+    struct SteppingSource {
+        now: Cell<u64>,
+    }
+
+    impl CycleSource for SteppingSource {
+        fn read_cycles(&self) -> u64 {
+            let value = self.now.get();
+            self.now.set(value + 7);
+            value
+        }
+    }
+
+    fn harness() -> (SteppingSource, Calibration) {
+        let source = SteppingSource { now: Cell::new(0) };
+        let calibration = Calibration::measure(&source, CALIBRATION_SAMPLES);
+        (source, calibration)
+    }
+
+    #[test]
+    fn spoor_stamp_phase_fills_the_sample_set_and_reports_ok() {
+        let (source, calibration) = harness();
+        let mut samples: Samples<SAMPLES> = Samples::new();
+        assert!(phase_spoor_stamp(&source, &calibration, &mut samples));
+        assert_eq!(samples.len(), SAMPLES);
+        assert_eq!(samples.dropped(), 0);
+    }
+
+    #[test]
+    fn spoor_drain_phase_drains_a_full_ring_every_sample() {
+        let (source, calibration) = harness();
+        let mut samples: Samples<SAMPLES> = Samples::new();
+        assert!(phase_spoor_drain(&source, &calibration, &mut samples));
+        assert_eq!(samples.len(), SAMPLES);
+        assert_eq!(samples.dropped(), 0);
+    }
+
+    #[test]
+    fn spoor_announce_phase_times_only_the_emitting_call() {
+        let (source, calibration) = harness();
+        let mut samples: Samples<SAMPLES> = Samples::new();
+        assert!(phase_spoor_announce(&source, &calibration, &mut samples));
+        assert_eq!(samples.len(), SAMPLES);
+        assert_eq!(samples.dropped(), 0);
+    }
 }
