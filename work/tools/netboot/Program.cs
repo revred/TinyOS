@@ -49,6 +49,15 @@ internal static class Program
     private static string _root = ".";
     private static bool _logOnly;
 
+    /// The file named in the offer.
+    ///
+    /// The Pi 5 bootloader has its own convention for what it fetches, so this
+    /// is a PROMPT rather than an instruction: naming something gets the client
+    /// as far as TFTP, and the request log then records what it actually asks
+    /// for - which is the observation the whole first run exists to make. An
+    /// empty name left it re-discovering with nothing to request.
+    private const string BootFileName = "bootcode.bin";
+
     private static int Main(string[] args)
     {
         string? mac = null;
@@ -178,7 +187,7 @@ internal static class Program
             var reply = BuildReply(buffer, messageType == 1 ? (byte)2 : (byte)5);
             socket.SendTo(reply, new IPEndPoint(IPAddress.Broadcast, DhcpClientPort));
             Console.WriteLine($"  -> sent {(messageType == 1 ? "OFFER" : "ACK")}: " +
-                              $"yiaddr={_offeredIp} siaddr={_serverIp} file=\"\" (root-relative)");
+                              $"yiaddr={_offeredIp} siaddr={_serverIp} file=\"{BootFileName}\" +opt43");
         }
     }
 
@@ -218,7 +227,10 @@ internal static class Program
     /// learning not to make. The TFTP side logs every request verbatim.
     private static byte[] BuildReply(byte[] request, byte messageType)
     {
-        var r = new byte[300];
+        // 548 is the minimum DHCP message size a client must accept; the option
+        // block outgrew a 300-byte buffer the moment PXE option 43 was added,
+        // which is worth a constant rather than another silent near-miss.
+        var r = new byte[548];
         r[0] = 2;                                              // BOOTREPLY
         r[1] = request[1];                                     // htype
         r[2] = request[2];                                     // hlen
@@ -228,9 +240,13 @@ internal static class Program
         _serverIp.GetAddressBytes().CopyTo(r, 20);             // siaddr
         Array.Copy(request, 28, r, 28, 16);                    // chaddr
 
-        // sname: the TFTP server, which some bootloaders read instead of siaddr.
+        // sname (44..108) and file (108..236): the BOOTP header fields, filled
+        // as well as the equivalent options, because clients differ in which
+        // they read and the cost of stating both is zero.
         var sname = Encoding.ASCII.GetBytes(_serverIp.ToString());
         Array.Copy(sname, 0, r, 44, Math.Min(sname.Length, 63));
+        var file = Encoding.ASCII.GetBytes(BootFileName);
+        Array.Copy(file, 0, r, 108, Math.Min(file.Length, 127));
 
         var at = 236;
         r[at++] = 99; r[at++] = 130; r[at++] = 83; r[at++] = 99;   // magic cookie
@@ -241,11 +257,35 @@ internal static class Program
         new byte[] { 255, 255, 0, 0 }.CopyTo(r, at); at += 4;
         r[at++] = 51; r[at++] = 4;                                  // lease time
         new byte[] { 0, 0, 0x0E, 0x10 }.CopyTo(r, at); at += 4;     // 1 hour
-        // Vendor class, echoed: the Pi 5 bootloader expects to see PXEClient
-        // back or it may ignore the offer.
+        // Vendor class, echoed: the client announces PXEClient and will ignore
+        // an offer that does not answer in kind.
         var pxe = Encoding.ASCII.GetBytes("PXEClient");
         r[at++] = 60; r[at++] = (byte)pxe.Length;
         pxe.CopyTo(r, at); at += pxe.Length;
+
+        // Option 43, PXE vendor sub-options. WITHOUT THIS THE BOARD REJECTS THE
+        // OFFER AND RE-DISCOVERS FOREVER - observed on the bench: two DISCOVERs
+        // answered with two OFFERs and never a REQUEST. A PXE client that has
+        // announced itself as one expects boot-server guidance, and an offer
+        // carrying an address but no such guidance is not an offer it can use.
+        //
+        // Sub-option 6 (discovery control) = 3 means "do not multicast or
+        // broadcast to find a boot server; use the file name you were given",
+        // which collapses the whole PXE boot-server negotiation into the two
+        // fields already set above. It is the smallest thing that can work.
+        r[at++] = 43; r[at++] = 4;
+        r[at++] = 6; r[at++] = 1; r[at++] = 3;                      // discovery control
+        r[at++] = 255;                                              // end of sub-options
+
+        // Option 66/67: the TFTP server and the file, stated explicitly as well
+        // as in siaddr/file, because clients differ in which they read.
+        var tftpServer = Encoding.ASCII.GetBytes(_serverIp.ToString());
+        r[at++] = 66; r[at++] = (byte)tftpServer.Length;
+        tftpServer.CopyTo(r, at); at += tftpServer.Length;
+        var bootfile = Encoding.ASCII.GetBytes(BootFileName);
+        r[at++] = 67; r[at++] = (byte)bootfile.Length;
+        bootfile.CopyTo(r, at); at += bootfile.Length;
+
         r[at++] = 255;                                              // END
         return r[..Math.Max(at, 300)];
     }

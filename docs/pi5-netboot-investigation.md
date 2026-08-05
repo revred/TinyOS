@@ -204,3 +204,102 @@ constants corroborated on this board, not independently derived** — the raw
 datum falls monotonically as the die warms and TinyOS's derived 40.9→46.7 °C
 brackets Linux's 38.05 °C idle sensibly, which is corroboration and is not the
 same thing as a two-point fit.
+
+---
+
+## RESOLVED 2026-08-05 — TinyOS booted over the wire
+
+`tos64-netboot` served the image and the board ran it. **The card swap is over.**
+Every question in this document is now answered on this board.
+
+### Q3 — what file set does the firmware request? **Answered, in order.**
+
+```
+7bf18f79/config.txt              served  45 bytes
+7bf18f79/pieeprom.sig            not found  (optional; boot continued)
+7bf18f79//config.txt             served    (note the doubled slash, twice)
+7bf18f79/kernel8.img             abandoned at block 1, then RETRIED
+7bf18f79/bcm2712-rpi-5-b.dtb     not found  (TinyOS needs no device tree)
+7bf18f79//cmdline.txt            not found
+7bf18f79/armstub8-2712.bin       not found
+7bf18f79/kernel8.img             SERVED COMPLETE — 293,481 bytes, 574 blocks
+```
+
+`7bf18f79` is the low 8 hex digits of the board serial `d7bd1a077bf18f79`, exactly
+as predicted. **Five of the eight requests are for files that do not exist and the
+boot proceeded anyway** — the firmware treats them as optional, which means a
+netboot root needs only `config.txt` and `kernel8.img`.
+
+Note the **doubled slash** (`7bf18f79//config.txt`). A TFTP server that normalises
+paths naively, or one that refuses anything unusual, will fail here. Ours resolves
+it through `Path.GetFullPath` and it lands on the same file.
+
+### Q2 — DHCP required? **Yes, and PXE option 43 is not optional.**
+
+The exchange stalled at DISCOVER→OFFER→DISCOVER→OFFER, forever, until the offer
+carried **option 43 sub-option 6 (discovery control) = 3**. The board announces
+`PXEClient:Arch:00000:UNDI:002001` and, having done so, will not accept an offer
+that gives it an address but no boot-server guidance. With option 43 present the
+handshake completed on the first attempt:
+
+```
+DHCP DISCOVER → OFFER → REQUEST → ACK
+```
+
+Also required in practice: a **non-empty boot file name**. An empty one left the
+client with nothing to request. `bootcode.bin` was named as a prompt; the board
+ignored it and asked for its own file set, which is exactly what the log was for.
+
+### Q5 — does netboot coexist with the TOS64 wire? **Answered: yes.**
+
+The netbooted image is emitting spoors on the same cable it was delivered over:
+
+```
+frame seq=222 count=3 epoch=0x04C7D0FF
+    Thermal Kernel Observe Ok  rung=ThermalSample  avs=0x000106CB ~61.8C
+== boot certificate (epoch 0x04C7D0FF) — 3 record(s), re-announced ==
+96 TOS64 frames in 30 s
+```
+
+A fresh epoch (`0x04C7D0FF`), the boot certificate re-announcing on its period, and
+the thermal rung sampling — from an image the board fetched over TFTP. **The
+delivery path and the observability path share one wire and do not interfere.**
+
+## The loop this replaces
+
+Before: build, power down, pull the card, swap files on the laptop, reinsert,
+power up. Two card moves and a power cycle per experiment.
+
+Now:
+
+```
+cargo run -p xtask -- pi5 --fixture=measure
+cp os/target/pi5/{kernel8.img,config.txt} <tftproot>/7bf18f79/
+tos64-netboot --mac 88:a2:9e:11:4e:cc --root <tftproot>
+# power-cycle the board
+```
+
+**Rule 9 is never engaged.** The firmware fetches and jumps before TinyOS exists;
+TinyOS neither receives, parses, nor admits anything, `gem.rs` keeps
+`no_path_in_this_module_ever_enables_receive`, and `LE-67`'s containment story is
+untouched.
+
+## Recovery, and why it is safe
+
+`BOOT_ORDER=0xf12` is network-then-SD. **Stop the server and the board boots the
+card** — proven twice before the server existed and unchanged by any of this. So
+a bad image costs a reboot with the server stopped, never a card swap.
+
+One consequence worth stating: once TinyOS is netbooted there is no SSH, so a
+remote reboot is not available. Returning to Pi OS means stopping `tos64-netboot`
+and power-cycling by hand — one physical action, against the two card moves it
+replaces.
+
+## Known rough edge
+
+The first `kernel8.img` request was **abandoned at block 1** and only succeeded on
+the client's retry. The transfer logic is classic 512-byte lock-step TFTP with a
+five-attempt bound; something about the first exchange — most likely the client
+switching source port between the request and the first ACK — loses it. It
+self-heals through the retry, so it is a slow start rather than a failure, and it
+is recorded here rather than left for someone to rediscover.
