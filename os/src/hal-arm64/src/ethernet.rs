@@ -1618,6 +1618,16 @@ mod glue {
                     crate::spoor::Verdict::Ok,
                     crate::thermal::read_raw(),
                 );
+                // The kernel drives the machine here, once per beat: one
+                // cooperative dispatch round, interrupts live, outside any
+                // measured region. `run_once` switches into the task, the task
+                // yields straight back, and the round stamps its own spoor from
+                // the kernel side where the taxonomy lives.
+                //
+                // Paced BY the tick rather than called FROM it - a context
+                // switch inside the handler would swap the stack underneath the
+                // frame that will `eret`, and the handler is not reentrant.
+                let _dispatched = crate::spoor::dispatch_round();
                 if beaconing {
                     if let Some((speed, full_duplex)) = speed_config {
                         let mut payload = [0u8; gem::SPOOR_FRAME_CAPACITY - 14];

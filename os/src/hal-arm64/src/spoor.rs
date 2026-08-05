@@ -46,6 +46,8 @@ pub enum Rung {
     /// The SoC die temperature was sampled; the cost field carries the AVS
     /// monitor's raw register word, unconverted (`LE-75`).
     ThermalSample = 8,
+    /// One cooperative dispatch round ran from the park loop (`LE-78`).
+    DispatchRound = 9,
 }
 
 /// What a rung reports, mirroring `kernel::spoor_stream::Verdict`.
@@ -70,6 +72,59 @@ extern "C" {
     fn tinyos_spoor_seed_epoch(sample: u64);
     /// `kernel::spoor_stream::tinyos_spoor_announce`.
     fn tinyos_spoor_announce(out: *mut u8, cap: usize) -> usize;
+    /// `kernel::board_dispatch::tinyos_dispatch_init`.
+    fn tinyos_dispatch_init() -> u8;
+    /// `kernel::board_dispatch::tinyos_dispatch_round`.
+    fn tinyos_dispatch_round() -> u16;
+}
+
+/// Creates the board's one task, returning whether it is dispatchable.
+///
+/// The kernel owns the scheduler, the contexts and the stack; this crate only
+/// says when. Called once, after the tick is armed and interrupts are
+/// unmasked, so the first dispatch round runs on a live machine rather than a
+/// masked one.
+#[cfg(target_arch = "aarch64")]
+#[must_use]
+pub fn dispatch_init() -> bool {
+    // SAFETY: the symbol is provided by `kernel`, which `pi5-image` links;
+    // single core, called once from the boot path before the park loop.
+    unsafe { tinyos_dispatch_init() == 1 }
+}
+
+/// Runs one cooperative dispatch round, returning the dispatched task index or
+/// [`NO_TASK`](kernel_no_task).
+///
+/// Called from the park loop and never from an interrupt handler: a context
+/// switch inside a handler swaps the stack underneath the frame that will
+/// `eret`, and the handler is not reentrant.
+#[cfg(target_arch = "aarch64")]
+#[must_use]
+pub fn dispatch_round() -> u16 {
+    // SAFETY: as above; the park loop is the only caller and is ordinary code.
+    unsafe { tinyos_dispatch_round() }
+}
+
+/// Mirrors `kernel::board_dispatch::NO_TASK`.
+///
+/// Duplicated across the seam for the same reason [`Rung`] is, and pinned by
+/// the parity test below.
+pub const fn kernel_no_task() -> u16 {
+    u16::MAX
+}
+
+/// Host builds create no task.
+#[cfg(not(target_arch = "aarch64"))]
+#[must_use]
+pub fn dispatch_init() -> bool {
+    false
+}
+
+/// Host builds dispatch nothing.
+#[cfg(not(target_arch = "aarch64"))]
+#[must_use]
+pub fn dispatch_round() -> u16 {
+    kernel_no_task()
 }
 
 /// Fixes this boot's epoch from the generic counter (`STORY-P1-10-04`).
@@ -190,6 +245,7 @@ mod tests {
             (Rung::ParkIteration, KernelRung::ParkIteration),
             (Rung::FaultTaken, KernelRung::FaultTaken),
             (Rung::ThermalSample, KernelRung::ThermalSample),
+            (Rung::DispatchRound, KernelRung::DispatchRound),
         ];
         for (ours, theirs) in pairs {
             assert_eq!(
@@ -198,7 +254,14 @@ mod tests {
                 "{ours:?} and {theirs:?} must carry the same wire value"
             );
         }
-        assert_eq!(pairs.len(), 8, "a rung added on either side must be added here too");
+        assert_eq!(pairs.len(), 9, "a rung added on either side must be added here too");
+    }
+
+    /// The seam's sentinel must be the kernel's, or "nothing ran" and "task
+    /// 65535 ran" become the same answer across the boundary.
+    #[test]
+    fn the_no_task_sentinel_agrees_with_the_kernel() {
+        assert_eq!(kernel_no_task(), kernel::board_dispatch::NO_TASK);
     }
 
     #[test]
@@ -227,6 +290,7 @@ mod tests {
             Rung::ParkIteration,
             Rung::FaultTaken,
             Rung::ThermalSample,
+            Rung::DispatchRound,
         ] {
             assert!(
                 KernelRung::from_bits(rung as u16).is_some(),

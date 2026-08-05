@@ -464,6 +464,21 @@ extern "C" fn continue_at_el1() -> ! {
                     unsafe {
                         core::arch::asm!("msr daifclr, #2", options(nomem, nostack));
                     }
+                    // The kernel's scheduler gets its one task here - AFTER
+                    // interrupts are live, so the first dispatch round the park
+                    // loop runs happens on a running machine rather than a
+                    // masked one. That ordering is the entire difference
+                    // between this and what `fixture_measure` has been doing on
+                    // silicon since BOARD VERDICT 5.
+                    crate::spoor::stamp(
+                        crate::spoor::Rung::DispatchRound,
+                        if crate::spoor::dispatch_init() {
+                            crate::spoor::Verdict::Ok
+                        } else {
+                            crate::spoor::Verdict::Failed
+                        },
+                        0,
+                    );
                     None
                 } else {
                     // The timer control readback disagreed: same refused

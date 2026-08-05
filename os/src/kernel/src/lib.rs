@@ -13,6 +13,7 @@
 // Arch-neutral core — what the AArch64 boot image links (`STORY-P1-07-06`):
 // the measurement harness, the pools, the scheduler, the dispatcher and the
 // context switch (whose assembly is arch-split inside the module).
+pub mod board_dispatch;
 pub mod context;
 pub mod dispatch;
 pub mod measure;

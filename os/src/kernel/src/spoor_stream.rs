@@ -60,6 +60,12 @@ pub enum Rung {
     /// calibration is unverified on this hardware and a converted value would
     /// arrive as a confident number nobody could tell was wrong.
     ThermalSample = 8,
+    /// One cooperative dispatch round ran from the park loop with interrupts
+    /// live — the kernel driving the machine rather than being measured by it.
+    ///
+    /// The cost field carries the dispatched task index, or nothing meaningful
+    /// when the outcome is `Skipped`/`Failed`.
+    DispatchRound = 9,
 }
 
 impl Rung {
@@ -80,6 +86,7 @@ impl Rung {
             6 => Some(Rung::ParkIteration),
             7 => Some(Rung::FaultTaken),
             8 => Some(Rung::ThermalSample),
+            9 => Some(Rung::DispatchRound),
             _ => None,
         }
     }
@@ -114,7 +121,8 @@ impl Rung {
             Rung::BeaconTransmitted
             | Rung::ParkIteration
             | Rung::FaultTaken
-            | Rung::ThermalSample => false,
+            | Rung::ThermalSample
+            | Rung::DispatchRound => false,
         }
     }
 
@@ -142,6 +150,11 @@ impl Rung {
             // it did: `Observe` because reading changes nothing, and nothing
             // yet acts on the reading.
             Rung::ThermalSample => (Category::Thermal, Action::Observe),
+            // The dispatcher chooses which task runs, which is exactly what
+            // `Category::Dispatch` and `Action::Select` already mean on the
+            // x86_64 path — so both architectures describe a dispatch round
+            // the same way and one host decoder reads either.
+            Rung::DispatchRound => (Category::Dispatch, Action::Select),
         }
     }
 }
@@ -593,6 +606,7 @@ mod tests {
             Rung::ParkIteration,
             Rung::FaultTaken,
             Rung::ThermalSample,
+            Rung::DispatchRound,
         ] {
             assert_eq!(Rung::from_bits(rung.to_bits()), Some(rung));
         }
@@ -604,7 +618,7 @@ mod tests {
     #[test]
     fn an_unknown_rung_is_refused_not_guessed() {
         assert_eq!(Rung::from_bits(0), None);
-        assert_eq!(Rung::from_bits(9), None);
+        assert_eq!(Rung::from_bits(10), None);
         assert_eq!(Rung::from_bits(u16::MAX), None);
     }
 
@@ -620,6 +634,7 @@ mod tests {
         assert_eq!(Rung::ParkIteration.to_bits(), 6);
         assert_eq!(Rung::FaultTaken.to_bits(), 7);
         assert_eq!(Rung::ThermalSample.to_bits(), 8);
+        assert_eq!(Rung::DispatchRound.to_bits(), 9);
     }
 
     /// A fault must describe itself the same way on both architectures, or a

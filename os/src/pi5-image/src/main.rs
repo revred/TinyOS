@@ -52,20 +52,38 @@ use kernel::fixture_measure_arm64 as _;
 /// stream into a crate of its own and discovers which symbols were load-
 /// bearing by watching the link fail on the runner. That is exactly the
 /// discovery this static exists to have already made.
+/// The seam's shape, named rather than a tuple.
+///
+/// It became a six-tuple when dispatch joined the spoor entry points and
+/// clippy refused it as a very complex type — correctly. A struct also makes
+/// the static self-describing: a reader sees which symbols the image is
+/// pinning and why, instead of counting positions in a tuple.
+///
+/// **The fields are never read, and that is the whole point.** This static
+/// exists so the linker keeps `kernel` and its `#[no_mangle]` definitions in
+/// the image; reading a field would be the one thing that makes it look
+/// justified to a lint and changes nothing about why it is here.
+#[cfg(target_arch = "aarch64")]
+#[allow(dead_code)]
+struct KernelSeam {
+    stamp: extern "C" fn(u16, u8, u32),
+    drain: unsafe extern "C" fn(*mut u8, usize) -> usize,
+    seed_epoch: extern "C" fn(u64),
+    announce: unsafe extern "C" fn(*mut u8, usize) -> usize,
+    dispatch_init: extern "C" fn() -> u8,
+    dispatch_round: extern "C" fn() -> u16,
+}
+
 #[cfg(target_arch = "aarch64")]
 #[used]
-static SPOOR_SEAM: (
-    extern "C" fn(u16, u8, u32),
-    unsafe extern "C" fn(*mut u8, usize) -> usize,
-    extern "C" fn(u64),
-    unsafe extern "C" fn(*mut u8, usize) -> usize,
-) = (
-    kernel::spoor_stream::tinyos_spoor_stamp,
-    kernel::spoor_stream::tinyos_spoor_drain,
-    kernel::spoor_stream::tinyos_spoor_seed_epoch,
-    kernel::spoor_stream::tinyos_spoor_announce,
-);
-
+static SPOOR_SEAM: KernelSeam = KernelSeam {
+    stamp: kernel::spoor_stream::tinyos_spoor_stamp,
+    drain: kernel::spoor_stream::tinyos_spoor_drain,
+    seed_epoch: kernel::spoor_stream::tinyos_spoor_seed_epoch,
+    announce: kernel::spoor_stream::tinyos_spoor_announce,
+    dispatch_init: kernel::board_dispatch::tinyos_dispatch_init,
+    dispatch_round: kernel::board_dispatch::tinyos_dispatch_round,
+};
 /// A panic in this image has no reporting channel of its own — the UART may
 /// be the very thing that failed — so the fail-safe terminal state is the
 /// same park the boot path ends in.
