@@ -20,6 +20,17 @@
 //      dropped. The board can now tell a late listener which boot it joined;
 //      this is the half that listens.
 //
+// It also harvests the OTHER thing on this cable. The board transmits its
+// TOS64-MEAS/2 measurement envelope and its TOS64-PRESENT/1 beacon as TEXT
+// frames on the same EtherType 0x88B5, one line per beat, cycling
+// (hal_arm64::gem::text_frame). Until now this tool captured those frames and
+// silently discarded them, because DecodeAll only ever looked for the SPOORJ01
+// magic - so the measurement envelope has been riding the wire unread through
+// every capture ever taken, including the three that produced BOARD VERDICTS
+// 11-13. REPORT-2026-08-04-01's single largest named debt is that no
+// board-emitted envelope has been machine-parsed off the wire. It was there the
+// whole time; nothing was listening for it.
+//
 // Input today is a capture file (pktmon etl2txt text, or raw bytes). Live
 // capture needs a driver below Windows' EtherType demux — Windows discards
 // EtherType 0x88B5 before any socket can see it, and offers no user-mode API
@@ -50,6 +61,17 @@ internal static class Program
     /// board, and is named rather than ignored.
     private const ushort KnownFlags = FlagRetained;
 
+    /// Every TOS64 envelope line begins with this. Used to find text frames
+    /// among binary ones without needing to know which is which in advance:
+    /// the board sends both on one EtherType so one capture filter sees the
+    /// whole conversation, and this is the other half of that bargain.
+    private const string EnvelopePrefix = "TOS64-";
+
+    /// Shortest run of printable ASCII treated as an envelope line. Twelve is
+    /// under the shortest real row ("END metrics=8") and well over the length a
+    /// run of packed binary records produces by chance.
+    private const int MinEnvelopeLine = 12;
+
     /// kernel::spoor_wire::EPOCH_UNDECLARED — an unseeded board, or an image
     /// older than the field. Read as an absence, never as boot number zero.
     private const uint EpochUndeclared = 0;
@@ -65,6 +87,7 @@ internal static class Program
         string? path = null;
         var strict = false;
         string? device = null;
+        string? textPath = null;
         var liveSeconds = 0;
         for (var i = 0; i < args.Length; i++)
         {
@@ -87,6 +110,12 @@ internal static class Program
                 case "--file" when i + 1 < args.Length:
                     path = args[++i];
                     break;
+                // Writes the harvested envelope lines to a file, so
+                // `xtask parse-meas` can consume a WIRE capture rather than a
+                // transcription of a photograph.
+                case "--text" when i + 1 < args.Length:
+                    textPath = args[++i];
+                    break;
                 // Exit non-zero unless at least one frame decoded, so a run can
                 // gate a Report rather than merely inform a reader.
                 case "--strict":
@@ -99,6 +128,7 @@ internal static class Program
         }
 
         List<Frame> frames;
+        var text = new List<string>();
 
         if (liveSeconds > 0)
         {
@@ -116,7 +146,11 @@ internal static class Program
             // a beacon or a transcript line rather than a spoor frame, and only
             // the ones carrying the magic produce records.
             frames = [];
-            foreach (var payload in payloads) frames.AddRange(DecodeAll(payload));
+            foreach (var payload in payloads)
+            {
+                frames.AddRange(DecodeAll(payload));
+                HarvestText(payload, text);
+            }
         }
         else
         {
@@ -131,9 +165,15 @@ internal static class Program
             Console.WriteLine($"ti64dink: {bytes.Length} candidate bytes from {Path.GetFileName(path)}");
             Console.WriteLine();
             frames = DecodeAll(bytes);
+            HarvestText(bytes, text);
         }
         if (frames.Count == 0)
         {
+            // Text first: a capture holding the measurement envelope and no
+            // spoor frames is a SUCCESSFUL capture of a different thing, and
+            // reporting it as "nothing found" would throw away the evidence
+            // this tool was just taught to see.
+            ReportText(text, textPath);
             Console.WriteLine("No SPOORJ01 frame found.");
             Console.WriteLine();
             Console.WriteLine("If the board is beaconing, the likely cause is the capture, not the board:");
@@ -143,7 +183,84 @@ internal static class Program
         }
 
         Report(frames);
+        ReportText(text, textPath);
         return 0;
+    }
+
+    /// Harvests every TOS64 envelope line from a payload or a capture blob.
+    ///
+    /// Deliberately a scan rather than a frame parse, for the same reason
+    /// ReadCandidateBytes is format-tolerant: this has to work against a live
+    /// payload, a raw dump and one capture tool's text export without three
+    /// code paths. A line is a run of printable ASCII starting at the envelope
+    /// prefix and ending at the first NUL, CR or LF - which is exactly the
+    /// shape hal_arm64::gem::text_frame emits, since it zero-pads to the
+    /// Ethernet minimum.
+    ///
+    /// Duplicates are kept out: the board cycles its transcript one line per
+    /// beat, so a 60-second capture holds each line many times over, and a
+    /// reader wants the envelope, not the repetition count.
+    private static void HarvestText(byte[] bytes, List<string> into)
+    {
+        var at = 0;
+        while (at < bytes.Length)
+        {
+            // Maximal run of printable ASCII. `gem::text_frame` writes the line
+            // at payload offset 0 and zero-pads to the Ethernet minimum, so a
+            // run terminated by NUL is exactly one envelope line.
+            if (bytes[at] < 0x20 || bytes[at] > 0x7E) { at++; continue; }
+            var start = at;
+            while (at < bytes.Length && bytes[at] >= 0x20 && bytes[at] <= 0x7E) at++;
+            var line = Encoding.ASCII.GetString(bytes, start, at - start).TrimEnd();
+
+            // Anchoring on the "TOS64-" prefix was the obvious rule and it is
+            // WRONG: only the BEGIN line of a TOS64-MEAS/2 envelope carries it.
+            // The metric rows ("D04  context_switch... min=80"), the continuation
+            // row and "END metrics=8" do not, and those are the measurements -
+            // the entire reason to read text frames at all.
+            //
+            // So the rule is shape, not prefix: long enough not to be noise, and
+            // carrying a key=value pair, which every envelope row does and a run
+            // of packed spoor records essentially never does. A false positive
+            // prints as visible junk rather than corrupting a parse.
+            if (line.Length >= MinEnvelopeLine && line.Contains('=') && !into.Contains(line))
+            {
+                into.Add(line);
+            }
+        }
+    }
+
+    /// Prints the harvested envelope, and optionally writes it where
+    /// `xtask parse-meas` can read it.
+    private static void ReportText(List<string> text, string? textPath)
+    {
+        if (text.Count == 0) return;
+
+        Console.WriteLine();
+        Console.WriteLine($"---- TOS64 text frames ---- ({text.Count} distinct line(s))");
+        foreach (var line in text) Console.WriteLine("    " + line);
+
+        if (textPath is null)
+        {
+            Console.WriteLine();
+            Console.WriteLine("    (--text <file> writes these where `xtask parse-meas` can read them)");
+            return;
+        }
+
+        try
+        {
+            File.WriteAllLines(textPath, text);
+            Console.WriteLine();
+            Console.WriteLine($"    written to {textPath} — parse with:");
+            Console.WriteLine($"      cargo run -p xtask -- parse-meas --file={textPath}");
+        }
+        catch (IOException e)
+        {
+            // Reported, never swallowed: a capture that silently failed to save
+            // is a capture that has to be taken again on a board someone has
+            // already powered down.
+            Console.Error.WriteLine($"ti64dink: could not write {textPath}: {e.Message}");
+        }
     }
 
     /// The wired adapter, chosen by description rather than by order.
@@ -181,6 +298,9 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("  ti64dink --file <capture>   pktmon etl2txt output, or raw frame bytes");
         Console.WriteLine("  ti64dink --file <c> --strict  exit 1 unless at least one frame decodes");
+        Console.WriteLine("  ti64dink --live 30 --text env.txt   also harvest the TOS64-MEAS/2");
+        Console.WriteLine("                                      envelope the board transmits as text");
+        Console.WriteLine("                                      frames, for `xtask parse-meas`");
         Console.WriteLine();
         Console.WriteLine("Capture on Windows (elevated, until Npcap is installed):");
         Console.WriteLine("  pktmon filter remove");
