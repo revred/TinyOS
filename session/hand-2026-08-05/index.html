@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TinyOS Handovers — 4 August 2026</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #5a5a5a;
+    --border: #d8d8d8;
+    --code-bg: #f2f2f2;
+    --accent: #0b5fff;
+    --tag-bg: #eef2ff;
+    --card-bg: #fafafa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --fg: #e8e8e8;
+      --muted: #a0a0a0;
+      --border: #333740;
+      --code-bg: #1e2126;
+      --accent: #6fa8ff;
+      --tag-bg: #1c2333;
+      --card-bg: #191c21;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.6;
+  }
+  h1 { font-size: 1.7rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.25rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+  .status {
+    display: inline-block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--tag-bg);
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    margin-bottom: 1.5rem;
+  }
+  code {
+    background: var(--code-bg);
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  a { color: var(--accent); }
+  .muted { color: var(--muted); }
+  .entries { list-style: none; padding-left: 0; }
+  .entry {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 0.9rem;
+  }
+  .entry .num {
+    display: inline-block;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin-right: 0.4rem;
+  }
+  .entry a { font-weight: 600; font-size: 1.02rem; text-decoration: none; }
+  .entry a:hover { text-decoration: underline; }
+  .entry p { margin: 0.4rem 0 0; color: var(--muted); font-size: 0.92rem; }
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+
+<h1>TinyOS &mdash; Handovers for 5 August 2026</h1>
+<p class="muted">This page indexes every handover produced on this date, in order. Per the <a href="../README.md">session naming convention</a>, all handovers from a single calendar date live in this one folder. Previous session: <a href="../hand-2026-08-04/index.html">4 August 2026</a>.</p>
+<span class="status">The loop closed &middot; a late listener reads the boot &middot; the machine says how hot it is &middot; next: the board runs the kernel</span>
+
+<h2>Handovers</h2>
+<ol class="entries">
+  <li class="entry">
+    <span class="num">01A</span><a href="01A-the-need-for-speed-and-what-must-not-be-traded-for-it.md">The need for speed, and what must not be traded for it</a>
+    <p>Written at the owner&#39;s request on the framing that the project now has <em>a verifiable development cycle worth a 10&times; improvement, with TDD and no loss of quality</em>. <strong>&sect;2 &mdash; where the speed actually comes from:</strong> evidence replaced transcription; ground truth captured <em>before</em> design (twenty minutes of SSH sized <code>STORY-P1-10-05</code> correctly and corrected a wrong risk statement already made out loud); a capture no longer has to be lucky; and gates that cost less than the failures they catch. The benchmark is real &mdash; <code>STORY-P1-10-05</code> ran observation &rarr; ground truth &rarr; design &rarr; TDD &rarr; gates &rarr; Story &rarr; commit &rarr; image in about an hour, with the owner only inserting a card and applying power. <strong>&sect;3 &mdash; what must not be traded, each with this session&#39;s receipt:</strong> prove the Red (14 tests failed against a neutered implementation); never substitute a constant for a discovery (<code>LE-69</code> refused a <em>conforming</em> device, and a wrong temperature still reads like a temperature); state what you did not measure (<code>LE-74</code>&#39;s caution was right and far too gentle &mdash; the board measured two consecutive epochs <strong>151 counter ticks apart</strong>); a gate that cannot see its subject is not a gate (<code>LE-72</code>); widen a vocabulary, never stretch one (and note <code>ACT</code> now has <strong>one verb of headroom</strong>). <strong>&sect;5 &mdash; the mandate, and it is not what <code>FEAT-P1-10</code>&#39;s Story list implies:</strong> <code>hal-arm64</code> references <em>none</em> of <code>sched</code>, <code>dispatch</code>, <code>lock</code> or <code>wcet</code> &mdash; <strong>the board has never run TinyOS&#39;s kernel.</strong> There are no call sites to wire because nothing calls them. The real next milestone is one task dispatched once on silicon, with the tick driving the dispatch round, observed through the stream built for exactly that. First, though: boot <code>f06bfa8ac7ec</code> and read the thermal rung, and write <code>REPORT-2026-08-04-01</code>, which is release-blocking.</p>
+  </li>
+</ol>
+
+<footer>
+Written at session close, 2026-08-05. The deep operational context (SSH runbook, card roles, capture procedure) lives in <a href="../hand-2026-08-03/09A-window-poisoned-inbound-path-indicted.md">hand-2026-08-03/09A</a>; the spoor substrate&#39;s own history is <a href="../hand-2026-08-04/index.html">4 August</a>.
+</footer>
+
+</body>
+</html>
