@@ -128,11 +128,45 @@ envelope and by the same discipline as everything else:
 
 ## 7. What this document does not decide
 
-- Whether the owner's existing Rust database can be ported under §4's constraints, or whether
-  what lands is a new fixed-slot table sharing its semantics. **That is a scoping question to
-  answer by reading the implementation, not by assertion here.**
-- The host-side archive (a real database over spoors and evidence, living in `xtask`, derived
-  from raw captures and rebuildable at any time). Different layer, different constraints,
-  gated behind `LE-76`.
+- ~~Whether the owner's existing Rust database can be ported under §4's constraints.~~
+  **Answered 2026-08-05 by reading it.** The engine is `SharCrust`
+  (`internal/Sharc.Probe/sharcrust/`) — a genuine from-scratch Rust implementation of the
+  SQLite file format: pager, B-tree read and write with page splits, overflow, freelist,
+  AES-256-GCM per-page crypto, ~791 tests. It is also, unambiguously, a `std` crate:
+
+  ```
+  serde · serde_json · rust_decimal · uuid · aes-gcm · hmac · sha2
+  pbkdf2 · rand · zeroize · ed25519-dalek        +  use std:: across the engine
+  ```
+
+  Every one of those needs `alloc` at minimum, and §4's first exclusion forbids `use alloc::`
+  outright. **So this is not a port with a cost — it is a different crate that would share
+  SharCrust's semantics and none of its code.** Anything built under this document is new
+  code; SharCrust's value to TinyOS is on the host side (below), not on the board.
+- The host-side archive's *contents*. Its **boundary**, however, is decided here, because an
+  earlier recommendation to put it "in `xtask`" was wrong and would have broken CI.
+
+  `internal/` is git-ignored — correctly, and with the same reasoning `external/npcap188/`
+  carries: proprietary code inside an MIT repository survives untracked exactly until someone
+  types `git add`. A clean clone therefore has no `internal/Sharc.Probe`, so **any
+  `xtask → sharcrust` path dependency fails on the runner.** `CONTEXT.md` flags the sharper
+  version of the same hazard itself: SharCrust's dev-dependencies reach into a sibling
+  `MAKER.aiKit` checkout, with the explicit warning to *"cut or vendor this before building
+  SharCrust inside any other repository's CI."*
+
+  **So the boundary is a file, not a Cargo dependency: TinyOS emits, Sharc.Probe ingests.**
+  TinyOS stays MIT and buildable from a clean clone, the proprietary engine stays out of its
+  dependency graph, and the archive lives where its engine already lives.
+
+  What that buys is larger than a query language. A `.arc` is SQLite-format, so a spoor
+  archive is immediately readable by machinery that already exists — `probe_cli`, PySharc, and
+  **`sharc_mcp`, an MCP server built for LLM agents**, with `hot_trace`, `hot_impact`,
+  `hot_history`, `hot_time_travel` and `hot_epoch_diff` already implemented over it. Sharc's
+  `epoch` already means *a snapshot generation you can diff against another*, and the board
+  already stamps a boot epoch. *"What changed between boot `0x04B328BC` and boot
+  `0x04C7D0FF`?"* becomes a tool call rather than a grep — which is the framing that started
+  this ("a spoor is to a physical system what a token is to a language model") actually
+  cashing out. Still gated behind `LE-76`: archiving today's text transcript would bake in
+  records with no sequence, no epoch and invisible loss.
 - Any Feature or Story decomposition. This is a scope note so that the boundary is settled
   before code exists — not a plan, and explicitly not a commitment to build.
