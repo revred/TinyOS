@@ -98,7 +98,7 @@ export CARGO_TARGET_DIR
 
 cd "$staged/os"
 
-echo "pre-commit: checking the staged tree — assurance spine, performance catalogue, crate sizes, metric labels..."
+echo "pre-commit: checking the staged tree — assurance spine, performance catalogue, crate sizes, metric labels, CI gates..."
 
 cargo run -q -p xtask -- check-assurance-spine
 cargo run -q -p xtask -- check-performance-catalogue
@@ -108,5 +108,11 @@ cargo run -q -p xtask -- check-crate-sizes
 # deterministic, and about the repository rather than about the machine — the
 # same three properties the checks above are chosen for.
 cargo run -q -p xtask -- check-metric-labels
+# LE-100: this repository closed loose ends on #[test]s and on xtask checks for
+# months while CI ran neither the suite nor half the checks. This one reads
+# .github/workflows/ci.yml and refuses a tree where a filed mechanism is not
+# wired into the runner -- including itself. Same three properties as the
+# checks above: cheap, deterministic, about the repository.
+cargo run -q -p xtask -- check-ci-gates
 
 echo "pre-commit: ok (validated the index, not the working tree)"

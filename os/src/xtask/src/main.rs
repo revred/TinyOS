@@ -12,6 +12,7 @@ mod assurance;
 mod board_run;
 mod boot_images;
 mod bound_provenance;
+mod ci_gates;
 mod citations;
 mod dashboard;
 mod external_isolation;
@@ -517,6 +518,10 @@ const SUBCOMMANDS: &[Subcommand] = &[
     Subcommand {
         name: "check-metric-labels",
         summary: "Every fixture metric's domain is selected by the contract of the Story it names",
+    },
+    Subcommand {
+        name: "check-ci-gates",
+        summary: "CI actually runs the host test suite and every gate filed as a CI mechanism",
     },
     Subcommand {
         name: "check-boot-images",
@@ -1060,6 +1065,38 @@ fn main() -> ExitCode {
                 }
                 Err(message) => {
                     eprintln!("xtask: metric label invalid: {message}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        // `LE-100`. CI ran no tests at all: `clippy --all-targets` compiles the
+        // harnesses, so a broken test failed the build and a *failing* test did
+        // not. This gate holds the workflow to running the suite, in its own
+        // job, blocking — and to running every check filed as a CI mechanism,
+        // itself included, because a `#[test]` guarding the test job dies with
+        // the job it guards.
+        "check-ci-gates" => {
+            let result = os_root().and_then(|root| {
+                let repo_root = root.parent().ok_or_else(|| {
+                    format!("could not resolve repository root from {}", root.display())
+                })?;
+                ci_gates::check_ci_gates(repo_root)
+            });
+            match result {
+                Ok(summary) => {
+                    println!(
+                        "ci-gate-check: {} job(s) in {} — the host test suite runs in `{}`, \
+                         blocking and outside the fast gates, and all {} CI-enforced xtask \
+                         check(s) are wired in",
+                        summary.job_count,
+                        ci_gates::WORKFLOW,
+                        summary.host_test_job,
+                        summary.enforced_count
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(message) => {
+                    eprintln!("xtask: CI gate missing: {message}");
                     ExitCode::FAILURE
                 }
             }

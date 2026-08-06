@@ -52,6 +52,17 @@ jobs:
       - name: Metric domain labels resolve against their owning Story's contract
         run: cargo run -p xtask -- check-metric-labels
 
+      # LE-100. The gates this repository files as mechanisms have to be
+      # executed where they count, and for the whole life of this project one
+      # of them was not: there was no `cargo test` step anywhere in this file.
+      # This gate asserts the `host-tests` job below exists, is separate from
+      # this one, is blocking, and that every xtask check named in
+      # `ci_gates::CI_ENFORCED` appears here — itself included, because a
+      # #[test] asserting "CI runs the host tests" is run by the very job it
+      # asserts and dies with it. A step here survives that deletion.
+      - name: Every gate this repository claims to enforce is wired into CI
+        run: cargo run -p xtask -- check-ci-gates
+
       - name: missing_docs check
         run: cargo doc --workspace --no-deps
         env:
@@ -89,6 +100,44 @@ jobs:
           rustup toolchain install --profile minimal --component rustfmt --component clippy "$(grep -oP 'channel\s*=\s*"\K[^"]+' rust-toolchain.toml)"
       - name: Run fixture smoke test
         run: cargo run -p xtask -- governance-fixture-test
+
+  # LE-100 — the host test suite, which until 2026-08-06 ran nowhere on this
+  # runner.
+  #
+  # `clippy --all-targets` in the governance job COMPILES every test harness in
+  # the workspace, which is exactly why the gap survived unnoticed: a broken
+  # test failed the build, and a FAILING test did not. Roughly 1,217 host tests
+  # were passing locally when this was found, and among them was every
+  # source-level guard this project has ever filed as the closure of a loose
+  # end — LE-99's stamp density, LE-97's cadence, the G23 pair equivalence,
+  # check-citations' own tree assertion. Each was written as the mechanism that
+  # stops a defect recurring; each gated a laptop and nothing here.
+  #
+  # ITS OWN JOB, deliberately, and `check-ci-gates` refuses the alternative.
+  # The governance job's steps exist to fail in seconds — fmt, lints, the
+  # register checks — and putting a full suite in front of them would make the
+  # cheapest signal in this workflow wait on the slowest.
+  #
+  # BLOCKING from day one. A test job that cannot fail the build is the state
+  # LE-100 describes with a green tick over it. The first runs are expected to
+  # surface tests that pass on Windows and fail here — this bench is a Windows
+  # host, `kernel`/`exec`/`shell` carry fixture bins gated `cfg(not(windows))`
+  # that no local gate compiles, and that is LE-64's family. It is the reason
+  # this landed on its own rather than inside somebody's merge.
+  host-tests:
+    name: LE-100 — the workspace host test suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain
+        run: |
+          rustup toolchain install --profile minimal --component rust-src "$(grep -oP 'channel\s*=\s*"\K[^"]+' rust-toolchain.toml)"
+      # `--workspace`, never a package list: a suite narrowed to a subset is
+      # how this hole would reopen quietly, and `check-ci-gates` refuses the
+      # narrowed spelling for that reason. Doc-tests run too — they are
+      # compiled examples in a tree whose doc comments carry the argument.
+      - name: cargo test --workspace
+        run: cargo test --workspace
 
   kernel-boot-x86_64:
     name: TEST-P0-01-01-A / TEST-P0-01-03-A — kernel boots to halt under QEMU
