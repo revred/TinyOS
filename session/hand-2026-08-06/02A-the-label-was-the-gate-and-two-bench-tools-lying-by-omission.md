@@ -198,6 +198,35 @@ answered; not worth doing under the impression that it is measuring what the OS 
   `work/tools/netboot/bin/Debug/net10.0/tos64-netboot.exe --mac 88:a2:9e:11:4e:cc --root
   C:/Code/TinyOS/os/target/pi5`, and it will now refuse rather than share if one is already up.
 
+## 6a. Added after the push: main went red, and the local gate set could not have known
+
+Three sessions' work was committed and pushed at the owner's instruction (`fb3f36c`), and **CI
+failed on the first QEMU job with a compile error**: `fixture_measure.rs` declared `METRICS = 9`
+for the `G23` spoor-enabled arm and left an eight-element `[None, None, …]` literal beside it.
+`E0308`, expected size 9 found size 8.
+
+**Every documented pre-push command was green on that tree, including `check-boot-images`.**
+That is not an excuse, it is the finding: **nothing local compiles the x86_64 kernel binary at
+all.** `cargo test -p kernel` builds *host* tests, `check-lints` lints the host target,
+`check-boot-images` builds **AArch64**, and the only things that compile `src/kernel` for
+`targets/x86_64-tinyos.json` are `xtask measure` and its siblings, which need QEMU and run
+CI-side. So the whole Tier 0 fixture set is unbuilt by every gate a session is told to run.
+
+**This is `LE-72`'s hole, mirrored.** `check-boot-images` exists because nothing compiled for
+AArch64 and three pushes went out green and came back red. A gate written for one architecture
+after one incident does not generalise itself, and the second architecture keeps the hole the
+first one closed. Filed as **`LE-92`**, with the fix costed: one subcommand looping the feature
+list `list-fixtures` already knows, compilation only, no QEMU — **all 19 variants took under two
+minutes by hand** while verifying this.
+
+Fixed as `[const { None }; METRICS]`, which is what the AArch64 fixture beside it already used
+and which **could not have failed this way**: the literal was a second declaration of a count the
+type already carried. All 18 fixture features plus the featureless build were then compiled for
+`x86_64-tinyos.json` locally before the second push.
+
+**And the rule that caught it is `LE-64`'s, unchanged: push, then watch the run.** Until `LE-92`
+ships that is not a fallback, it is the gate.
+
 ## 7. The next session
 
 1. **Item 3, as `01A` wrote it** — `D04` and `D05` paired arms, both arms in one boot, reading

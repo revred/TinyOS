@@ -251,8 +251,14 @@ pub fn run() -> bool {
     let samples: &mut Samples<SAMPLES> = unsafe { &mut *core::ptr::addr_of_mut!(SAMPLE_BUFFER) };
 
     let mut ok = conformance_ok;
-    let mut collected: [Option<Measured>; METRICS] =
-        [None, None, None, None, None, None, None, None];
+    // Sized FROM `METRICS` rather than spelled out: a hand-written run of
+    // `None`s is a second declaration of the metric count that nothing keeps
+    // in step with the first. Adding the ninth metric (`PERF-D07-G23`'s
+    // spoor-enabled arm) bumped `METRICS` and left eight `None`s here, which
+    // no local gate compiles — this file is built only for the x86_64 kernel
+    // binary — so it reached CI as a type error. The AArch64 fixture beside it
+    // already did this.
+    let mut collected: [Option<Measured>; METRICS] = [const { None }; METRICS];
 
     // The reference goes first: it is the denominator of every ratio the gate
     // compares, so a run in which it did not happen is not a run with one
