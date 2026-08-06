@@ -1811,3 +1811,105 @@ WHAT THESE THREE RUNS DO NOT SHOW
     does not program RP1's PWM and has no thermal sensing at all - LE-75, raised from
     the owner's observation during this session. These runs are 30-90 seconds each and
     nothing here supports any claim about sustained operation.
+
+================================================================================
+BOARD VERDICT 14 - 2026-08-05, kernel8.img f8133b0958d3, NETBOOTED WITH NO SD CARD
+STORY-P1-11-01: the kernel drives the machine. FEAT-P1-11's first board evidence.
+================================================================================
+
+  RECORDED BECAUSE IT WAS NOT. hand-2026-08-05/07A section 4 cites "BOARD VERDICT 14" as
+  already holding the results of the image it overwrote. No such record existed - the
+  register ended at VERDICT 13, and 07A's three measurements were retained as loose .txt
+  files and never appended here. That is the same carried-forward-claim class 07A itself
+  names, found the same way: by reading the register instead of the prose. This entry is
+  written from the run it describes and does not attempt to reconstruct the lost image's.
+
+  NO CARD IN THE PI. The SD card was on the laptop for the whole of this run, so the
+  firmware had no fallback and the boot proves netboot rather than leaving which-path-won
+  as an unverified variable. tos64-netboot served config.txt and kernel8.img (578 blocks,
+  transfer complete) to 88:a2:9e:11:4e:cc; the canvas came up. THE CARD SWAP IS OVER, and
+  it is over because the FIRMWARE fetches over TFTP before any TinyOS code runs - not
+  because anything on the board listens. GEM receive stays disabled (LE-67 posture
+  unchanged, RCG-01 not engaged).
+
+canvas (owner transcription, first minute):
+  TOS64-LINK/1 RP1=PRESENT ID=0x0109 PHY=0x600D84A2 LINK=DOWN BEACON=SKIPPED
+  TOS64-BEAT/1 SEQ=133,134,... STATE=BEACONING FB=REFUSED
+
+  LINK=DOWN/BEACON=SKIPPED on the report line is the boot-time snapshot as in verdicts
+  2, 3 and 4 - autonegotiation takes seconds and the park-loop watch owns the transition,
+  which the beat line then shows it did.
+
+wire (Ti64Dink, Npcap, UNELEVATED), epoch 0x04B1CA6E, verbatim:
+
+  frame seq=1638 count=4 epoch=0x04B1CA6E
+      [1638] Boot      Kernel  Create    Ok       rung=BeaconTransmitted cost=409
+      [1639] Boot      Kernel  Select    Ok       rung=ParkIteration     cost=410
+      [1640] Thermal   Kernel  Observe   Ok       rung=ThermalSample     avs=0x000106D8 data=728
+      [1641] Dispatch  Kernel  Select    Ok       rung=DispatchRound     cost=0
+  frame seq=1642 count=4 epoch=0x04B1CA6E
+      [1642] Boot      Kernel  Create    Ok       rung=BeaconTransmitted cost=410
+      [1643] Boot      Kernel  Select    Ok       rung=ParkIteration     cost=411
+      [1644] Thermal   Kernel  Observe   Ok       rung=ThermalSample     avs=0x000106D7 data=727
+      [1645] Dispatch  Kernel  Select    Ok       rung=DispatchRound     cost=0
+
+  == boot certificate (epoch 0x04B1CA6E) - 3 record(s), re-announced ==
+      [0] Boot Kernel Create Ok  rung=MmuEnabled  cost=183624
+      [1] Boot Kernel Create Ok  rung=GicRouted   cost=0
+      [2] Boot Kernel Create Ok  rung=TickArmed   cost=1
+
+  frames 30 (25 stream, 5 retained); records ok 100; refused 0; lost 0; boots seen 1;
+  span 1638..1738 continuous.
+
+reading:
+
+  STORY-P1-11-01 CRITERION 7 IS MET. `Dispatch Kernel Select Ok rung=DispatchRound` is on
+  the wire ONE PER BEAT, in every frame, with the outcome visible on every round -
+  TEST-P1-11-01-A clause 7 as written. Outcome is Ok on every observed round, so the
+  Skipped/Failed arms of criterion 3 remain host-only; that is stated, not glossed.
+  cost=0 is the dispatched task index (the single task), not a cycle count.
+
+  THIS IS THE KERNEL DRIVING THE MACHINE, WITH INTERRUPTS LIVE. Every prior board verdict
+  measured TinyOS from inside a fixture with IRQs masked. tinyos_dispatch_init runs after
+  daifclr and the round runs from the park loop as ordinary code, so the context switch
+  happens on the park stack and not inside a handler.
+
+  THERMAL IS LIVE AND THE RAW WORD MOVES: avs=0x000106D4..0x000106DD, data 724..733 across
+  the window. STORY-P1-10-05 criteria 2 and 7's first half are met - the board emits the
+  raw register word unmasked and unscaled and the host converts. NO TEMPERATURE IS QUOTED:
+  the bcm2711_thermal calibration is unverified on this silicon and the paired Pi OS
+  reading criterion 7 requires has not been taken. The ~53-57C the decoder prints is
+  labelled unverified by the decoder itself and must not be cited as a measurement.
+
+  THE 11-METRIC ENVELOPE PARSED OFF THE WIRE AGAIN, on a different image and a different
+  boot path (netboot, not SD) from the 07A capture: `xtask parse-meas` read all 11 metrics
+  with timing::parse_stream unchanged. Exit 1, honestly - no TOS64-RESULT/1 verdict line
+  was in the window, LE-76 unchanged. Retained: wire-boot-verdict-2026-08-05.txt.
+
+  TWO HOST-TOOL DEFECTS FOUND AND FIXED BY THIS RUN, both recorded as LE rows:
+  - tos64-netboot CRASHED ON THE FIRST PACKET IT EVER ANSWERED. It guessed its own address
+    at startup while the board was off, so the bench NIC had no link and no link-local
+    address; it bound to 0.0.0.0, offered siaddr 0.0.0.0, and the broadcast reply had no
+    route across this host's five IPv4 addresses (SocketException 10065). An unhandled
+    exception then killed the whole server. A DHCP responder that dies on its first reply
+    is a fail-safe violation, not a configuration problem.
+  - ti64dink COULD NOT SEE DispatchRound AT ALL. Its rung table stopped at 8 while the
+    kernel had added DispatchRound=9, and a SECOND hand-kept list ("categories that carry
+    a rung": Boot, Fault, Thermal) omitted Dispatch. So `--until rung=DispatchRound` - the
+    exact command 07A section 1 printed as the next session's first act - watched 300
+    SECONDS of DispatchRound records and exited 1 as a timeout. A watch that reports a
+    real event as an absence is worse than one that cannot parse: the operator concludes
+    the board did not do the thing. Fixed by resolving the rung against the kernel's own
+    (rung, category, action) triple, deleting the second list. Verified in the correct
+    direction: the SAME command against the SAME live board now exits 0 within ~5 records.
+
+WHAT THIS RUN DOES NOT SHOW
+
+  - The dispatch round's COST with interrupts live. Still unmeasured, STORY-P1-11-01's own
+    named debt, and a different number from the fixture's masked one.
+  - Preemption, EL0, more than one task, or any containment claim. The task yields
+    immediately and does no work.
+  - Skipped/Failed dispatch outcomes. Every observed round was Ok.
+  - A live frame 0 or a TOS64-RESULT/1 verdict. A second power cycle inside the capture
+    window was attempted and did not happen; the epoch never changed. LE-76 stands.
+  - Any thermal calibration. See above.

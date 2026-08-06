@@ -109,11 +109,82 @@ implementation may not drift apart unannounced. Nothing above is weakened; two c
    overflow or null dereference after the switch reports through `STORY-P1-07-02`'s handler.
    This is a *guard*, not W^X and not isolation; the named-debt section stands.
 
-### The board captures (to be quoted verbatim when the Tier 1 run happens)
+### The board captures, quoted verbatim — Tier 1 run 2026-08-04
 
-Pending. Clause 4's two `TOS64-MMU/1` probe numbers and clause 6's decoded fault frame land
-here, transcribed from the canvas into the ground-truth file's `===== BOARD VERDICT N =====`
-record first.
+**Clause 4 required these to be quoted here and not merely to exist**, because the clause is
+the Story: they are the only signal separating a working configuration from a silently-ignored
+`SCTLR_EL1` write. They were transcribed into the ground-truth register first, per the rule
+above, and are reproduced here from `BOARD VERDICT 5` (measure boot, kernel `0c709197ed26`):
+
+```
+TOS64-MMU/1  SCTLR=0000000030D01805 OFF=75213055 ON=183180
+```
+
+`SCTLR_EL1` is **read back**, not assumed from the write: `M` (bit 0), `C` (bit 2) and `I`
+(bit 12) are all set. The same memory-bound loop over the same memory ran **75,213,055 cycles
+with the MMU off and 183,180 with it on — 410×.** `BOARD VERDICT 7` repeats the probe on a
+different image at ~405×, so the ratio is a property of the configuration and not of one
+build. That pair of numbers is this clause's whole argument, and it is what licenses every
+figure `STORY-P1-07-06` takes above this line to be about TinyOS rather than about the bus.
+
+Clause 6's decoded fault frame, from `BOARD VERDICT 8` (`mmu-fault` boot, kernel
+`fde0f2ce3f91`):
+
+```
+TOS64-FAULT/1 SLOT=CUR_EL_SPX/SYNC INDEX=04
+TOS64-FAULT/1 ESR=0000000096000005 CLASS=DATA-ABORT EC=25 IL=32
+TOS64-FAULT/1 STATUS=TRANSLATION LEVEL=1 WNR=READ ISV=NO SIZE=UNKNOWN S1PTW=NO
+TOS64-FAULT/1 FAR=0000002000000000 ELR=000000000008EF08 SPSR=0000000040000345
+TOS64-FAULT/1 HALTED REASON=NO-RESUME-PATH
+```
+
+`FAR_EL1 = 0x20_0000_0000` is the unmapped guard address to the bit, and the `ESR` decode is
+internally consistent (`EC=0x25` data abort with no exception-level change, `DFSC` translation
+fault at level 1, `WnR=read`, `ISV=0` yielding `SIZE=UNKNOWN` honestly rather than guessed).
+`HALTED REASON=NO-RESUME-PATH` is fail-safe-over-keep-trying on silicon: slot 4 has no resume
+path, so the handler reported and stopped rather than looping on the faulting instruction.
+The fault path survived the memory-system change that most easily breaks it, which is what
+clause 6 exists to prove.
+
+Filed evidence: [`REPORT-2026-08-04-01`](../reports/REPORT-2026-08-04-01.md).
+
+### Amended 2026-08-05 — clause 5's channel, substituted with its reason
+
+Recorded rather than silently absorbed, under the same house rule as the 2026-08-04
+amendment. **Clause 5 as written is not observable on this bench and never was.** It asks
+that the UART "continues to work, demonstrated by output emitted after the switch" — but the
+PL011 has never produced a byte on this board, before the switch or after it (`LE-47`, five
+consecutive zero-byte captures and an owner-declared-infeasible loopback). A channel that was
+never alive cannot be shown to survive anything, so a literal reading leaves this clause
+permanently unmeetable rather than merely unmet, and the 2026-08-04 amendment substituted the
+evidence channel for clauses 4 and 6 without addressing this one.
+
+What the clause is *for* is unambiguous and is testable: **if the Device-nGnRnE attributes for
+a device region are wrong, that device stops answering at the moment the MMU comes on.** Two
+device regions on this board demonstrably keep answering after the switch, both through
+mappings this Story built:
+
+- **The STAT GPIO block.** `STORY-P1-07-08`'s lamp is held on through boot and toggles at 1 Hz
+  in the park loop, which is after the MMU is enabled — proven on silicon 2026-08-03 and on
+  every boot since. A wrong Device attribute on that block would freeze or lose the lamp.
+- **The RP1 peripheral window at CPU `0x1F_0000_0000`.** `BOARD VERDICT 2` read
+  `ID=0x0109 PHY=0x600D84A2` through it, and the whole of `FEAT-P1-09` — MDIO, the GEM, the
+  beacon transmit — runs through that mapping with caches on. `BOARD VERDICT 1` is the
+  counter-example that makes this evidence rather than assertion: when that window *was*
+  unreadable it read `0xDEADDEAD`, loudly and diagnosably, exactly as this clause predicts a
+  wrong device mapping would present.
+
+DMA coherency rides along and is stated because it is the failure this substitution could
+otherwise hide: the beacon staging cleans its lines to the point of coherency and the mailbox
+exchange clean-invalidates around the firmware's access, so a device reading RAM behind the
+caches this Story turned on sees what the CPU wrote — evidenced by the beacon frames captured
+byte-identical off the cable 2026-08-05 (`STORY-P1-09-03`).
+
+**What this substitution does not establish:** that the PL011's own mapping is correct. It is
+mapped explicitly and its attributes are pinned by the walker test, but no byte has ever left
+it, and if the fault is in that mapping rather than in the adapter or the cable, nothing here
+would distinguish the two. That remains `LE-47`'s open question and it is not closed by this
+clause being discharged on other regions.
 
 ## Test type
 

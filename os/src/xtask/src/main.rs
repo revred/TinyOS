@@ -11,6 +11,7 @@
 mod assurance;
 mod boot_images;
 mod bound_provenance;
+mod citations;
 mod dashboard;
 mod external_isolation;
 mod gate;
@@ -487,6 +488,10 @@ const SUBCOMMANDS: &[Subcommand] = &[
         summary: "Validate contracts, loose ends and the Story/Feature join",
     },
     Subcommand {
+        name: "assurance-status",
+        summary: "Decompose the release-gate denominator: what is blocked, by what, and by whom",
+    },
+    Subcommand {
         name: "check-shell-parity",
         summary: "Boot the shell-batch fixture and byte-compare its transcript to the golden",
     },
@@ -501,6 +506,10 @@ const SUBCOMMANDS: &[Subcommand] = &[
     Subcommand {
         name: "check-lints",
         summary: "Host clippy per package, so one crate's failure cannot hide the next crate's",
+    },
+    Subcommand {
+        name: "check-citations",
+        summary: "Every STORY/FEAT/TEST id cited in a Rust doc comment resolves to a filed document",
     },
     Subcommand {
         name: "check-boot-images",
@@ -885,6 +894,36 @@ fn main() -> ExitCode {
                 }
             }
         }
+        // `LE-73`. The spine gates the documents that exist against each other,
+        // so a source file citing an id that was never filed is invisible to all
+        // of them. `kernel::udp_wire` was joined to the spine by exactly such a
+        // citation for as long as it existed.
+        "check-citations" => {
+            let result = os_root().and_then(|root| {
+                let repo_root = root.parent().ok_or_else(|| {
+                    format!("could not resolve repository root from {}", root.display())
+                })?;
+                citations::check_citations(repo_root)
+            });
+            match result {
+                Ok(summary) => {
+                    println!(
+                        "citation-check: {} Rust files, {} citations of {} distinct ids — every \
+                         one resolves to a filed document ({} brace shorthand(s) skipped, \
+                         reported rather than dropped)",
+                        summary.file_count,
+                        summary.citation_count,
+                        summary.distinct_ids,
+                        summary.shorthand_skipped
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(message) => {
+                    eprintln!("xtask: citation invalid: {message}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         // `LE-77`. `cargo clippy --workspace` stops at the first crate that
         // fails, so on this bench `kernel`'s Windows-unbuildable bin hid every
         // later crate — including the unused import that reached CI.
@@ -968,6 +1007,28 @@ fn main() -> ExitCode {
                 }
                 Err(message) => {
                     eprintln!("xtask: assurance spine invalid: {message}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        // `LE-84`. The dashboard publishes `20/460`; this says what the 460 is
+        // made of. It reads only committed TSVs and derives every figure, so a
+        // claim about where effort should go is re-derivable rather than
+        // quoted from a handover that nobody re-checks.
+        "assurance-status" => {
+            let result = os_root().and_then(|root| {
+                let repo_root = root.parent().ok_or_else(|| {
+                    "os/ has no parent directory; cannot locate the repository root".to_string()
+                })?;
+                assurance::release_status(repo_root)
+            });
+            match result {
+                Ok(status) => {
+                    print!("{}", assurance::render_release_status(&status));
+                    ExitCode::SUCCESS
+                }
+                Err(message) => {
+                    eprintln!("xtask: could not decompose the release status: {message}");
                     ExitCode::FAILURE
                 }
             }

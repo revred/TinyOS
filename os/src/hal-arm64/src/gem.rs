@@ -848,6 +848,67 @@ mod tests {
         );
     }
 
+    /// `FEAT-P1-09`'s exit criterion, discharged against the cable rather than
+    /// against this file's own arithmetic: **twelve beacon frames the board
+    /// actually transmitted, captured off the wire on 2026-08-05 and compared to
+    /// [`beacon_frame`] byte for byte, header included.**
+    ///
+    /// Every other test here proves the builder is self-consistent. This one is
+    /// the only test in the crate that can fail because the *board* disagrees
+    /// with the builder, which is the whole content of the criterion: "the beacon
+    /// frame appears in a stock host packet capture and is byte-identical to the
+    /// pinned frame the host-side tests already assert."
+    ///
+    /// The fixture is the evidence file itself — one copy, `include_str!`d — so
+    /// the bytes a Report cites and the bytes this test asserts cannot drift
+    /// apart. The sequence is read from the file as an *input* to the builder;
+    /// deriving it from the frame under comparison would compare the frame to
+    /// itself and pass unconditionally.
+    ///
+    /// Captured from a *late* attach — the board had been beaconing to seq ~5964
+    /// for a long time — so this also says the beacon is unchanged deep into a
+    /// run, not merely correct in the first frames after boot.
+    #[test]
+    fn the_captured_beacon_is_byte_identical_to_the_built_frame() {
+        const CAPTURE: &str =
+            include_str!("../../../../goals/reports/beacon-frames-2026-08-05.txt");
+
+        let mut compared = 0;
+        for line in CAPTURE.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let (seq_text, hex) = line.split_once(' ').expect("`<seq> <hex>` per record");
+            let seq: u32 = seq_text.parse().expect("the sequence is decimal");
+
+            // Hex to bytes, by hand: this crate is `no_std` and a dependency for
+            // one test is a dependency in the image's tree.
+            assert_eq!(hex.len() % 2, 0, "a whole number of octets");
+            let observed: Vec<u8> = (0..hex.len() / 2)
+                .map(|index| {
+                    u8::from_str_radix(&hex[index * 2..index * 2 + 2], 16).expect("hex octet")
+                })
+                .collect();
+
+            let (built, len) = beacon_frame(seq);
+            assert_eq!(
+                observed.len(),
+                len,
+                "seq {seq}: the board transmitted {} bytes, the builder produces {len}",
+                observed.len()
+            );
+            assert_eq!(
+                &built[..len],
+                &observed[..],
+                "seq {seq}: the frame on the cable differs from the frame this crate builds"
+            );
+            compared += 1;
+        }
+
+        assert_eq!(compared, 12, "every captured frame must be compared, not merely parsed");
+    }
+
     #[test]
     fn the_sequence_field_is_the_only_varying_bytes() {
         let (a, len_a) = beacon_frame(0);

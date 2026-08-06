@@ -224,6 +224,73 @@ fn reach_from_contents(
     Ok(reach)
 }
 
+/// One release-gate cell of the catalogue, as `assurance-status` reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReleaseGate {
+    /// `PERF-Dnn-Gnn`.
+    pub id: String,
+    /// `Dnn`.
+    pub domain: String,
+    /// `Gnn`.
+    pub guardrail: String,
+    /// The `tier` column verbatim: `Host+T0+HIL`, `T1+T2`, and so on.
+    pub tier: String,
+    /// The `readiness` column — a property of the domain, not of this cell.
+    pub readiness: String,
+}
+
+impl ReleaseGate {
+    /// Whether a board is the *only* thing that can move this gate.
+    ///
+    /// `HIL` does not count as reachable, for the reason
+    /// [`reach_from_contents`] states: the HIL rigs are Phase 3 CAN/USB
+    /// hardware-in-the-loop and this project has none.
+    pub fn is_hardware_only(&self) -> bool {
+        !self.tier.contains("Host") && !self.tier.contains("T0")
+    }
+}
+
+/// Every in-play **release** gate, as rows rather than as a count.
+///
+/// [`release_gate_reach`] answers "how many"; this answers "which", which is
+/// what a decomposition needs. `G24`/`G25` are excluded here for the same
+/// reason they are excluded there — they are *claim* gates by the catalogue's
+/// own `gate` column.
+pub fn release_gates(
+    repo_root: &Path,
+    in_play_domains: &BTreeSet<String>,
+) -> Result<Vec<ReleaseGate>, String> {
+    let path = repo_root.join("goals").join("performance").join("catalogue.tsv");
+    let contents = fs::read_to_string(&path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let mut gates = Vec::new();
+    for (zero_based_index, raw_line) in contents.lines().skip(1).enumerate() {
+        let line = raw_line.trim_end_matches('\r');
+        if line.is_empty() {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() != FIELD_COUNT {
+            return Err(format!(
+                "line {}: expected {FIELD_COUNT} tab-separated fields, found {}",
+                zero_based_index + 2,
+                fields.len()
+            ));
+        }
+        if !in_play_domains.contains(fields[1]) || fields[7] != "release" {
+            continue;
+        }
+        gates.push(ReleaseGate {
+            id: fields[0].to_string(),
+            domain: fields[1].to_string(),
+            guardrail: fields[2].to_string(),
+            tier: fields[5].to_string(),
+            readiness: fields[6].to_string(),
+        });
+    }
+    Ok(gates)
+}
+
 fn validate_axis_id(value: &str, prefix: char, line_number: usize) -> Result<(), String> {
     let bytes = value.as_bytes();
     if bytes.len() != 3 || bytes[0] != prefix as u8 || !bytes[1..].iter().all(u8::is_ascii_digit) {

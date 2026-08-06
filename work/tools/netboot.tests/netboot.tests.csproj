@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The first test project for a bench tool, and it exists because of LE-87.
+       LE-66's finding, verbatim in effect: a seam with zero tests is not thin,
+       it is untested. tos64-netboot is three seams (UDP bind, TFTP path
+       resolution, file service) and every defect it has produced (LE-87,
+       LE-88, and the LE-80 family before them) lived in one of the three.
+       Two of them are pure functions and one is a platform semantic; all three
+       are tested here rather than re-diagnosed on the bench at the cost of a
+       power cycle. -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\netboot\netboot.csproj" />
+  </ItemGroup>
+
+</Project>

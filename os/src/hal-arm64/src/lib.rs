@@ -22,6 +22,7 @@
 #![cfg_attr(not(test), no_std)]
 #![deny(missing_docs)]
 
+pub mod actuation;
 pub mod board;
 pub mod boot;
 pub mod canvas;

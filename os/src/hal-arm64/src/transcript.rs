@@ -8,12 +8,44 @@
 //! Pure buffer type here, host-tested; the one static instance at the bottom
 //! is the board's.
 
-/// Capacity of the whole transcript: the envelope is ~11 lines of ≤ 140
-/// bytes. Overflow is dropped, never wrapped — a truncated transcript reads
-/// as truncated, a wrapped one lies.
-pub const TRANSCRIPT_CAPACITY: usize = 2048;
+/// Longest line the envelope can produce, with margin.
+///
+/// The real worst case observed on the wire is **169 bytes** — a `METRIC`
+/// line whose metric name is the longest in the set
+/// (`pool_u64x64_alloc_free_round_trip_per_op_of_8_spoored`, 52 characters)
+/// followed by six percentile fields. Named here so the capacity below is
+/// derived from it rather than guessed beside it.
+///
+/// **256 rather than a snug fit over 169**, because the thing that grows is
+/// the metric *name*, and a bound with 20 bytes of headroom is one rename
+/// away from the failure it was written to prevent. The cost of the margin is
+/// static bytes on a board with gigabytes; the cost of getting it wrong is a
+/// board run whose numbers never reach the wire.
+pub const MAX_LINE_BYTES: usize = 256;
+
+/// Capacity of the whole transcript, **derived** so that [`MAX_LINES`] lines
+/// of [`MAX_LINE_BYTES`] cannot overflow it.
+///
+/// Overflow is dropped, never wrapped — a truncated transcript reads as
+/// truncated, a wrapped one lies. That honesty is what made the 2026-08-06
+/// failure diagnosable in one capture instead of producing a plausible wrong
+/// number, and it is why the buffer keeps the behaviour.
+///
+/// **It was a hand-picked 2048 until 2026-08-06, documented as "~11 lines of
+/// ≤ 140 bytes", and adding a twelfth metric silently overran it.** The
+/// `PERF-D07-G23` spoor-enabled arm's line reached the wire carrying its
+/// *name* and none of its numbers, and the `END metrics=12` line never
+/// arrived at all — so the measurement ran correctly on silicon and the
+/// transport dropped it. A capacity that is a constant beside its consumers,
+/// rather than a function of them, is a capacity that goes stale the moment
+/// anyone adds a line; [`tests::the_capacity_holds_a_full_transcript`] is now
+/// what fails instead of a board run.
+pub const TRANSCRIPT_CAPACITY: usize = MAX_LINES * MAX_LINE_BYTES;
 
 /// Most lines the transcript will index — envelope plus chatter headroom.
+///
+/// The envelope is `BEGIN` + one per metric + `END`, plus the fixture's two
+/// trailing chatter lines: 12 metrics puts it at 16.
 pub const MAX_LINES: usize = 24;
 
 /// An append-only line buffer with bounded copy-out access.
@@ -120,6 +152,71 @@ mod tests {
         let len = transcript.copy_line(1, &mut out).expect("second line");
         assert_eq!(&out[..len], b"TOS64-MEAS/2 METRIC domain=D07" as &[u8]);
         assert_eq!(transcript.copy_line(3, &mut out), None);
+    }
+
+    /// The gate that should have existed before 2026-08-06.
+    ///
+    /// A full-length transcript — every indexable line at the longest line the
+    /// envelope can produce — must fit whole. Written as a *behavioural* check
+    /// rather than an arithmetic one on the two constants, because the thing
+    /// that actually failed was a real recorded transcript losing its tail:
+    /// the `PERF-D07-G23` arm's numbers and the `END` line, dropped in
+    /// transport after the fixture had measured them correctly.
+    #[test]
+    fn the_capacity_holds_a_full_transcript() {
+        let mut transcript = TranscriptBuffer::new();
+        let mut line = [b'X'; MAX_LINE_BYTES];
+        line[MAX_LINE_BYTES - 1] = b'\n';
+        for _ in 0..MAX_LINES {
+            transcript.record(&line);
+        }
+        assert_eq!(
+            transcript.line_count(),
+            MAX_LINES,
+            "a full transcript must survive whole; if this fails, the envelope grew and \
+             TRANSCRIPT_CAPACITY did not"
+        );
+        let mut out = [0u8; MAX_LINE_BYTES];
+        let len = transcript.copy_line(MAX_LINES - 1, &mut out).expect("the last line exists");
+        assert_eq!(
+            len,
+            MAX_LINE_BYTES - 1,
+            "the LAST line is the one truncation eats first, so it is the one worth asserting"
+        );
+    }
+
+    /// The real envelope, at the size that broke it, must fit with room left.
+    ///
+    /// Pins the actual failure rather than a synthetic worst case: 12 metrics,
+    /// the longest metric name in the set, plus `BEGIN`, `END` and the
+    /// fixture's two chatter lines.
+    #[test]
+    fn the_twelve_metric_envelope_that_overran_2048_now_fits() {
+        const LONGEST_METRIC_LINE: &[u8] =
+            b"TOS64-MEAS/2 METRIC domain=D07 metric=pool_u64x64_alloc_free_round_trip_per_op_of_8_spoored n=1000 dropped=0 warmup=100 min=481 p50=481 p99=481 p99_9=481 max=481 unit=cycles\n";
+        assert!(
+            LONGEST_METRIC_LINE.len() <= MAX_LINE_BYTES,
+            "the observed worst-case line ({}) must fit MAX_LINE_BYTES ({MAX_LINE_BYTES})",
+            LONGEST_METRIC_LINE.len()
+        );
+
+        let mut transcript = TranscriptBuffer::new();
+        transcript.record(b"TOS64-MEAS/2 BEGIN tier=T1 arch=aarch64 platform=rpi5-bcm2712 qualification=none cycle_source=pmccntr_el0 overhead_cycles=43 cycles_per_us=2400\n");
+        for _ in 0..12 {
+            transcript.record(LONGEST_METRIC_LINE);
+        }
+        transcript.record(b"TOS64-MEAS/2 END metrics=12\n");
+        transcript.record(b"fixture-measure metrics=12\n");
+        transcript.record(b"fixture-measure cycle_source_conformance ok span=5507\n");
+
+        assert_eq!(transcript.line_count(), 16, "BEGIN + 12 metrics + END + two chatter lines");
+        let mut out = [0u8; MAX_LINE_BYTES];
+        let len = transcript.copy_line(15, &mut out).expect("the conformance line exists");
+        assert_eq!(
+            &out[..len],
+            b"fixture-measure cycle_source_conformance ok span=5507" as &[u8],
+            "the LAST line must arrive whole — on 2026-08-06 the tail was silently dropped"
+        );
     }
 
     #[test]

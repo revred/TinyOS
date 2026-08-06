@@ -25,6 +25,7 @@ This is the primitive the `G-PA-8` 5-axis CNC flagship milestone (a cross-`EPIC-
 | Story | Summary | Status |
 |---|---|---|
 | [`STORY-P1-06-01`](../stories/STORY-P1-06-01.md) | Bounded decision-to-actuation path: declared budget, enforced deadline, measured distribution, demonstrated overrun trip | **Verified** (Tier 0, mechanism half, 2026-07-29, `REPORT-2026-07-29-02`; assurance `baseline-debt`) |
+| [`STORY-P1-06-02`](../stories/STORY-P1-06-02.md) | The actuation path reaches the real-time architecture: an ARM64 `OutputLine` over RP1 bank-0 GPIO 20..27 | In progress — host half Green, criterion 4 needs a board |
 
 ## Containment contract
 
@@ -47,3 +48,32 @@ This Feature was written 2026-07-26. **`ADR 0005` landed on 2026-07-28 and `STOR
 - **Consequence for the Story's scope.** Verified-at-Tier-0 means *the mechanism and its enforcement are proven and the numbers are recorded as Tier 0 mechanism evidence*. The bound itself is **stated debt against `LE-09`**, and the Report must say so in those words rather than presenting a QEMU distribution as a satisfied margin.
 
 **The positive control is not optional here either.** A deliberate overrun that trips the policy is this Feature's detector, and `ADR 0005`'s trap applies unchanged: a clean run proves nothing until the enforcement has been *seen* to fire. That is already an exit criterion — *"the proof must show the enforcement firing, not only clean runs"* — and it predates the ADR by two days, which is the third independent arrival at that rule in this repository.
+
+### Re-worded 2026-08-06 — three halves, each naming its own gate
+
+`09A` §11 asked whether this Feature is technically complete with evidence and found the answer
+is *"the claimed half is; the Feature is not"* — but the exit criteria above state the three
+halves in one sentence, so no session can tell which one it has just discharged. Split, with the
+gate each closes against:
+
+| # | Half | What closes it | Blocked by |
+|---|---|---|---|
+| 1 | **Mechanism and enforcement at Tier 0** | `STORY-P1-06-01` functionally `Verified` + `REPORT-2026-07-29-02` | **Done, 2026-07-29.** Re-derived and reproduced on the current tree 2026-08-05, seven days and one `TOS64-*` rename later |
+| 2 | **Cheap, state-free denial** | `PERF-D03-G20` | **Measured and refused**, not unmeasured — 55% run-to-run p99 CV. The refusal is now a `refused` row in `guardrail-evidence.tsv` rather than Report prose only |
+| 3 | **Under hostile load** | `PERF-D05-G19`, `PERF-D05-G21` | `FEAT-P1-05`, whose mechanism is unbuilt — see that Feature's Story scope section |
+| 4 | **The bound** | `PERF-D03-G04`, `PERF-D05-G04` | `ADR 0005` + zero qualified platforms. **The owner's decision, not this Feature's** |
+
+**Three things this Feature's evidence does not cover, all found by checking rather than reading,
+and none of them blocked by the owner or by an unbuilt Feature:**
+
+- **Every line of it is Tier 0 QEMU `x86_64`.** `ADR 0004` makes ARM64 the real-time tier, and
+  `os/src/hal-arm64/src/` contained no `actuation` module and no `OutputLine` implementation
+  until 2026-08-06 — the arch-neutral trait was built so a Pi 5 backend could slot in, and
+  nothing had. The Report is careful that *the boards carry the product's numbers*; what was
+  written nowhere is that **the mechanism itself had never run on the architecture this project
+  designates as real-time.**
+- **The path is fixture-only** and has never run on the shipping `os` image — the `LE-20` shape.
+  `LE-85`.
+- **`STORY-P1-06-01` held zero rows in `guardrail-evidence.tsv`** until 2026-08-06, so in the
+  register this Feature was indistinguishable from one nobody started. It now holds one, and
+  that one is a *refusal* — which is the accurate record and does not move the published count.

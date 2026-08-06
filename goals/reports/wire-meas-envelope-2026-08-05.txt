@@ -1,0 +1,38 @@
+===== MEAS/2 measurement envelope, HARVESTED OFF THE WIRE 2026-08-05 =====
+STORY-P1-07-06 criterion 1: an envelope the board emitted, captured from the
+cable and parsed by the UNCHANGED xtask parser (timing::parse_stream).
+
+NOTE ON THIS HEADER: it deliberately never writes the protocol prefix in prose.
+xtask pi5::extract_tos64_lines takes each line from its first occurrence of that
+prefix onward, so a comment mentioning it becomes a malformed record and the
+capture stops parsing. Found by doing it.
+
+Source:  ti64dink --live 25 --text  (Npcap, unelevated), EtherType 0x88B5 text
+         frames, one transcript line per beat, rotated so BEGIN is first.
+Board:   Pi 5 / BCM2712, netbooted, measure fixture, beacon at seq ~5012-5029.
+Image:   the measure fixture the board was executing on 2026-08-05. Its binary
+         is NOT retained and is not byte-reproducible from the tree - LE-78.
+Parser:  cargo run -p xtask -- parse-meas <file>   (POSITIONAL path; ti64dink
+         printed --file= until 2026-08-05, a form parse-meas rejects)
+Result:  11 metrics, BEGIN through END, every field parsed, parser unchanged.
+         Exit 1, and honestly so: no RESULT/1 verdict line was on the wire in
+         this window. The fixture emits its verdict ONCE at completion,
+         thousands of beats before a late listener attaches - LE-76, a text
+         channel with no retention. The envelope parsed; the verdict was absent.
+Cross-check: a SECOND independent capture minutes later, starting at a
+         different point in the cycle, produced a BYTE-IDENTICAL envelope after
+         rotation. The rotation is exact, not a plausible reconstruction.
+
+TOS64-MEAS/2 BEGIN tier=T1 arch=aarch64 platform=rpi5-bcm2712 qualification=none cycle_source=pmccntr_el0 overhead_cycles=43 cycles_per_us=2400
+TOS64-MEAS/2 METRIC domain=REF metric=fixed_integer_loop n=1000 dropped=0 warmup=100 min=2877 p50=2937 p99=2995 p99_9=3024 max=3098 unit=cycles
+TOS64-MEAS/2 METRIC domain=D07 metric=pool_u64x64_alloc_free_round_trip n=1000 dropped=0 warmup=100 min=371 p50=372 p99=372 p99_9=372 max=372 unit=cycles
+TOS64-MEAS/2 METRIC domain=D07 metric=pool_u64x4_alloc_denied_exhausted_per_op_of_64 n=1000 dropped=0 warmup=100 min=484 p50=487 p99=489 p99_9=489 max=489 unit=cycles
+TOS64-MEAS/2 METRIC domain=D04 metric=context_switch_yield_roundtrip_2switches n=1000 dropped=0 warmup=100 min=78 p50=80 p99=80 p99_9=80 max=80 unit=cycles
+TOS64-MEAS/2 METRIC domain=D05 metric=dispatch_select_highest_priority_ready n=1000 dropped=0 warmup=100 min=1534 p50=1534 p99=1536 p99_9=1536 max=1536 unit=cycles
+TOS64-MEAS/2 METRIC domain=D05 metric=dispatch_run_once_cooperative_round n=1000 dropped=0 warmup=100 min=1657 p50=1659 p99=1670 p99_9=1670 max=1670 unit=cycles
+TOS64-MEAS/2 METRIC domain=D02 metric=fault_brk_capture_escape_kernel_context n=1000 dropped=0 warmup=100 min=111 p50=111 p99=111 p99_9=111 max=111 unit=cycles
+TOS64-MEAS/2 METRIC domain=D07 metric=pool_u64x64_alloc_free_round_trip_per_op_of_8 n=1000 dropped=0 warmup=100 min=472 p50=473 p99=473 p99_9=473 max=473 unit=cycles
+TOS64-MEAS/2 METRIC domain=D07 metric=spoor_stamp_park_rung_per_op_of_8 n=1000 dropped=0 warmup=100 min=132 p50=136 p99=142 p99_9=143 max=143 unit=cycles
+TOS64-MEAS/2 METRIC domain=D07 metric=spoor_drain_full_ring_frame_of_181 n=1000 dropped=0 warmup=100 min=121614 p50=122005 p99=122005 p99_9=122218 max=122223 unit=cycles
+TOS64-MEAS/2 METRIC domain=D07 metric=spoor_announce_certificate_frame_of_3 n=1000 dropped=0 warmup=100 min=3088 p50=3099 p99=3112 p99_9=3126 max=3135 unit=cycles
+TOS64-MEAS/2 END metrics=11

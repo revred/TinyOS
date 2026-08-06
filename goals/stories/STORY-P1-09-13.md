@@ -1,6 +1,6 @@
 # STORY-P1-09-13 — The Address Nobody Wrote: the Endpoint's BARs Are Sized, Assigned, and Believed
 
-Status: **In progress — every criterion Green on silicon 2026-08-04: the boxed boot answered criterion 5 in its success arm — the canvas read `RP1=PRESENT ID=0x0109 PHY=0x600D84A2` where a week of `0xDEAD` poison had been, and the laptop's linkwatch logged the wire training to 1000 Mbps at 01:27:03 under TinyOS. Not Verified.**
+Status: **Verified (functional) 2026-08-05 — every criterion Green on silicon 2026-08-04: the boxed boot answered criterion 5 in its success arm — the canvas read `RP1=PRESENT ID=0x0109 PHY=0x600D84A2` where a week of `0xDEAD` poison had been, and the laptop's linkwatch logged the wire training to 1000 Mbps at 01:27:03 under TinyOS. This is the Story that cleared the window-wide poison and unblocked the rest of `FEAT-P1-09`: everything downstream — the PHY scan, the link watch, the beacon, and eventually the byte-identical capture that closed the Feature's exit criterion — became reachable on this boot. Advanced under [`06A`](../../session/hand-2026-08-05/06A-nothing-is-verified-and-the-reason-is-not-velocity.md) §4.1. **Assurance state remains `specified` and this Story is NOT release-assured**: 0 qualified platforms.**
 Feature: [`FEAT-P1-09`](../features/FEAT-P1-09.md)
 Introduced in: [`session/hand-2026-08-03/09A-window-poisoned-inbound-path-indicted.md`](../../session/hand-2026-08-03/09A-window-poisoned-inbound-path-indicted.md) — the same-night conviction capture
 

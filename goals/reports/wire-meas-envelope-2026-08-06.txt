@@ -1,0 +1,14 @@
+TOS64-MEAS/2 BEGIN tier=T1 arch=aarch64 platform=rpi5-bcm2712 qualification=none cycle_source=pmccntr_el0 overhead_cycles=43 cycles_per_us=2400
+TOS64-MEAS/2 METRIC domain=REF metric=fixed_integer_loop n=1000 dropped=0 warmup=100 min=2839 p50=2875 p99=2947 p99_9=2947 max=2957 unit=cycles
+TOS64-MEAS/2 METRIC domain=D07 metric=pool_u64x64_alloc_free_round_trip n=1000 dropped=0 warmup=100 min=380 p50=381 p99=381 p99_9=381 max=381 unit=cycles
+TOS64-MEAS/2 METRIC domain=D07 metric=pool_u64x4_alloc_denied_exhausted_per_op_of_64 n=1000 dropped=0 warmup=100 min=501 p50=503 p99=503 p99_9=503 max=504 unit=cycles
+TOS64-MEAS/2 METRIC domain=D04 metric=context_switch_yield_roundtrip_2switches n=1000 dropped=0 warmup=100 min=79 p50=79 p99=79 p99_9=79 max=79 unit=cycles
+TOS64-MEAS/2 METRIC domain=D05 metric=dispatch_select_highest_priority_ready n=1000 dropped=0 warmup=100 min=1502 p50=1502 p99=1502 p99_9=1503 max=1503 unit=cycles
+TOS64-MEAS/2 METRIC domain=D05 metric=dispatch_run_once_cooperative_round n=1000 dropped=0 warmup=100 min=1644 p50=1647 p99=1647 p99_9=1648 max=1648 unit=cycles
+TOS64-MEAS/2 METRIC domain=D02 metric=fault_brk_capture_escape_kernel_context n=1000 dropped=0 warmup=100 min=109 p50=109 p99=109 p99_9=109 max=109 unit=cycles
+TOS64-MEAS/2 METRIC domain=D07 metric=pool_u64x64_alloc_free_round_trip_per_op_of_8 n=1000 dropped=0 warmup=100 min=479 p50=479 p99=479 p99_9=479 max=480 unit=cycles
+TOS64-MEAS/2 METRIC domain=D07 metric=spoor_stamp_park_rung_per_op_of_8 n=1000 dropped=0 warmup=100 min=131 p50=137 p99=143 p99_9=144 max=144 unit=cycles
+TOS64-MEAS/2 METRIC domain=D07 metric=spoor_drain_full_ring_frame_of_181 n=1000 dropped=0 warmup=100 min=121741 p50=122051 p99=122192 p99_9=122441 max=122491 unit=cycles
+TOS64-MEAS/2 METRIC domain=D07 metric=spoor_announce_certificate_frame_of_3 n=1000 dropped=0 warmup=100 min=3039 p50=3045 p99=3066 p99_9=3101 max=3101 unit=cycles
+TOS64-MEAS/2 METRIC domain=D07 metric=pool_u64x64_alloc_free_round_trip_per_op_of_8_spoored n=1000 dropped=0 warmup=100 min=604 p50=604 p99=604 p99_9=604 max=604 unit=cycles
+TOS64-MEAS/2 END metrics=12

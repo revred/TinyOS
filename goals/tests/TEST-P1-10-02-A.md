@@ -4,7 +4,7 @@ Status: **Specified — written before implementation, per the TDD mandate**
 Story: [`STORY-P1-10-02`](../stories/STORY-P1-10-02.md)
 Tier: Host unit tests (stamping vocabulary, drain arithmetic, ring-overflow accounting) **plus** a Tier 1 hardware run whose capture carries records from more than one category, per [Target Hardware & Test Matrix](../../README.md#target-hardware--test-matrix)
 Assurance contract: [`goals/assurance/story-contracts.tsv`](../assurance/story-contracts.tsv)
-Performance domains: `D07`
+Performance domains: `D07`, `D11`
 Security controls: `SEC-19`, `SEC-20`
 Containment classes: `C1`, `C2`
 Boundary tests: `BND-03`, `BND-07`, `BND-17`

@@ -1,4 +1,10 @@
-//! Spoors on the wire, unformatted (`STORY-P1-09-16`).
+//! Spoors on the wire, unformatted (`STORY-P1-10-01`).
+//!
+//! Until 2026-08-05 this line cited a Story id that was never filed — the same
+//! `LE-73` defect as the sibling `crate::udp_wire`, and found by the citation
+//! gate written to close it (`xtask check-citations`). The dead id is recorded
+//! in `STORY-P1-10-01` and deliberately not repeated here: an unfiled id left
+//! in a doc comment is the defect, whether it is cited or merely remembered.
 //!
 //! A [`Spoor`](crate::spoor::Spoor) is 64 bits **for speed** — one packed
 //! store, cheap enough to stamp from a real-time path. Rendering one into text

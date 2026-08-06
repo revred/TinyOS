@@ -38,9 +38,9 @@ use crate::context::{self, Context};
 use crate::measure::{Calibration, Environment, Metric, Report, Samples};
 use crate::measure_phases::{
     phase_context_switch, phase_dispatch_round, phase_dispatch_select, phase_pool_alloc_free,
-    phase_pool_alloc_free_batched, phase_pool_denial, phase_reference_loop, phase_spoor_announce,
-    phase_spoor_drain, phase_spoor_stamp, CALIBRATION_SAMPLES, CONFORMANCE_SAMPLES, SAMPLES,
-    STACK_SIZE, WARMUP,
+    phase_pool_alloc_free_batched, phase_pool_alloc_free_batched_spoored, phase_pool_denial,
+    phase_reference_loop, phase_spoor_announce, phase_spoor_drain, phase_spoor_stamp,
+    CALIBRATION_SAMPLES, CONFORMANCE_SAMPLES, SAMPLES, STACK_SIZE, WARMUP,
 };
 use core::fmt::Write;
 use hal::time::{conformance, CycleSource, Timebase};
@@ -172,7 +172,7 @@ impl Write for BoardSink {
     }
 }
 
-const METRICS: usize = 11;
+const METRICS: usize = 12;
 
 struct Measured {
     domain: &'static str,
@@ -325,14 +325,47 @@ fn measure_run() -> bool {
     // `STORY-P1-10-02` criterion 6: the observability substrate's own cost,
     // through the same harness as everything it observes. The timed regions
     // stop at the RAM buffer — the GEM transmit is not in any of them.
+    //
+    // **`D11`, and they were labelled `D07` until 2026-08-06.** `D07` is pool
+    // allocation; `D11` is *"spoor stamp and journal"* and these three measure
+    // nothing else. The label was `D07` because `STORY-P1-10-02`'s contract
+    // selected only `D07`, so the metric was bent to fit the contract rather
+    // than the contract extended to fit the subject — and the consequence was
+    // not cosmetic: **nobody ever compared these numbers to `D11`'s targets**,
+    // which the stamp arm misses by 1.9x at the median. The contract now
+    // selects `D07,D11` and `PERF-D11-G01`/`G02`/`G03` are filed from this
+    // metric. A domain label is what decides which targets a number is read
+    // against, so a wrong one is not a naming defect, it is an unread gate.
     ok &= phase_spoor_stamp(&source, &calibration, samples);
-    ok &= collect(&mut collected, 8, "D07", "spoor_stamp_park_rung_per_op_of_8", samples);
+    ok &= collect(&mut collected, 8, "D11", "spoor_stamp_park_rung_per_op_of_8", samples);
 
     ok &= phase_spoor_drain(&source, &calibration, samples);
-    ok &= collect(&mut collected, 9, "D07", "spoor_drain_full_ring_frame_of_181", samples);
+    ok &= collect(&mut collected, 9, "D11", "spoor_drain_full_ring_frame_of_181", samples);
 
     ok &= phase_spoor_announce(&source, &calibration, samples);
-    ok &= collect(&mut collected, 10, "D07", "spoor_announce_certificate_frame_of_3", samples);
+    ok &= collect(&mut collected, 10, "D11", "spoor_announce_certificate_frame_of_3", samples);
+
+    // `PERF-D07-G23`'s spoor-ENABLED arm, and the reason it is here at all:
+    // the three costs above are **absolute**, and `G23`'s target is a
+    // **ratio** — `spoor enabled adds <= 2% p99 and <= 2% CPU cycles`. No
+    // percentage can be computed from an absolute cost, so every spoor number
+    // this board has ever produced was in the wrong units for the gate they
+    // were taken for (`09A` §5). This arm is slot 7's twin with one stamp per
+    // round trip inside the timed region and nothing else changed, which
+    // `kernel::measure_phases`'s source-level test holds it to.
+    //
+    // Deliberately in the SAME run as slot 7 rather than a separate boot:
+    // `BOARD VERDICT 9` measured ~3% build-to-build movement on untouched code
+    // paths, which is larger than the 2% the gate allows, so two arms from two
+    // runs could not answer the question at all.
+    ok &= phase_pool_alloc_free_batched_spoored(&source, &calibration, samples);
+    ok &= collect(
+        &mut collected,
+        11,
+        "D07",
+        "pool_u64x64_alloc_free_round_trip_per_op_of_8_spoored",
+        samples,
+    );
 
     let environment = Environment {
         tier: "T1",

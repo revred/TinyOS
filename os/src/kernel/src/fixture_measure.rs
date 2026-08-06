@@ -32,8 +32,8 @@ use kernel::fault::{Disposition, FaultReport, FaultingContext};
 use kernel::measure::{Calibration, Environment, Metric, Report, Samples};
 use kernel::measure_phases::{
     phase_context_switch, phase_dispatch_round, phase_dispatch_select, phase_pool_alloc_free,
-    phase_pool_alloc_free_batched, phase_pool_denial, phase_reference_loop, CALIBRATION_SAMPLES,
-    CONFORMANCE_SAMPLES, SAMPLES, STACK_SIZE, WARMUP,
+    phase_pool_alloc_free_batched, phase_pool_alloc_free_batched_spoored, phase_pool_denial,
+    phase_reference_loop, CALIBRATION_SAMPLES, CONFORMANCE_SAMPLES, SAMPLES, STACK_SIZE, WARMUP,
 };
 
 static mut SAMPLE_BUFFER: Samples<SAMPLES> = Samples::new();
@@ -149,7 +149,7 @@ extern "C" fn tinyos_fault_entry(frame: *const FaultFrame) -> ! {
 
 /// How many metrics this fixture measures — the fixed capacity of the
 /// collected-summary array below.
-const METRICS: usize = 8;
+const METRICS: usize = 9;
 
 /// One measured phase, held until every phase has run. Phases are measured
 /// first and the envelope emitted once at the end, so a fixture that dies
@@ -259,11 +259,11 @@ pub fn run() -> bool {
     // metric missing — it is a run with no gated evidence at all.
     ok &= phase_reference_loop(&source, &calibration, samples);
     ok &= collect(&mut collected, 0, "REF", "fixed_integer_loop", samples);
-    let _ = writeln!(serial, "fixture-measure phase 1/8 done (REF gate reference)");
+    let _ = writeln!(serial, "fixture-measure phase 1/9 done (REF gate reference)");
 
     ok &= phase_pool_alloc_free(&source, &calibration, samples);
     ok &= collect(&mut collected, 1, "D07", "pool_u64x64_alloc_free_round_trip", samples);
-    let _ = writeln!(serial, "fixture-measure phase 2/8 done (D07 alloc/free)");
+    let _ = writeln!(serial, "fixture-measure phase 2/9 done (D07 alloc/free)");
 
     ok &= phase_pool_denial(&source, &calibration, samples);
     ok &= collect(
@@ -273,30 +273,48 @@ pub fn run() -> bool {
         "pool_u64x4_alloc_denied_exhausted_per_op_of_64",
         samples,
     );
-    let _ = writeln!(serial, "fixture-measure phase 3/8 done (D07 denial)");
+    let _ = writeln!(serial, "fixture-measure phase 3/9 done (D07 denial)");
 
     ok &= phase_context_switch(&source, &calibration, samples);
     ok &= collect(&mut collected, 3, "D04", "context_switch_yield_roundtrip_2switches", samples);
-    let _ = writeln!(serial, "fixture-measure phase 4/8 done (D04 context switch)");
+    let _ = writeln!(serial, "fixture-measure phase 4/9 done (D04 context switch)");
 
     ok &= phase_dispatch_select(&source, &calibration, samples);
     ok &= collect(&mut collected, 4, "D05", "dispatch_select_highest_priority_ready", samples);
-    let _ = writeln!(serial, "fixture-measure phase 5/8 done (D05 selection)");
+    let _ = writeln!(serial, "fixture-measure phase 5/9 done (D05 selection)");
 
     ok &= phase_dispatch_round(&source, &calibration, samples);
     ok &= collect(&mut collected, 5, "D05", "dispatch_run_once_cooperative_round", samples);
-    let _ = writeln!(serial, "fixture-measure phase 6/8 done (D05 dispatch round)");
+    let _ = writeln!(serial, "fixture-measure phase 6/9 done (D05 dispatch round)");
 
     ok &= phase_fault_latency(&calibration);
     ok &= collect(&mut collected, 6, "D02", "fault_ud2_capture_terminate_kernel_context", samples);
-    let _ = writeln!(serial, "fixture-measure phase 7/8 done (D02 fault latency)");
+    let _ = writeln!(serial, "fixture-measure phase 7/9 done (D02 fault latency)");
 
     // Last rather than beside its unbatched twin, so the six pre-existing
     // phases keep their order and their chatter unchanged.
     ok &= phase_pool_alloc_free_batched(&source, &calibration, samples);
     ok &=
         collect(&mut collected, 7, "D07", "pool_u64x64_alloc_free_round_trip_per_op_of_8", samples);
-    let _ = writeln!(serial, "fixture-measure phase 8/8 done (D07 batched round trip, LE-24)");
+    let _ = writeln!(serial, "fixture-measure phase 8/9 done (D07 batched round trip, LE-24)");
+
+    // `PERF-D07-G23`'s spoor-ENABLED arm. Immediately after its twin and
+    // sharing the same sample buffer, so the pair is measured under the same
+    // thermal and cache conditions in the same run: two arms taken minutes
+    // apart, or in different runs, would carry the ~3% build-to-build movement
+    // BOARD VERDICT 9 observed as if it were spoor overhead. The ratio the
+    // gate asks for is (this p99 - slot 7's p99) / slot 7's p99, and it is
+    // computed by a reader from these two rows rather than asserted here --
+    // the fixture emits measurements, never verdicts.
+    ok &= phase_pool_alloc_free_batched_spoored(&source, &calibration, samples);
+    ok &= collect(
+        &mut collected,
+        8,
+        "D07",
+        "pool_u64x64_alloc_free_round_trip_per_op_of_8_spoored",
+        samples,
+    );
+    let _ = writeln!(serial, "fixture-measure phase 9/9 done (D07 G23 spoor-enabled arm)");
 
     let environment = Environment {
         tier: "T0",

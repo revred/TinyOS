@@ -12,6 +12,49 @@ A flooding fixture playing a compromised C2 component saturates, in turn and in 
 
 `STORY-P1-04-01`/`-02` (real preemption and deadline enforcement are what "RT reserves survive" means); `STORY-P1-01-02` (degradation measured against committed baselines).
 
+## Scope, settled 2026-08-06 before the Story starts
+
+The scope question `09A` §9 raised, answered here rather than discovered mid-campaign. **The
+saturation vectors this Story covers are pools, task slots, the ready queue and the spoor
+journal — `D05`, `D07`, `D11`.** The contract row gained `D11` on 2026-08-06: the description
+above names spoor-journal saturation and the row did not select the journal's own domain. `D11`
+is `prototype` readiness, so the addition costs no `open-debt.tsv` row.
+
+**IPC channel and grant saturation are deliberately out of scope.** They are `D12` and `D13`,
+both `specified` readiness — the subsystems do not exist. Selecting them would force open-debt
+rows that can never be closed, in both directions, and `check-assurance-spine` enforces exactly
+that. They split into a second Story that lands when those subsystems do; the sentence in the
+Description above is the record of what that Story owes.
+
+**Three of the four things the criteria below assert must be true have no mechanism in the
+kernel to be true of**, which is why this Story has not started and why starting it is a build
+job rather than a test-writing one. In cost order:
+
+1. **There is no RT reserve and no per-class budget.** `Tcb` carries `base_priority`,
+   `inherited_priority`, `wcet_budget`, `overrun_policy`, `entry`, `ticks_consumed` and `state`
+   — and no containment class. The pool is one flat capacity with no class tag and no
+   reservation floor, and a repository-wide search for a scheduling or allocation reserve finds
+   none. So `BND-15` and `RCG-08` have nothing behind them. **This is Feature-sized design work
+   and probably its own Feature rather than a Story of this one.**
+2. **Denial is not attributable to an offender.** `Actor` is a three-value nibble — `Kernel`,
+   `Exec`, `Session`. Criterion 2 wants every denial charged to the offender and
+   spoor-attributed; today a spoor can say the kernel denied something, not *which task, of
+   which class* caused it. Extending the encoding is a wire-format change touching
+   `spoor_stream.rs`, `spoor_wire.rs` and the ARM64 parity vocabulary, and it interacts with
+   `LE-82`. Do them together: both are "the spoor vocabulary cannot say the thing the contract
+   requires".
+3. **No property-testing infrastructure.** Criterion 4 needs the interleaving invariant in CI
+   with a recorded seed policy. There is no `proptest`, `quickcheck` or `arbitrary` dependency
+   anywhere under `os/`, and `kernel` is `no_std`. This needs a host-tier dev-dependency, a
+   decision recorded against `RCG-07`'s minimal-dependency-surface stance, and the seed policy
+   written down *before* the first test.
+4. **No campaign harness.** `xtask` parses single measurement envelopes; this needs concurrent
+   flood-plus-RT orchestration, idle-versus-flood distributions side by side, and a measured
+   recovery-time bound after the flood stops.
+
+Steps 1 and 2 are the honest answer to "what will it take". Steps 3 and 4 are the part this
+document describes, and they are the smaller half.
+
 ## Acceptance criteria (draft — to be finalized when this Story starts)
 
 1. Under each saturation vector and their combination, the RT task's measured deadline-hit rate and latency distribution stay within its declared bound — raw distributions in the Report, idle-vs-flood side by side.

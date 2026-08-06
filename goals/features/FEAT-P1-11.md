@@ -1,6 +1,6 @@
 # FEAT-P1-11 — The Kernel Drives the Board
 
-Status: **In progress — added 2026-08-05. `STORY-P1-11-01` implemented and host-Green; no board evidence yet.**
+Status: **In progress — added 2026-08-05, and **board-proven the same day**: `STORY-P1-11-01` is `Verified` (functional), host-Green on 6 tests and criterion 7 met on silicon (`BOARD VERDICT 14`). `Dispatch Kernel Select Ok rung=DispatchRound` rode the wire one per beat, netbooted with no SD card in the board, 0 refused and 0 lost — **the kernel driving the machine with interrupts live**, which is the one thing every earlier board verdict could not show, having measured TinyOS from inside a fixture with IRQs masked. Not Complete, and the gap is deliberate rather than pending: every observed round returned `Ok`, so criterion 3's `Skipped`/`Failed` arms are **host-only**; the round's cost with interrupts live is **unmeasured** and is a different number from the fixture's masked one; and there is one task, no preemption, no `EL0` and no containment claim. Assurance state stays `specified` — 0 qualified platforms, so assurance `verified` is closed to every Story in this project.**
 Epic: [`EPIC-P1`](../epics/EPIC-P1.md) — Determinism Proof
 Introduced in: `session/hand-2026-08-05/05A`, after a correction to the claim that the kernel had never run on silicon
 
@@ -30,7 +30,7 @@ This Feature closes exactly that gap and claims nothing wider.
 
 | Story | What it does | Status |
 |---|---|---|
-| [`STORY-P1-11-01`](../stories/STORY-P1-11-01.md) | One task, dispatched from the park loop with interrupts live, stamping a `DispatchRound` spoor | In progress — host-Green 2026-08-05 (6 tests); image `f8133b0958d3` built and served; awaiting one power cycle |
+| [`STORY-P1-11-01`](../stories/STORY-P1-11-01.md) | One task, dispatched from the park loop with interrupts live, stamping a `DispatchRound` spoor | Verified (functional) 2026-08-05 — host-Green (6 tests) and **criterion 7 met on silicon** (`BOARD VERDICT 14`): `Dispatch Kernel Select Ok rung=DispatchRound` one per beat, netbooted with no SD card, 0 refused, 0 lost. Every observed round returned `Ok`, so the Skipped/Failed arms stay host-only |
 
 ## What this Feature deliberately does not do
 

@@ -279,18 +279,79 @@ mod tests {
     /// file the fast check reads must be named in the source of the full check.
     /// The fast check can then never pass on a file the full one does not also
     /// examine, which is what makes "run the fast one" safe advice.
+    /// Every source file the above test treats as "the full check".
+    ///
+    /// `assurance` was one 4,400-line file until 2026-08-06 and is now a
+    /// directory, which is why [`every_assurance_module_is_part_of_the_full_check`]
+    /// exists beside this list: a subset test whose corpus silently stops
+    /// covering a module would keep passing while guaranteeing less.
+    const FULL_CHECK_SOURCES: [(&str, &str); 13] = [
+        ("performance_catalogue.rs", include_str!("performance_catalogue.rs")),
+        ("bound_provenance.rs", include_str!("bound_provenance.rs")),
+        ("assurance/mod.rs", include_str!("assurance/mod.rs")),
+        ("assurance/common.rs", include_str!("assurance/common.rs")),
+        ("assurance/context.rs", include_str!("assurance/context.rs")),
+        ("assurance/contracts.rs", include_str!("assurance/contracts.rs")),
+        ("assurance/documents.rs", include_str!("assurance/documents.rs")),
+        ("assurance/ids.rs", include_str!("assurance/ids.rs")),
+        ("assurance/loose_ends.rs", include_str!("assurance/loose_ends.rs")),
+        ("assurance/registers.rs", include_str!("assurance/registers.rs")),
+        ("assurance/release_status.rs", include_str!("assurance/release_status.rs")),
+        ("assurance/security_spine.rs", include_str!("assurance/security_spine.rs")),
+        ("assurance/status.rs", include_str!("assurance/status.rs")),
+    ];
+
+    /// Assurance modules deliberately outside [`FULL_CHECK_SOURCES`].
+    ///
+    /// Test sources are excluded because including them would make the subset
+    /// test below pass for the wrong reason: a spine file named only in a test
+    /// fixture would satisfy "the full check reads this file" while no
+    /// validator touched it.
+    const TEST_ONLY_ASSURANCE_MODULES: [&str; 1] = ["spine_tests.rs"];
+
+    /// The guard the directory split made necessary.
+    ///
+    /// `include_str!` needs literal paths, so the corpus above is hand-kept.
+    /// This reads the directory the compiler read and fails if the two
+    /// disagree — so adding `assurance/whatever.rs` and forgetting this list
+    /// breaks a test rather than quietly shrinking what the subset test
+    /// proves. Same shape as `LE-80`: a hand-kept mirror of a real set, with
+    /// nothing checking the mirror. It caught `spine_tests.rs` on its first
+    /// run, which is the only reason that file is classified rather than
+    /// silently absent.
+    #[test]
+    fn every_assurance_module_is_part_of_the_full_check() {
+        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/assurance");
+        let mut on_disk: Vec<String> = std::fs::read_dir(&directory)
+            .expect("the assurance module directory exists")
+            .map(|entry| entry.expect("readable entry").file_name().to_string_lossy().into_owned())
+            .filter(|name| {
+                name.ends_with(".rs") && !TEST_ONLY_ASSURANCE_MODULES.contains(&name.as_str())
+            })
+            .collect();
+        on_disk.sort();
+        let mut listed: Vec<String> = FULL_CHECK_SOURCES
+            .iter()
+            .filter_map(|(name, _)| name.strip_prefix("assurance/").map(str::to_string))
+            .collect();
+        listed.sort();
+        assert_eq!(
+            on_disk, listed,
+            "FULL_CHECK_SOURCES must name every assurance module; the subset test below is only \
+             as strong as this corpus"
+        );
+    }
+
     #[test]
     fn every_fast_checked_file_is_also_read_by_the_full_spine_check() {
-        const FULL_CHECK: &str = concat!(
-            include_str!("assurance.rs"),
-            include_str!("performance_catalogue.rs"),
-            include_str!("bound_provenance.rs"),
-        );
+        let full_check: String =
+            FULL_CHECK_SOURCES.iter().map(|(_, source)| *source).collect::<Vec<_>>().join("\n");
+        let full_check = full_check.as_str();
         for file in &SPINE_FILES {
             let basename = file.path.rsplit('/').next().expect("path has a basename");
             let stem = basename.trim_end_matches(".tsv");
             assert!(
-                FULL_CHECK.contains(stem),
+                full_check.contains(stem),
                 "{} is validated by check-spine-files but named nowhere in the full spine check",
                 file.path
             );

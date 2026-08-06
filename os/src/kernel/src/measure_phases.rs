@@ -193,6 +193,76 @@ pub fn phase_pool_alloc_free_batched<S: CycleSource>(
     ok
 }
 
+/// `PERF-D07-G23`'s **spoor-enabled arm** — byte-for-byte
+/// [`phase_pool_alloc_free_batched`] with one stamp per round trip.
+///
+/// # Why this phase exists, and why it is a *pair*
+///
+/// `G23` reads *"spoor enabled adds <= 2% p99 and <= 2% CPU cycles;
+/// allocations = 0; torn records = 0"* — and every spoor number this project
+/// has ever measured is **absolute**: stamp 136 cycles, announce 3099, drain
+/// 122005. A percentage needs two arms and there was only ever one, so the
+/// gate could not be computed from any measurement taken, however precise.
+/// That is handover `09A` §5's general finding in its sharpest instance: *a
+/// measurement taken without first reading the gate's `target` column is a
+/// measurement that will need retaking.* This is the retake, done as a pair so
+/// the units come out right the first time.
+///
+/// **The disabled arm is [`phase_pool_alloc_free_batched`] and nothing else.**
+/// Not a copy — the same function, already committed, already carrying `D07`'s
+/// `G01`/`G02`/`G03` rows. Two arms that share a loop shape but not a loop
+/// cannot be differenced honestly, because any edit to one silently changes
+/// the ratio. The body below is that function's body with exactly one line
+/// added, and [`tests::the_two_g23_arms_differ_by_exactly_the_stamp`] is what
+/// holds that claim to something.
+///
+/// **One stamp per round trip is the deliberate worst case.** Real
+/// instrumentation density is lower, so a ratio computed from these two arms
+/// over-states the overhead rather than flattering it — which is the direction
+/// a safety gate should err in, and must be said with the number rather than
+/// after it.
+#[inline(never)]
+pub fn phase_pool_alloc_free_batched_spoored<S: CycleSource>(
+    source: &S,
+    calibration: &Calibration,
+    samples: &mut Samples<SAMPLES>,
+) -> bool {
+    let mut pool: Pool<u64, 64> = Pool::new();
+    let mut stream: SpoorStream<BOARD_STREAM_CAPACITY> = SpoorStream::new();
+    stream.seed_epoch(0x5EED_0000_0000_0001);
+    // Close the certificate before the timed region, exactly as
+    // `phase_spoor_stamp` does: the once-per-boot retain path is not what any
+    // steady-state ratio should be carrying.
+    stream.stamp(Rung::ParkIteration, Outcome::Ok, 0);
+    let mut ok = true;
+    for index in 0..(WARMUP + SAMPLES) {
+        let value = index as u64;
+        let mut round_trips = 0usize;
+        let watch = Stopwatch::start(source);
+        for _ in 0..ROUND_TRIP_BATCH {
+            let Ok(handle) = pool.alloc(value) else {
+                break;
+            };
+            if pool.free(handle) == Ok(value) {
+                round_trips += 1;
+            }
+            stream.stamp(Rung::ParkIteration, Outcome::Ok, 0);
+        }
+        let cycles = watch.stop(calibration);
+        if round_trips != ROUND_TRIP_BATCH {
+            ok = false;
+        }
+        if index >= WARMUP {
+            samples.record(cycles / ROUND_TRIP_BATCH as u64);
+        }
+    }
+    // Every stamp accounted: one closing the certificate, then one per round
+    // trip. A disagreeing sequence means the arm measured something other than
+    // the workload plus exactly one stamp per operation, which would make the
+    // ratio meaningless rather than merely imprecise.
+    ok && stream.next_sequence() == (1 + (WARMUP + SAMPLES) * ROUND_TRIP_BATCH) as u64
+}
+
 /// D07: the denial path over an exhausted `Pool<u64, 4>`, batched
 /// [`D07_BATCH`] operations per sample.
 #[inline(never)]
@@ -559,5 +629,81 @@ mod spoor_phase_tests {
         assert!(phase_spoor_announce(&source, &calibration, &mut samples));
         assert_eq!(samples.len(), SAMPLES);
         assert_eq!(samples.dropped(), 0);
+    }
+
+    #[test]
+    fn the_spoor_enabled_g23_arm_fills_the_sample_set_and_accounts_every_stamp() {
+        let (source, calibration) = harness();
+        let mut samples: Samples<SAMPLES> = Samples::new();
+        assert!(
+            phase_pool_alloc_free_batched_spoored(&source, &calibration, &mut samples),
+            "a false return means the stamp count disagreed and the ratio would be meaningless"
+        );
+        assert_eq!(samples.len(), SAMPLES);
+        assert_eq!(samples.dropped(), 0);
+    }
+
+    /// The claim `PERF-D07-G23`'s ratio rests on: **inside the timed region
+    /// the two arms differ by exactly one stamp, and by nothing else.**
+    ///
+    /// Checked against the source text, because the behaviour cannot show it.
+    /// Two arms that had quietly diverged — a different pool capacity, a
+    /// different batch, one extra check inside the stopwatch — would both
+    /// still run, both still fill their sample sets, and produce a difference
+    /// that would be reported as *spoor overhead*. A ratio is only as good as
+    /// the sameness of what it divides, and nothing else in this file was in a
+    /// position to notice that going wrong.
+    ///
+    /// **The timed region specifically**, from `Stopwatch::start` to
+    /// `watch.stop`, because that is the only part of either arm the
+    /// measurement can see. Setup outside it — the enabled arm's stream, its
+    /// certificate-closing stamp, its sequence assertion — is allowed to
+    /// differ and must, or there would be nothing to stamp with.
+    #[test]
+    fn the_two_g23_arms_differ_by_exactly_one_stamp_inside_the_timed_region() {
+        const SOURCE: &str = include_str!("measure_phases.rs");
+        const STAMP: &str = "stream.stamp(Rung::ParkIteration, Outcome::Ok, 0);";
+
+        fn timed_region_of(function: &str) -> Vec<String> {
+            let body = SOURCE
+                .split_once(&format!("pub fn {function}<S: CycleSource>"))
+                .expect("the phase exists")
+                .1;
+            let region = body
+                .split_once("let watch = Stopwatch::start(source);")
+                .expect("the phase times something")
+                .1;
+            let region = region
+                .split_once("let cycles = watch.stop(calibration);")
+                .expect("the phase stops its watch")
+                .0;
+            region
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty() && !line.starts_with("//"))
+                .map(str::to_string)
+                .collect()
+        }
+
+        let disabled = timed_region_of("phase_pool_alloc_free_batched");
+        let enabled = timed_region_of("phase_pool_alloc_free_batched_spoored");
+
+        assert_eq!(
+            enabled.iter().filter(|line| *line == STAMP).count(),
+            1,
+            "the enabled arm's timed region must carry exactly one stamp"
+        );
+        assert!(
+            !disabled.contains(&STAMP.to_string()),
+            "the disabled arm's timed region must carry none"
+        );
+        let enabled_without_stamp: Vec<&String> =
+            enabled.iter().filter(|line| *line != STAMP).collect();
+        let disabled_lines: Vec<&String> = disabled.iter().collect();
+        assert_eq!(
+            disabled_lines, enabled_without_stamp,
+            "the G23 arms have diverged inside the timed region by something other than the \
+             spoor stamp, so any percentage computed from them is not spoor overhead"
+        );
     }
 }

@@ -88,6 +88,7 @@ internal static class Program
         var strict = false;
         string? device = null;
         string? textPath = null;
+        string? rawPath = null;
         var anyFrames = false;
         var liveSeconds = 0;
         string? untilSpec = null;
@@ -118,6 +119,15 @@ internal static class Program
                 // transcription of a photograph.
                 case "--text" when i + 1 < args.Length:
                     textPath = args[++i];
+                    break;
+                // Writes captured BEACON frames, whole and in hex, so
+                // FEAT-P1-09's exit criterion can be discharged as a real
+                // byte-identical comparison against gem::beacon_frame rather
+                // than as an eyeball comparison of a decoded text line. The
+                // header is included because it is where the destination MAC,
+                // source MAC and EtherType live.
+                case "--raw" when i + 1 < args.Length:
+                    rawPath = args[++i];
                     break;
                 // Watch the wire before TinyOS exists: the Pi 5 bootloader's
                 // netboot traffic is DHCP and TFTP over IPv4/UDP, so the 0x88B5
@@ -197,7 +207,10 @@ internal static class Program
                 ? $"ti64dink: watching for {watch.Describe} on {chosen} (timeout {window}s)"
                 : $"ti64dink: listening {window}s on {chosen}");
             var startedAt = DateTime.UtcNow;
-            var payloads = Live.Capture(chosen, window, watch is null ? null : watch.Offer, out var seen);
+            var wholeFrames = rawPath is null ? null : new List<byte[]>();
+            var payloads = Live.Capture(
+                chosen, window, watch is null ? null : watch.Offer, out var seen, wholeFrames);
+            if (rawPath is not null) WriteRawBeacons(wholeFrames!, rawPath);
             Console.WriteLine($"ti64dink: {seen} TOS64 frame(s) captured");
             Console.WriteLine();
             // Each captured payload is decoded on its own: a TOS64 frame may be
@@ -308,7 +321,7 @@ internal static class Program
             if (spec.StartsWith("rung=", StringComparison.Ordinal))
             {
                 var name = spec["rung=".Length..];
-                foreach (var (target, known) in Rungs)
+                foreach (var (target, known, _, _) in Rungs)
                 {
                     if (known == name)
                     {
@@ -351,9 +364,16 @@ internal static class Program
                         if (frame.Retained) continue;
                         foreach (var bits in frame.Records)
                         {
-                            var cat = (int)((bits >> 60) & 0xF);
-                            var carriesRung = cat is 6 or 7 or 10; // Boot, Fault, Thermal
-                            if (carriesRung && (int)((bits >> 32) & 0xFFFF) == _target)
+                            // Resolved through the same table the renderer uses,
+                            // rather than through a second hand-kept list of
+                            // "categories that carry a rung" — the duplicate
+                            // that let `--until rung=DispatchRound` sit through
+                            // 300 s of DispatchRound records on 2026-08-05.
+                            var category = Name(Categories, (int)((bits >> 60) & 0xF));
+                            var action = Name(Actions, (int)((bits >> 52) & 0xF));
+                            if (category is null || action is null) continue;
+                            var target = (int)((bits >> 32) & 0xFFFF);
+                            if (target == _target && RungName(target, category, action) is not null)
                             {
                                 Sighted = true;
                             }
@@ -386,6 +406,53 @@ internal static class Program
     /// Duplicates are kept out: the board cycles its transcript one line per
     /// beat, so a 60-second capture holds each line many times over, and a
     /// reader wants the envelope, not the repetition count.
+    /// Writes every captured BEACON frame, whole and in hex, one per line.
+    ///
+    /// Beacons only, selected on the payload's own opening bytes rather than on
+    /// length or position: the same EtherType carries transcript lines and spoor
+    /// frames, and a file that mixed them would make the Rust-side comparison
+    /// assert against whatever happened to arrive first.
+    ///
+    /// The `seq` is parsed out and written beside the bytes because the Rust
+    /// test needs it as INPUT — `beacon_frame(seq)` is what gets compared, and a
+    /// test that read the sequence out of the frame it is checking would be
+    /// comparing the frame to itself.
+    private static void WriteRawBeacons(List<byte[]> frames, string rawPath)
+    {
+        const string Prefix = "TOS64-PRESENT/1 board=pi5-bcm2712 seq=";
+        var lines = new List<string>
+        {
+            "# FEAT-P1-09 exit criterion: beacon frames as captured, whole, with the",
+            "# 14-byte Ethernet header. Format: <seq> <hex bytes>. Compared against",
+            "# hal_arm64::gem::beacon_frame(seq) byte for byte by a host test.",
+        };
+        var written = 0;
+        foreach (var frame in frames)
+        {
+            if (frame.Length < 14 + Prefix.Length) continue;
+            var payload = Encoding.ASCII.GetString(frame, 14, frame.Length - 14);
+            if (!payload.StartsWith(Prefix, StringComparison.Ordinal)) continue;
+            var rest = payload[Prefix.Length..];
+            var end = 0;
+            while (end < rest.Length && char.IsAsciiDigit(rest[end])) end++;
+            if (end == 0) continue;
+            lines.Add($"{rest[..end]} {Convert.ToHexString(frame)}");
+            written++;
+        }
+        try
+        {
+            File.WriteAllLines(rawPath, lines);
+            Console.WriteLine();
+            Console.WriteLine($"    {written} whole beacon frame(s) written to {rawPath}");
+        }
+        catch (IOException e)
+        {
+            // Never swallowed: see the --text writer. A capture that failed to
+            // save is a capture to be retaken on a board someone powered down.
+            Console.Error.WriteLine($"ti64dink: could not write {rawPath}: {e.Message}");
+        }
+    }
+
     private static void HarvestText(byte[] bytes, List<string> into)
     {
         var at = 0;
@@ -438,7 +505,14 @@ internal static class Program
             File.WriteAllLines(textPath, EnvelopeForParser(text));
             Console.WriteLine();
             Console.WriteLine($"    written to {textPath} — parse with:");
-            Console.WriteLine($"      cargo run -p xtask -- parse-meas --file={textPath}");
+            // A POSITIONAL path, not `--file=`. It printed `--file=` until
+            // 2026-08-05 and `xtask parse-meas` takes a bare path, so following
+            // this tool's own instruction produced "cannot read
+            // --file=C:/tmp/env.txt: the filename, directory name, or volume
+            // label syntax is incorrect" — an error that reads like a bad path
+            // rather than a wrong command form. A tool that prints a command the
+            // tool it names refuses is worse than one that prints nothing.
+            Console.WriteLine($"      cargo run -p xtask -- parse-meas {textPath}");
         }
         catch (IOException e)
         {
@@ -806,7 +880,8 @@ internal static class Program
         }
 
         decoded++;
-        var rung = category is "Boot" or "Fault" or "Thermal" ? Rung(target) : $"target={target}";
+        var named = RungName(target, category, action);
+        var rung = named is not null ? $"rung={named}" : $"target={target}";
         // The cost field is a raw AVS register word for a thermal sample, not a
         // number of cycles. Conversion is the HOST's job by design: the board
         // emits and does not interpret, and the calibration below is unverified
@@ -919,14 +994,37 @@ internal static class Program
     /// position; it is not a sort, and nothing is reordered within the run.
     /// If no BEGIN was captured the lines are written untouched, so the parser
     /// refuses an incomplete envelope rather than being handed a plausible one.
+    ///
+    /// THE VERDICT IS CARRIED TOO, and it was not until 2026-08-05. The filter
+    /// above excluded `TOS64-RESULT/1` as collateral: it is neither a beacon nor
+    /// a METRIC line, but `xtask parse-meas` requires it and exits 1 without one
+    /// ("no usable verdict line"). So a harvest of a PERFECT envelope - eleven
+    /// metrics, BEGIN through END, every field parsed - still failed, and failed
+    /// in a way that reads like a capture problem rather than a filter decision.
+    /// It is appended after the rotated envelope rather than rotated into place
+    /// because the verdict is one terminal statement about the whole run, emitted
+    /// at fixture completion after END, not a positional element of the cycle.
+    ///
+    /// On this bench that fix changes nothing on its own, and saying so matters:
+    /// the measure fixture emits its verdict ONCE at completion, thousands of
+    /// beats before any late listener attaches, so a live capture of a
+    /// long-running board will still carry no verdict and parse-meas will still
+    /// exit 1. That is `LE-76` exactly - a text channel with no retention - and
+    /// the honest reading of an exit 1 here is "the envelope parsed and the
+    /// verdict was never on the wire during this window", not "the parse failed".
     private static List<string> EnvelopeForParser(List<string> text)
     {
         var envelope = text.FindAll(line => line.StartsWith("TOS64-MEAS/2", StringComparison.Ordinal));
         var begin = envelope.FindIndex(line => line.Contains(" BEGIN ", StringComparison.Ordinal));
-        if (begin <= 0) return envelope;
-        var rotated = envelope.GetRange(begin, envelope.Count - begin);
-        rotated.AddRange(envelope.GetRange(0, begin));
-        return rotated;
+        if (begin > 0)
+        {
+            var rotated = envelope.GetRange(begin, envelope.Count - begin);
+            rotated.AddRange(envelope.GetRange(0, begin));
+            envelope = rotated;
+        }
+        envelope.AddRange(
+            text.FindAll(line => line.StartsWith("TOS64-RESULT/1", StringComparison.Ordinal)));
+        return envelope;
     }
 
     /// Renders an AVS monitor temperature word (LE-75).
@@ -950,27 +1048,49 @@ internal static class Program
         return $"avs=0x{raw:X8} data={data}{flag} ~{milli / 1000.0:F1}C(unverified)";
     }
 
-    /// Mirrors kernel::spoor_stream::Rung. Wire-visible and append-only. One
-    /// table for both directions: the decoder renders from it and `--until
-    /// rung=<Name>` resolves against it, so the two cannot drift apart.
-    private static readonly (int Target, string Name)[] Rungs =
+    /// Mirrors kernel::spoor_stream::Rung AND its `category_action()`.
+    /// Wire-visible and append-only. One table for both directions: the decoder
+    /// renders from it and `--until rung=<Name>` resolves against it, so the two
+    /// cannot drift apart.
+    ///
+    /// THE CATEGORY/ACTION PAIR IS PART OF THE TABLE, and that is the fix for a
+    /// defect this table caused twice on 2026-08-05. The rung id lives in the
+    /// `target` field of every record `spoor_stream` stamps — but `target` means
+    /// something else on other paths (the x86_64 dispatcher puts a task index
+    /// there), so the decoder cannot simply resolve every `target` as a rung.
+    /// It previously guarded that with a hand-kept list of categories said to
+    /// "carry a rung" — `Boot`, `Fault`, `Thermal` — written before
+    /// `DispatchRound` existed and never updated when it did. The result was two
+    /// failures from one omission: the decoder printed `target=9` for a record it
+    /// could have named, and `--until rung=DispatchRound` watched 300 seconds of
+    /// DispatchRound records without firing, which is the worse of the two
+    /// because it reports a real event as an absence.
+    ///
+    /// Resolving against the declared `(category, action)` pair instead removes
+    /// the hand-kept list entirely: a rung is named when the id AND the pair
+    /// agree with what the kernel says that rung stamps as. A task index cannot
+    /// masquerade as a rung unless it also arrives under that rung's own pair,
+    /// and no rung has id 0.
+    private static readonly (int Target, string Name, string Category, string Action)[] Rungs =
     [
-        (1, "MmuEnabled"),
-        (2, "GicRouted"),
-        (3, "TickArmed"),
-        (4, "BeaconTransmitted"),
-        (5, "FixtureMeasure"),
-        (6, "ParkIteration"),
-        (7, "FaultTaken"),
-        (8, "ThermalSample"),
+        (1, "MmuEnabled", "Boot", "Create"),
+        (2, "GicRouted", "Boot", "Create"),
+        (3, "TickArmed", "Boot", "Create"),
+        (4, "BeaconTransmitted", "Boot", "Create"),
+        (5, "FixtureMeasure", "Boot", "Create"),
+        (6, "ParkIteration", "Boot", "Select"),
+        (7, "FaultTaken", "Fault", "Fault"),
+        (8, "ThermalSample", "Thermal", "Observe"),
+        (9, "DispatchRound", "Dispatch", "Select"),
     ];
 
-    private static string Rung(int target)
+    /// The rung a record names, or null when its `target` is not a rung.
+    private static string? RungName(int target, string category, string action)
     {
-        foreach (var (known, name) in Rungs)
+        foreach (var (known, name, cat, act) in Rungs)
         {
-            if (known == target) return $"rung={name}";
+            if (known == target && cat == category && act == action) return name;
         }
-        return $"rung=UNKNOWN({target})";
+        return null;
     }
 }

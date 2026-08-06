@@ -60,6 +60,8 @@ internal static class Program
 
     private static int Main(string[] args)
     {
+        Unbuffer();
+
         string? mac = null;
         string? server = null;
         for (var i = 0; i < args.Length; i++)
@@ -94,13 +96,77 @@ internal static class Program
         Console.WriteLine($"  offering client  : {_offeredIp}");
         Console.WriteLine($"  tftp root        : {(_logOnly ? "(log-only: no file will be served)" : Path.GetFullPath(_root))}");
         Console.WriteLine();
+
+        // BOTH ports are claimed before EITHER loop starts, and a port already
+        // held ends the run here (LE-87). Binding inside each loop is how the
+        // tool came to answer DHCP correctly while a stale instance served
+        // TFTP: one half succeeded, the other half was never reached, and
+        // every visible signal said the run was good.
+        var dhcpSocket = Claim(DhcpServerPort, "DHCP");
+        if (dhcpSocket is null) return 3;
+        var tftpSocket = Claim(TftpPort, "TFTP");
+        if (tftpSocket is null) { dhcpSocket.Dispose(); return 3; }
+
+        Console.WriteLine($"  ports held       : UDP {DhcpServerPort} (DHCP) + UDP {TftpPort} (TFTP), exclusively");
+        Console.WriteLine();
         Console.WriteLine("  Ctrl-C to stop. Reboot the board now.");
         Console.WriteLine();
 
-        var tftp = new Thread(TftpLoop) { IsBackground = true };
+        var tftp = new Thread(() => TftpLoop(tftpSocket)) { IsBackground = true };
         tftp.Start();
-        DhcpLoop();
+        DhcpLoop(dhcpSocket);
         return 0;
+    }
+
+    /// Claims one UDP port for this process alone, or explains who has it.
+    ///
+    /// The bind is the decision; `netstat` is only diagnosis, so a bind that
+    /// fails for some other reason still stops the run and still says what the
+    /// operating system said.
+    private static Socket? Claim(int port, string role)
+    {
+        try
+        {
+            return PortGuard.BindExclusive(IPAddress.Any, port);
+        }
+        catch (SocketException e)
+        {
+            Console.Error.WriteLine($"tos64-netboot: REFUSING TO START — cannot take UDP {port} ({role}): {e.SocketErrorCode}");
+            var holders = PortGuard.HoldersOf(port);
+            if (holders.Count > 0)
+            {
+                Console.Error.WriteLine($"  UDP {port} is held by {holders.Count} process(es):");
+                foreach (var line in PortGuard.Describe(holders)) Console.Error.WriteLine(line);
+                Console.Error.WriteLine("  Stop it and start again. A second instance would not have failed");
+                Console.Error.WriteLine("  loudly here — it would have shared the port and served a stale");
+                Console.Error.WriteLine("  image while this one logged a clean DHCP exchange (LE-87).");
+            }
+            else if (e.SocketErrorCode == SocketError.AccessDenied)
+            {
+                Console.Error.WriteLine("  Access denied and no holder found: this needs an elevated shell.");
+            }
+            else
+            {
+                Console.Error.WriteLine("  No holder could be identified; netstat was unreadable or the port");
+                Console.Error.WriteLine("  is held by something it does not list. The bind is authoritative.");
+            }
+            return null;
+        }
+    }
+
+    /// Makes the log reach the file while the server is still running.
+    ///
+    /// Redirected stdout is BUFFERED — 4 KiB, flushed on exit. A bench session
+    /// redirects this tool to a log and reads it in another window, so every
+    /// line after the first few sat invisible until the process was killed:
+    /// the DHCP exchange, the TFTP requests, and the served file's digest, all
+    /// of which exist to be read WHILE the board is booting. Found 2026-08-06
+    /// verifying the LE-87 fix, and it is the same family as the defect it was
+    /// found verifying — the tool did the work and the report did not arrive.
+    private static void Unbuffer()
+    {
+        Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
+        Console.SetError(new StreamWriter(Console.OpenStandardError()) { AutoFlush = true });
     }
 
     private static void Usage()
@@ -142,21 +208,12 @@ internal static class Program
 
     // ---- DHCP -------------------------------------------------------------
 
-    private static void DhcpLoop()
+    /// Answers the one board named on the command line, on a socket already
+    /// bound exclusively by `Claim`.
+    private static void DhcpLoop(Socket socket)
     {
-        using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        using var owned = socket;
         socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.Broadcast, true);
-        socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-        try
-        {
-            socket.Bind(new IPEndPoint(IPAddress.Any, DhcpServerPort));
-        }
-        catch (SocketException e)
-        {
-            Console.Error.WriteLine($"tos64-netboot: cannot bind UDP {DhcpServerPort}: {e.Message}");
-            Console.Error.WriteLine("  Another DHCP server is running, or this needs elevation.");
-            return;
-        }
 
         var buffer = new byte[2048];
         while (true)
@@ -184,10 +241,64 @@ internal static class Program
                               (vendorClass is null ? "" : $"  vendor-class=\"{vendorClass}\""));
 
             if (messageType is not (1 or 3)) continue;          // DISCOVER, REQUEST
+
+            // The board's link comes up when the board does, so an address
+            // guessed at startup is an address guessed while the bench NIC was
+            // still down. Re-guess here, where the DISCOVER proves the link is
+            // live: 2026-08-05 the tool printed `server address : 0.0.0.0`,
+            // offered siaddr 0.0.0.0, and the broadcast had no route.
+            if (_serverIp.Equals(IPAddress.Any))
+            {
+                _serverIp = GuessLinkLocalAddress();
+                if (!_serverIp.Equals(IPAddress.Any))
+                {
+                    Console.WriteLine($"  server address resolved on link-up: {_serverIp}");
+                }
+            }
+
             var reply = BuildReply(buffer, messageType == 1 ? (byte)2 : (byte)5);
-            socket.SendTo(reply, new IPEndPoint(IPAddress.Broadcast, DhcpClientPort));
+
+            // Fail-safe over keep-trying's opposite failure: an unhandled
+            // SocketException here killed the whole server on the FIRST packet
+            // it ever answered (10065, no route for 255.255.255.255 from a
+            // socket bound to 0.0.0.0 across several link-local NICs). A send
+            // that fails must cost this one reply, never the session — the
+            // bootloader retries DISCOVER, and a live server can answer the
+            // retry. Sent from a socket bound to the bench address so Windows
+            // cannot pick the Bluetooth or WiFi route for the broadcast.
+            if (!TrySendBroadcast(reply))
+            {
+                continue;
+            }
+
             Console.WriteLine($"  -> sent {(messageType == 1 ? "OFFER" : "ACK")}: " +
                               $"yiaddr={_offeredIp} siaddr={_serverIp} file=\"{BootFileName}\" +opt43");
+        }
+    }
+
+    /// Broadcasts one DHCP reply out the bench interface, reporting rather than
+    /// throwing.
+    ///
+    /// Bound to `_serverIp` deliberately: this host holds five IPv4 addresses,
+    /// four of them link-local (Bluetooth, two WiFi-Direct virtuals, the bench
+    /// Ethernet), and an unbound broadcast lets the stack choose among them.
+    /// The one that matters is the one the board is cabled to.
+    private static bool TrySendBroadcast(byte[] reply)
+    {
+        try
+        {
+            using var send = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            send.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.Broadcast, true);
+            send.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            send.Bind(new IPEndPoint(_serverIp, 0));
+            send.SendTo(reply, new IPEndPoint(IPAddress.Broadcast, DhcpClientPort));
+            return true;
+        }
+        catch (SocketException e)
+        {
+            Console.Error.WriteLine($"  !! reply not sent ({e.SocketErrorCode}): {e.Message}");
+            Console.Error.WriteLine($"     bound to {_serverIp}; the bootloader will retry DISCOVER.");
+            return false;
         }
     }
 
@@ -297,19 +408,9 @@ internal static class Program
     /// Read-only TFTP. Every request is logged verbatim BEFORE any decision
     /// about whether the file exists, because the log is the point of the first
     /// run: it is the only way to observe what the firmware asks for.
-    private static void TftpLoop()
+    private static void TftpLoop(Socket socket)
     {
-        using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-        socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-        try
-        {
-            socket.Bind(new IPEndPoint(IPAddress.Any, TftpPort));
-        }
-        catch (SocketException e)
-        {
-            Console.Error.WriteLine($"tos64-netboot: cannot bind UDP {TftpPort}: {e.Message}");
-            return;
-        }
+        using var owned = socket;
 
         var buffer = new byte[1024];
         while (true)
@@ -344,11 +445,11 @@ internal static class Program
                 continue;
             }
 
-            var path = Path.GetFullPath(Path.Combine(_root, name.Replace('/', Path.DirectorySeparatorChar)));
-            var rootFull = Path.GetFullPath(_root);
-            // Refuse anything that escapes the root. A path traversal in a
-            // bench tool is still a path traversal.
-            if (!path.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase))
+            // Name to file, or refusal, in one decision — see `TftpPaths` for
+            // why the leading-slash spelling of the root is not an escape, and
+            // for what it cost on 2026-08-06 when it was treated as one.
+            var path = TftpPaths.Resolve(_root, name);
+            if (path is null)
             {
                 Console.WriteLine($"  -> REFUSED: outside the tftp root");
                 SendError(socket, from, 2, "access violation");
@@ -362,7 +463,10 @@ internal static class Program
             }
 
             var bytes = File.ReadAllBytes(path);
-            Console.WriteLine($"  -> serving {bytes.Length} bytes");
+            // Digest and absolute path on every transfer: what was served has
+            // to be comparable against what was built without a power cycle to
+            // find out (LE-87).
+            Console.WriteLine(TransferLog.Served(path, bytes));
             Serve(socket, from, bytes);
         }
     }

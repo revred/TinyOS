@@ -31,3 +31,32 @@ The load generator plays a compromised C2 component and must prove single-compro
 ## Exit criteria
 
 The Story **Verified** at Tier 0 with a dated Report containing raw campaign evidence — the first Report in the repository whose primary content is adversarial-load data rather than functional pass/fail — and `SEC-20`'s state on this Story converting from `baseline-debt` to `verified` for the Tier 0 scope (hardware-tier debt stays named).
+
+### Re-worded 2026-08-06 — "`verified` for the Tier 0 scope" is not a state the spine can represent
+
+The paragraph above asks for something the assurance spine has no way to record, and a criterion
+that cannot be represented is a criterion that will be declared met by prose. **A Story's
+assurance state is all-or-nothing**: `baseline-debt` or `verified`, with no partial value and no
+per-tier value. There is no "verified for the Tier 0 scope".
+
+What the spine *can* represent, and therefore what this Feature actually exits on:
+
+- **Functional `Verified`** on `STORY-P1-05-01`, from its `Status:` header, on the strength of the
+  campaign — every saturation vector run, RT reserves held, denial bounded and attributable,
+  recovery measured. This is the substance and it is fully reachable at Tier 0.
+- **Guardrail evidence rows** in `guardrail-evidence.tsv` for the gates the campaign actually
+  measures, in `D05`, `D07` and `D11`, each read against its `target` column **before** the
+  measurement is taken rather than after. `cargo run -p xtask -- assurance-status` prints which
+  of those gates are reachable; `G19` (isolation under competing load) and `G21` (exhaustion and
+  fault containment) are this campaign's own gates and are currently counted as *unevidenced
+  because unbuilt*, which is the honest reading.
+- **`SEC-20` staying `baseline-debt`.** Not as a failure — as the accurate record. The conversion
+  the original paragraph asks for is gated on hardware-tier obligations this Feature does not
+  discharge, and `qualified-platforms.tsv` holds zero qualified platforms.
+- **No `G04` row from any of it.** `PERF-D05-G04` and `PERF-D07-G04` are bound-class and are
+  refused at `T0`, on `x86_64`, and from any platform absent from `qualified-platforms.tsv`. The
+  refusal lands at the *end* of the work if nobody reads this first, which is the only reason
+  this bullet exists.
+
+So the honest exit is **functionally `Verified` with `baseline-debt` retained**, and the Feature
+document says so here rather than leaving a session to discover it at a release gate.

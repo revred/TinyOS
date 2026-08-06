@@ -156,8 +156,18 @@ internal static class Live
     /// never happens must end as a reported timeout, never as a hung bench
     /// (fail-safe over keep-trying; the caller reads which of the two
     /// happened from whether the predicate ever fired, not from elapsed time).
+    ///
+    /// `wholeFrames`, when given, additionally receives each matching frame with
+    /// its 14-byte Ethernet header INTACT. The payload list cannot serve that
+    /// purpose: `FEAT-P1-09`'s exit criterion is a byte-identical comparison
+    /// against `hal_arm64::gem::beacon_frame`, which builds the destination MAC,
+    /// the source MAC and the EtherType as the first fourteen bytes of its
+    /// output — so a comparison against a header-stripped payload would silently
+    /// skip the three fields most likely to be wrong, and pass while proving
+    /// less than it claimed.
     internal static List<byte[]> Capture(
-        string device, int seconds, Func<byte[], bool>? sighted, out int framesSeen)
+        string device, int seconds, Func<byte[], bool>? sighted, out int framesSeen,
+        List<byte[]>? wholeFrames = null)
     {
         var errbuf = new byte[ErrbufSize];
         // 65536 snaplen so nothing is ever truncated; promiscuous because the
@@ -193,6 +203,7 @@ internal static class Live
                 if (etherType != Tos64EtherType) continue;
 
                 framesSeen++;
+                wholeFrames?.Add(frame);
                 var payload = frame[14..];
                 payloads.Add(payload);
                 if (sighted is not null && sighted(payload)) break;
