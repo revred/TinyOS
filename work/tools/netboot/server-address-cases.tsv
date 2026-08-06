@@ -1,0 +1,41 @@
+value	verdict	why
+# The rules for an EXPLICIT --server value, shared by the two programs that
+# each implement them: `ServerAddress.Choose` (C#, work/tools/netboot) and
+# `board_run::server_address` (Rust, os/src/xtask). Both read this file in
+# their own test suite and assert the same verdict for every row.
+#
+# It exists because 08C argued the duplication was correct — the two are
+# separate programs and nothing links them, the same reason POWER_EXIT_LEFT_OFF
+# is duplicated by value — and then did not do what TransferBeacon and
+# TransferGuard did for exactly that argument: assert the mirror. An unasserted
+# duplicate is not a duplicate, it is two implementations that agree today.
+#
+# `accept` means the value may be served from. `refuse` means it may not, and
+# this file deliberately does NOT distinguish Malformed from Unusable: that
+# split is one program's vocabulary, and what has to agree across the seam is
+# whether a boot goes out on the value.
+#
+# Rows with an empty `value` cannot be written in TSV and are tested locally on
+# both sides instead.
+169.254.113.248	accept	the bench link-local address the 2026-08-06 boot was recovered with
+169.254.0.113	accept	four octets, one of which is zero — not the same as 0.0.0.0
+10.0.0.1	accept	routable unicast is deliberately allowed; a bench may be on a real subnet
+192.168.1.20	accept	discovery filters this out as a CANDIDATE, but naming it is a decision
+8.8.8.8	accept	nothing here knows the bench's topology, and guessing it is LE-97's mistake
+169.254.113	refuse	three octets: .NET's IPAddress.Parse ACCEPTS this as 169.254.0.113
+169.254	refuse	two octets: parses as 169.0.0.254
+169	refuse	one octet: parses as 0.0.0.169
+169.254.113.248.9	refuse	five octets
+169.254.113.999	refuse	an octet is a byte
+169.254.113.-1	refuse	an octet is a byte and unsigned
+169.254.113. 248	refuse	whitespace inside an octet
+169.254.0.01	refuse	a leading zero is an octal ambiguity; .NET's own parser rejects it too
+not-an-address	refuse	not digits
+0.0.0.0	refuse	a bind wildcard, not somewhere a client can fetch from
+0.1.2.3	refuse	0.0.0.0/8 is "this network" and is not a source a client can reach
+127.0.0.1	refuse	loopback: the board would be told to fetch from itself
+127.255.255.254	refuse	all of 127/8 is loopback, not just .0.1
+224.0.0.1	refuse	multicast is not a unicast server address
+239.255.255.250	refuse	the top of the multicast range
+240.0.0.1	refuse	240/4 is reserved
+255.255.255.255	refuse	limited broadcast; a server address is one host, not every host

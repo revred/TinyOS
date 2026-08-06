@@ -9,6 +9,7 @@
 //! evidence, and this Feature appends to it; it never reorders it.
 
 use crate::gem::{self, LinkState, MdioPort, PhyOutcome, Speed, TxError};
+use crate::gem_receive;
 use crate::pcie::{self, LinkAbsent};
 use crate::pl011::Mmio;
 use crate::rp1_clocks::{self, ClockRefused};
@@ -252,6 +253,32 @@ pub fn link_line(discovery: &Discovery, beacon: BeaconField) -> ([u8; LINK_LINE_
     (line.bytes, line.at)
 }
 
+/// Milliseconds the park loop waits per tick.
+///
+/// The tick is the lamp's resolution; the beat below is everything else's.
+pub const PARK_TICK_MS: u32 = 100;
+
+/// Ticks per park **beat** — the pass that stamps, dispatches, transmits and
+/// drains. Everything periodic except the lamp happens on this multiple.
+pub const PARK_BEAT_TICKS: u32 = 10;
+
+/// The beat period. **1 Hz, and `LE-99` is why this is a named derivation
+/// rather than two literals twenty lines apart.**
+///
+/// `PERF-D05-G23` measured one spoor stamp at +110 cycles p99 on a 1650-cycle
+/// dispatch round — 6.7% against a 2% allowance, a fail by 3.3x — and the
+/// shipping park loop stamps once per round, exactly as the fixture arm does.
+/// The gate's OTHER clause, `<= 2% CPU cycles`, passes by roughly seven orders
+/// of magnitude, and the only reason is this constant: one round per second is
+/// 110 cycles per second on a 2.4 GHz core.
+///
+/// So this number is load-bearing for a filed gate verdict, and nothing tied
+/// the two together until `LE-99`. Raising the cadence does not breach a test
+/// somewhere else — it silently makes the per-round overhead the CPU-cycles
+/// figure too, with no symptom on the wire. The test that guards it is in this
+/// file and it names the gate.
+pub const PARK_BEAT_MS: u32 = PARK_TICK_MS * PARK_BEAT_TICKS;
+
 /// The park loop's verdict for one beat (`STORY-P1-09-14`): the three
 /// silences the first trained wire exposed, each named. `Beaconing` is the
 /// healthy hum; `parked` now carries its watch; a refused transmit is
@@ -319,6 +346,48 @@ pub fn emit_heartbeat<M: Mmio>(
         Ok(text) => uart.write_str(text).is_ok(),
         Err(_) => false,
     }
+}
+
+/// Builds one `TOS64-RX/1` line (`STORY-P1-09-16`): the board's first inbound
+/// channel, reported every beat on the canvas.
+///
+/// Both counts are always present, including while the channel is idle, and
+/// that is deliberate: `accepted=0 refused=0` is a claim (nothing has arrived)
+/// where a missing field is only an absence of information. The refused count
+/// is what makes an accepted count mean anything — a board that counts one
+/// frame has been shown to hear, and only a board that counts a refusal has
+/// been shown to decline.
+///
+/// Pure; pinned by the tests.
+pub fn receive_line(
+    state: gem_receive::ReceiveState,
+    accepted: u32,
+    refused: u32,
+) -> ([u8; LINK_LINE_CAPACITY], usize) {
+    let mut line = LineBuilder::new();
+    line.push("TOS64-RX/1 state=");
+    match state {
+        gem_receive::ReceiveState::Idle => line.push("idle"),
+        gem_receive::ReceiveState::Listening => line.push("listening"),
+        gem_receive::ReceiveState::Stopped(gem_receive::ReceiveError::Overrun) => {
+            line.push("stopped reason=overrun");
+        }
+        gem_receive::ReceiveState::Stopped(gem_receive::ReceiveError::BufferUnavailable) => {
+            line.push("stopped reason=nobuffer");
+        }
+        gem_receive::ReceiveState::Refused(gem_receive::EnableError::UnencodableBufferSize) => {
+            line.push("refused reason=size");
+        }
+        gem_receive::ReceiveState::Refused(gem_receive::EnableError::MisalignedRing) => {
+            line.push("refused reason=align");
+        }
+    }
+    line.push(" accepted=");
+    line.push_dec(accepted);
+    line.push(" refused=");
+    line.push_dec(refused);
+    line.push("\n");
+    (line.bytes, line.at)
 }
 
 /// Derives one beat's park verdict from the loop's channels
@@ -423,6 +492,98 @@ pub use crate::etherrors::{blink_code, blink_detail};
 mod tests {
     use super::*;
     use core::cell::Cell;
+
+    /// This file's own text, read at compile time — the only thing that can see
+    /// the park loop, because the loop is `#[cfg(target_arch = "aarch64")]` glue
+    /// and no host test can call it. Same mechanism `kernel::measure_phases`
+    /// uses to hold its timed regions.
+    const SOURCE: &str = include_str!("ethernet.rs");
+
+    // A source-level test necessarily quotes the strings it hunts for, so
+    // every needle below is ASSEMBLED from halves: written whole, each one
+    // would match its own definition and the search would find this module
+    // instead of the code. Found the hard way — the first cut of these tests
+    // failed against themselves, twice, at two different nesting depths.
+    const GLUE_BANNER: &str = concat!("// --- aarch64", " glue");
+    const BEAT_GATE: &str = concat!("if tick.is_multiple_of(", "PARK_BEAT_TICKS) {");
+    const TICK_WAIT: &str = concat!("if !wait_millis(", "PARK_TICK_MS) {");
+    const DISPATCH_CALL: &str = concat!("crate::spoor::", "dispatch_round()");
+    const LITERAL_WAIT: &str = concat!("wait_millis(", "100)");
+
+    /// The park loop's source and **only** it: everything after the glue
+    /// banner, which sits below this module.
+    fn glue_source() -> &'static str {
+        SOURCE.split_once(GLUE_BANNER).expect("the glue banner exists").1
+    }
+
+    /// How many lines of the once-per-beat block contain `needle`, ignoring
+    /// comments and blanks.
+    ///
+    /// Iterator rather than a collected `Vec`: this crate is `no_std` with no
+    /// allocator, and the test build has no `alloc` either — the same property
+    /// `PERF-Dnn-G11` records for the shipped code.
+    fn beat_lines_containing(needle: &str) -> usize {
+        glue_source()
+            .split_once(BEAT_GATE)
+            .expect("the park loop gates its beat on PARK_BEAT_TICKS")
+            .1
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with("//"))
+            .filter(|line| line.contains(needle))
+            .count()
+    }
+
+    /// `LE-99`, first half. `PERF-D05-G23`'s filed note says the shipping park
+    /// loop exceeds the gate's per-round stamp budget by 3.3x and that the ONLY
+    /// thing making that harmless is the beat: one dispatch round per second,
+    /// so 110 cycles of stamp per second on a 2.4 GHz core.
+    ///
+    /// Nothing tied that sentence to the code. This does. It is a structural
+    /// assertion and deliberately encodes **no measured figure** — the cycle
+    /// costs belong to a boot, not to a design constant.
+    #[test]
+    fn the_park_beat_is_one_hertz_and_perf_d05_g23_depends_on_it() {
+        assert_eq!(
+            PARK_TICK_MS * PARK_BEAT_TICKS,
+            PARK_BEAT_MS,
+            "the beat period must be the product of its two factors"
+        );
+        assert_eq!(
+            PARK_BEAT_MS, 1_000,
+            "THE BEAT IS NO LONGER 1 Hz. PERF-D05-G23 fails its p99 clause by 3.3x per dispatch \
+             round and passes its CPU-cycles clause only because one round runs per second. \
+             Raising the cadence makes the per-round overhead the CPU figure too. Re-derive the \
+             gate's note before changing this (LE-99)"
+        );
+    }
+
+    /// The constants must be what the loop actually uses, or they are two
+    /// numbers in a doc comment. `LE-80`'s lesson: a mirror nobody asserts is
+    /// two values that agree today.
+    #[test]
+    fn the_park_loop_paces_itself_from_the_named_constants() {
+        assert!(glue_source().contains(TICK_WAIT), "the tick wait must use PARK_TICK_MS");
+        assert!(glue_source().contains(BEAT_GATE), "the beat gate must use PARK_BEAT_TICKS");
+        assert!(
+            !glue_source().contains(LITERAL_WAIT),
+            "a literal cadence beside a named one is the drift LE-99 asks to prevent"
+        );
+    }
+
+    /// `LE-99`, second half as far as this crate can see it: **one dispatch
+    /// round per beat.** The kernel side pins one stamp per round; together
+    /// they are one stamp per second, which is the number `PERF-D05-G23`'s
+    /// CPU-cycles clause rests on.
+    #[test]
+    fn the_beat_runs_exactly_one_dispatch_round() {
+        let rounds = beat_lines_containing(DISPATCH_CALL);
+        assert_eq!(
+            rounds, 1,
+            "a second dispatch round per beat doubles the stamp rate PERF-D05-G23 was read \
+             against (LE-99)"
+        );
+    }
 
     /// A GEM double that panics on any access — proof the window is never
     /// touched behind failed gates.
@@ -922,6 +1083,51 @@ mod tests {
         assert_eq!(differing.len(), 1, "the sequence digit is the only variance");
     }
 
+    // TEST-P1-09-16-A clause 3, the reported half: the inbound row.
+
+    #[test]
+    fn the_receive_line_is_exact_bytes_and_always_carries_both_counts() {
+        use crate::gem_receive::{EnableError, ReceiveError, ReceiveState};
+        let (bytes, len) = receive_line(ReceiveState::Idle, 0, 0);
+        assert_eq!(
+            core::str::from_utf8(&bytes[..len]).unwrap(),
+            "TOS64-RX/1 state=idle accepted=0 refused=0\n",
+            "zero is a claim; a missing field would only be an absence of information"
+        );
+        let (bytes, len) = receive_line(ReceiveState::Listening, 1, 0);
+        assert_eq!(
+            core::str::from_utf8(&bytes[..len]).unwrap(),
+            "TOS64-RX/1 state=listening accepted=1 refused=0\n"
+        );
+        let (bytes, len) = receive_line(ReceiveState::Listening, 3, 17);
+        assert_eq!(
+            core::str::from_utf8(&bytes[..len]).unwrap(),
+            "TOS64-RX/1 state=listening accepted=3 refused=17\n"
+        );
+        // Every stop reason is spoken, never relabelled as quiet.
+        for (state, expected) in [
+            (ReceiveState::Stopped(ReceiveError::Overrun), "stopped reason=overrun"),
+            (ReceiveState::Stopped(ReceiveError::BufferUnavailable), "stopped reason=nobuffer"),
+            (ReceiveState::Refused(EnableError::UnencodableBufferSize), "refused reason=size"),
+            (ReceiveState::Refused(EnableError::MisalignedRing), "refused reason=align"),
+        ] {
+            let (bytes, len) = receive_line(state, 2, 5);
+            let text = core::str::from_utf8(&bytes[..len]).unwrap();
+            assert_eq!(text, format!("TOS64-RX/1 state={expected} accepted=2 refused=5\n"));
+        }
+    }
+
+    #[test]
+    fn the_receive_line_never_overruns_its_buffer_at_the_widest_counts() {
+        use crate::gem_receive::{ReceiveError, ReceiveState};
+        let (_, len) = receive_line(
+            ReceiveState::Stopped(ReceiveError::BufferUnavailable),
+            u32::MAX,
+            u32::MAX,
+        );
+        assert!(len < LINK_LINE_CAPACITY, "the longest line still fits, at {len} bytes");
+    }
+
     #[test]
     fn a_refused_uart_write_stops_the_heartbeat_permanently() {
         use crate::pl011::{register, Pl011};
@@ -1250,6 +1456,147 @@ mod glue {
     static mut BEACON_MEMORY: BeaconMemory =
         BeaconMemory { ring: [[0; 4]; 2], frame: [0; gem::SPOOR_FRAME_CAPACITY] };
 
+    /// The receive ring and its single buffer (`STORY-P1-09-16`), 64-byte
+    /// aligned for the same reason and **separate from [`BeaconMemory`] on
+    /// purpose**.
+    ///
+    /// This is the second pinned grant, and the widening `LE-67` now records.
+    /// It is not shared with the transmit staging region because the two
+    /// directions have opposite writers: the CPU writes the transmit region
+    /// and the device reads it; the device writes this one. Aliasing them
+    /// would let a confused inbound write corrupt the frame the board is
+    /// about to transmit — turning an inbound fault into an *outbound lie*,
+    /// and every piece of evidence this project has is an outbound frame.
+    #[repr(C, align(64))]
+    struct ReceiveMemory {
+        ring: [u32; 4],
+        buffer: [u8; gem_receive::RECEIVE_BUFFER_BYTES],
+    }
+
+    static mut RECEIVE_MEMORY: ReceiveMemory =
+        ReceiveMemory { ring: [0; 4], buffer: [0; gem_receive::RECEIVE_BUFFER_BYTES] };
+
+    /// The DMA address of the receive buffer, as the device sees it.
+    fn receive_buffer_dma() -> u64 {
+        // SAFETY: address-of only; no reference to the mutable static is
+        // taken and nothing is dereferenced.
+        unsafe {
+            let memory = core::ptr::addr_of!(RECEIVE_MEMORY);
+            board::RP1_DMA_RAM_BASE + core::ptr::addr_of!((*memory).buffer) as u64
+        }
+    }
+
+    /// Writes the one-descriptor ring, cleans it to the point of coherency,
+    /// and arms the MAC. [`None`] on success; a refusal is returned so the
+    /// canvas can say which one, and nothing is enabled in that case.
+    fn arm_receive<M: Mmio>(device: &M) -> gem_receive::ReceiveState {
+        let buffer_dma = receive_buffer_dma();
+        let Some(ring) = gem_receive::receive_ring(buffer_dma) else {
+            // The static is `align(64)`, so this is unreachable by
+            // construction — and it is checked rather than asserted, because
+            // an alignment that a future edit breaks must degrade to a
+            // spoken refusal and not to a device writing at a shifted
+            // address with the ownership bit flipped.
+            return gem_receive::ReceiveState::Refused(gem_receive::EnableError::MisalignedRing);
+        };
+        // SAFETY: single core, and this function plus `poll_receive` are the
+        // only writers of `RECEIVE_MEMORY`. The raw pointer avoids taking a
+        // reference to a mutable static.
+        let ring_dma = unsafe {
+            let memory = core::ptr::addr_of_mut!(RECEIVE_MEMORY);
+            (*memory).ring = ring;
+            crate::mmu::clean_dcache_range(memory as usize, core::mem::size_of::<ReceiveMemory>());
+            board::RP1_DMA_RAM_BASE + core::ptr::addr_of!((*memory).ring) as u64
+        };
+        match gem_receive::enable_receive(
+            device,
+            gem::BEACON_SOURCE_MAC,
+            ring_dma,
+            gem_receive::RECEIVE_BUFFER_BYTES,
+        ) {
+            Ok(()) => gem_receive::ReceiveState::Listening,
+            Err(refused) => gem_receive::ReceiveState::Refused(refused),
+        }
+    }
+
+    /// One bounded inbound poll: at most **one** descriptor examined, at most
+    /// one frame admitted, per beat. Returns the new state and how much to add
+    /// to each counter.
+    ///
+    /// The device wrote this memory behind the CPU's caches, so the region is
+    /// cleaned-and-invalidated before the descriptor is read — the mirror of
+    /// `stage_bytes`' clean, in the direction that actually needs it.
+    fn poll_receive<M: Mmio>(
+        device: &M,
+        state: gem_receive::ReceiveState,
+    ) -> (gem_receive::ReceiveState, u32, u32) {
+        if state != gem_receive::ReceiveState::Listening {
+            return (state, 0, 0);
+        }
+        // Status first: an overrun makes whatever is in the buffer suspect,
+        // so it is read before the descriptor rather than after.
+        match gem_receive::read_status(device) {
+            Ok(_) => {}
+            Err(error) => {
+                gem_receive::disable_receive(device);
+                return (gem_receive::ReceiveState::Stopped(error), 0, 0);
+            }
+        }
+        // SAFETY: as `arm_receive`. The read is of memory this core owns and
+        // the device writes; the maintenance below makes the device's stores
+        // visible before either word is read.
+        let (word0, word1, admission) = unsafe {
+            let memory = core::ptr::addr_of_mut!(RECEIVE_MEMORY);
+            crate::mmu::clean_invalidate_dcache_range(
+                memory as usize,
+                core::mem::size_of::<ReceiveMemory>(),
+            );
+            let word0 = core::ptr::read_volatile(core::ptr::addr_of!((*memory).ring[0]));
+            let word1 = core::ptr::read_volatile(core::ptr::addr_of!((*memory).ring[1]));
+            let admission = match gem_receive::classify_descriptor(word0, word1) {
+                gem_receive::DescriptorState::MacOwns => None,
+                gem_receive::DescriptorState::Refused(_) => {
+                    // A descriptor that cannot be a frame is counted as a
+                    // refusal and the buffer is re-armed; it is not an error
+                    // condition, because the device is exactly the thing this
+                    // Feature contracts as compromisable.
+                    Some(gem_receive::Admission::Refused(gem_receive::FrameRefusal::TooShort))
+                }
+                gem_receive::DescriptorState::Frame { length } => {
+                    // `length` is bounded by `classify_descriptor` against
+                    // the region, which is what makes this slice safe — the
+                    // device's own number is never trusted as a length.
+                    // Built from a raw pointer rather than by indexing the
+                    // place expression, so no reference to the mutable
+                    // static is ever created (`dangerous_implicit_autorefs`).
+                    let buffer = core::ptr::addr_of!((*memory).buffer).cast::<u8>();
+                    let frame = core::slice::from_raw_parts(buffer, length);
+                    Some(gem_receive::admit(frame, gem::BEACON_SOURCE_MAC))
+                }
+            };
+            (word0, word1, admission)
+        };
+        let _ = (word0, word1);
+        let Some(admission) = admission else {
+            return (state, 0, 0);
+        };
+        // Re-arm: one descriptor, handed back explicitly. Until this happens
+        // the MAC has nowhere to put a second frame, which is the property
+        // that makes one-poll-per-beat a bound rather than a hope.
+        // SAFETY: as above.
+        unsafe {
+            let memory = core::ptr::addr_of_mut!(RECEIVE_MEMORY);
+            if let Some(ring) = gem_receive::rearm(receive_buffer_dma()) {
+                (*memory).ring = ring;
+            }
+            crate::mmu::clean_dcache_range(memory as usize, core::mem::size_of::<ReceiveMemory>());
+        }
+        match admission {
+            gem_receive::Admission::Accepted => (state, 1, 0),
+            gem_receive::Admission::Refused(_) => (state, 0, 1),
+        }
+    }
+
     /// Bound on the ticks-elapsed busy wait, so a stuck counter converts to
     /// a stop instead of a silent hang (`SEC-20` — no unbounded wait, even
     /// in a park loop).
@@ -1352,7 +1699,7 @@ mod glue {
     /// every channel has stopped, the board is simply parked.
     pub fn announce_and_park(
         uart: &Pl011<VolatileMmio>,
-        splash: Option<crate::hdmi::FramebufferInfo>,
+        splash: crate::hdmi::DisplayOutcome,
         boot_lines: &crate::canvas::BootLines<'_>,
         tick_refused: Option<&[u8]>,
     ) -> ! {
@@ -1401,7 +1748,18 @@ mod glue {
         // `STORY-P1-07-09`: the firmware's canvas — background, title, and
         // the report line as text. UX beside the mailbox splash, never
         // instead of it; the serial line above stays the evidence.
-        let mut console = crate::canvas::SimplefbSurface;
+        //
+        // `LE-98`: the canvas now exists only if the firmware reported a
+        // display. Without one it paints nothing — and SAYS so on the serial
+        // line, because a surface that refuses silently is the half-success
+        // `LE-87` is about and is exactly how the 2026-08-06 run looked
+        // healthy while writing 4 MB to an address nobody had verified.
+        let mut console = crate::canvas::Canvas::permitted_by(&splash);
+        if console.is_dark() {
+            let _ = uart.write_str(
+                "TOS64-CANVAS/1 painting=no reason=firmware-reported-no-display (LE-98)\n",
+            );
+        }
         crate::canvas::draw_frame(&mut console);
         crate::canvas::draw_line(
             &mut console,
@@ -1473,8 +1831,8 @@ mod glue {
         // looked stays watched from the park loop — the wire decides when.
         let mut watch = watch_from(&discovery);
         let mut heartbeating = true;
-        let fb_granted = splash.is_some();
-        let mut animation = splash.map(|info| {
+        let fb_granted = splash.framebuffer.is_some();
+        let mut animation = splash.framebuffer.map(|info| {
             (crate::hdmi::Framebuffer { info }, crate::hdmi::Bounce::new(info.width, info.height))
         });
         // `STORY-P1-09-07`/`-11`: the latch owns the lamp — outcome changes
@@ -1482,11 +1840,25 @@ mod glue {
         let mut lamp = SentenceLatch::new(
             blink_code(&discovery).map(|code| sentence_for(code, blink_detail(&discovery))),
         );
+        // `STORY-P1-09-16`: the inbound channel. Idle until the board is
+        // beaconing; both counters start at zero and are painted from the
+        // first beat, because `accepted=0 refused=0` is a claim and a blank
+        // row is not.
+        let mut receive = gem_receive::ReceiveState::Idle;
+        let mut rx_accepted: u32 = 0;
+        let mut rx_refused: u32 = 0;
+        let (rx_text, rx_len) = receive_line(receive, rx_accepted, rx_refused);
+        crate::canvas::draw_line(
+            &mut console,
+            crate::canvas::RX_Y,
+            &rx_text[..rx_len.saturating_sub(1)],
+            crate::canvas::TEXT,
+        );
         let mut beat_seq: u32 = 1;
         let mut frame_seq: u32 = 1;
         let mut tick: u32 = 0;
         loop {
-            if !wait_millis(100) {
+            if !wait_millis(PARK_TICK_MS) {
                 // A stuck counter stops every periodic channel at once.
                 break;
             }
@@ -1511,7 +1883,7 @@ mod glue {
                     crate::hdmi::heartbeat_color(beaconing),
                 );
             }
-            if tick.is_multiple_of(10) {
+            if tick.is_multiple_of(PARK_BEAT_TICKS) {
                 // TEST-P1-09-08-A clause 3: while discovery reports absence,
                 // one re-probe per second. The gates keep refused passes away
                 // from the window and the GPIO, so the release still runs at
@@ -1673,11 +2045,19 @@ mod glue {
                     }
                 }
                 // `STORY-P1-07-06`: one transcript line per beat rides the
-                // wire behind the beacon, cycling, so a capture of any
-                // dozen-odd seconds holds the whole envelope — the owner's
-                // "diagnosis moves onto the cable" applied to the first
-                // hardware measurement. Same fail-safe as the beacon: one
-                // refusal ends the channel and is spoken.
+                // wire behind the beacon, cycling — the owner's "diagnosis
+                // moves onto the cable" applied to the first hardware
+                // measurement. Same fail-safe as the beacon: one refusal ends
+                // the channel and is spoken.
+                //
+                // **A full cycle is `count` beats, and the beat is 1 Hz, so it
+                // is `count` seconds — 18 at the 14-metric envelope of
+                // 2026-08-06.** Stated as a function of `count` rather than as
+                // the "dozen-odd seconds" this comment used to claim: that was
+                // written when the envelope was shorter, and a capture window
+                // sized from a stale constant is how an operator concludes a
+                // line was never transmitted when it simply had not come round
+                // yet. Size the capture from `line_count`, with margin.
                 #[cfg(feature = "fixture-measure")]
                 if beaconing {
                     if let Some((speed, full_duplex)) = speed_config {
@@ -1697,6 +2077,43 @@ mod glue {
                         }
                     }
                 }
+                // `STORY-P1-09-16`: the board's first inbound poll, and the
+                // one place in this loop that reads bytes it did not write.
+                //
+                // Armed only while the board is beaconing — we listen only on
+                // a wire we are already speaking on, and a beacon that stops
+                // takes the receiver down with it, so an enabled DMA engine
+                // never outlives the channel that justified it. `Stopped` and
+                // `Refused` are terminal: neither is `Idle`, so no later pass
+                // re-arms them.
+                //
+                // Exactly one descriptor per beat. The one-descriptor ring
+                // means the MAC has nowhere to put a second frame until this
+                // poll hands the descriptor back, which is what makes a 1 Hz
+                // poll a bound rather than a hope.
+                if beaconing {
+                    if receive == gem_receive::ReceiveState::Idle {
+                        receive = arm_receive(&gem_window);
+                    }
+                    let (next, accepted, refused) = poll_receive(&gem_window, receive);
+                    receive = next;
+                    rx_accepted = rx_accepted.saturating_add(accepted);
+                    rx_refused = rx_refused.saturating_add(refused);
+                } else if receive == gem_receive::ReceiveState::Listening {
+                    gem_receive::disable_receive(&gem_window);
+                    receive = gem_receive::ReceiveState::Idle;
+                }
+                let (rx_text, rx_len) = receive_line(receive, rx_accepted, rx_refused);
+                crate::canvas::draw_line(
+                    &mut console,
+                    crate::canvas::RX_Y,
+                    &rx_text[..rx_len.saturating_sub(1)],
+                    match receive {
+                        gem_receive::ReceiveState::Stopped(_)
+                        | gem_receive::ReceiveState::Refused(_) => crate::canvas::ALERT,
+                        _ => crate::canvas::TEXT,
+                    },
+                );
                 // `STORY-P1-07-04` clause 1: the ratio evidence accumulates
                 // on screen once a second — unless the tick was refused, in
                 // which case its row stays pinned to the refusal painted

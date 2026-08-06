@@ -11,6 +11,11 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="netboot.tests" />
+    <!-- `power.tests` holds this program's `TransferBeacon` against
+         `tos64-power`'s `TransferGuard`. The two live in separate programs
+         because one is a DHCP/TFTP server and the other is a mains switch, and
+         a format that drifts between them fails OPEN — see LE-95 clause 2. -->
+    <InternalsVisibleTo Include="power.tests" />
   </ItemGroup>
 
 </Project>

@@ -66,6 +66,50 @@ internal static class Live
     [DllImport(Wpcap, CallingConvention = CallingConvention.Cdecl)]
     private static extern void pcap_close(IntPtr handle);
 
+    [DllImport(Wpcap, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int pcap_sendpacket(IntPtr handle, byte[] buf, int size);
+
+    [DllImport(Wpcap, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr pcap_geterr(IntPtr handle);
+
+    /// Transmits `frame` verbatim on `device` — the whole Ethernet frame,
+    /// header included, exactly as given.
+    ///
+    /// The fifth P/Invoke, and the first one that makes this tool a *sender*.
+    /// It exists for `STORY-P1-09-16` criterion 4: the board learned to receive
+    /// on 2026-08-06 and nothing on this bench could speak to it, so its first
+    /// inbound path was host-Green and unwitnessable (`LE-93`).
+    ///
+    /// Verbatim matters. The board's admission filter reads a destination, an
+    /// EtherType and six payload bytes, and the refusal arms of criterion 4 are
+    /// frames that are *deliberately wrong* in exactly one of those. A sender
+    /// that helpfully corrected any of them would make every refusal arm
+    /// untestable — so nothing here validates, defaults or fixes up the bytes.
+    ///
+    /// No elevation is required: Npcap's filter driver is already bound to the
+    /// adapter, and sending is the same handle capturing uses.
+    internal static void Send(string device, byte[] frame)
+    {
+        var errbuf = new byte[ErrbufSize];
+        var handle = pcap_open_live(device, 65536, 1, 100, errbuf);
+        if (handle == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("pcap_open_live: " + Str(errbuf));
+        }
+        try
+        {
+            if (pcap_sendpacket(handle, frame, frame.Length) != 0)
+            {
+                var message = Marshal.PtrToStringAnsi(pcap_geterr(handle)) ?? "(no message)";
+                throw new InvalidOperationException("pcap_sendpacket: " + message);
+            }
+        }
+        finally
+        {
+            pcap_close(handle);
+        }
+    }
+
     internal sealed record Device(string Name, string Description);
 
     internal static List<Device> Devices()

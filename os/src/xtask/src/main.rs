@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 mod assurance;
+mod board_run;
 mod boot_images;
 mod bound_provenance;
 mod citations;
@@ -16,6 +17,7 @@ mod dashboard;
 mod external_isolation;
 mod gate;
 mod governance;
+mod guest_images;
 mod performance_catalogue;
 mod pi5;
 mod probe_pe;
@@ -122,7 +124,7 @@ fn measurable_fixture(name: &str) -> Option<MeasurableTarget> {
 /// file's match arms or grepping `.github/workflows/ci.yml`, which meant an
 /// agent could not enumerate the test harness without reverse-engineering it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Fixture {
+pub struct Fixture {
     /// `--fixture=` value, or `""` for the default no-fixture boot.
     name: &'static str,
     package: &'static str,
@@ -137,7 +139,7 @@ struct Fixture {
 }
 
 /// Every Tier 0 fixture, in roadmap order.
-const FIXTURES: &[Fixture] = &[
+pub const FIXTURES: &[Fixture] = &[
     Fixture {
         name: "",
         package: "kernel",
@@ -515,6 +517,14 @@ const SUBCOMMANDS: &[Subcommand] = &[
         name: "check-boot-images",
         summary: "Build EVERY AArch64 image variant (featureless + each fixture) and clippy them",
     },
+    Subcommand {
+        name: "check-guest-images",
+        summary: "Compile EVERY x86_64 Tier 0 fixture binary — the same hole, the other arch",
+    },
+    Subcommand {
+        name: "board-run",
+        summary: "The whole board evidence loop in one command: verify, serve, POWER-CYCLE, watch, parse",
+    },
     Subcommand { name: "check-crate-sizes", summary: "Enforce the 20,000-LOC crate ceiling" },
     Subcommand { name: "check-image-size", summary: "Enforce the system-image size ceiling" },
     Subcommand {
@@ -809,6 +819,130 @@ fn main() -> ExitCode {
                 }
             }
         }
+        // `LE-95`. Nine stages of the board evidence loop were built and proven
+        // by 2026-08-06 and the tenth was a human hand on a mains plug, so
+        // three consecutive handovers opened with a board item nobody could
+        // take. This composes all ten. The ordering is a value in
+        // `board_run::plan` rather than the shape of this arm, because the
+        // ordering constraints are safety properties on a mains path and a
+        // safety property expressed as control flow is one nobody can test.
+        "board-run" => {
+            let rest: Vec<String> = args.collect();
+            let flag = |prefix: &str| {
+                rest.iter().find_map(|arg| arg.strip_prefix(prefix).map(str::to_string))
+            };
+            let dry_run = rest.iter().any(|arg| arg == "--dry-run");
+
+            let Some(plug_url) = flag("--plug=") else {
+                eprintln!(
+                    "xtask: board-run needs --plug=<http url> naming the LAN-controlled relay"
+                );
+                eprintln!(
+                    "xtask: the plug must be controllable locally with NO vendor cloud account —"
+                );
+                eprintln!(
+                    "xtask: a bench that cannot reboot its board while someone else's service is"
+                );
+                eprintln!(
+                    "xtask: down is a new instrument failure, and this project has had five."
+                );
+                return ExitCode::from(XtaskExit::HarnessError as u8);
+            };
+            let plug = board_run::PlugConfig {
+                url: plug_url,
+                dialect: flag("--dialect=").unwrap_or_else(|| "tasmota".to_string()),
+                entity: flag("--entity="),
+            };
+
+            // `LE-97`, and it is required rather than defaulted for a reason
+            // the plan itself proves: `StartNetboot` runs BEFORE `PowerCycle`,
+            // so the board is off and the bench NIC has no link at the moment
+            // the server starts — discovery cannot work on this path. On
+            // 2026-08-06 the interactive tool fell back to `0.0.0.0` in exactly
+            // that state and only a human reading the printed line stopped a
+            // boot being diagnosed as a board fault. Here there is no human
+            // reading, so there is no fallback to read.
+            let Some(server) = flag("--server=") else {
+                eprintln!(
+                    "xtask: board-run needs --server=<ip>, the bench interface's own address"
+                );
+                eprintln!(
+                    "xtask: it cannot be discovered: this command powers the board itself, so at"
+                );
+                eprintln!(
+                    "xtask: the moment the server starts the far end is unpowered and the NIC has"
+                );
+                eprintln!("xtask: no link. A server that cannot name its own address does not");
+                eprintln!("xtask: serve — it hands out siaddr=0.0.0.0 and the boot fails looking");
+                eprintln!("xtask: exactly like a board fault (LE-97).");
+                return ExitCode::from(XtaskExit::HarnessError as u8);
+            };
+            let server = match board_run::server_address(&server) {
+                Ok(address) => address,
+                Err(message) => {
+                    eprintln!("xtask: board-run: {message}");
+                    eprintln!("xtask: refused BEFORE the plan ran, so no power moved.");
+                    return ExitCode::from(XtaskExit::HarnessError as u8);
+                }
+            };
+
+            let root = PathBuf::from(flag("--root=").unwrap_or_else(|| "target/pi5".to_string()));
+            let run = board_run::BoardRun {
+                image: flag("--image=").map_or_else(|| root.join("kernel8.img"), PathBuf::from),
+                expected_digest: flag("--expect-digest="),
+                mac: flag("--mac=").unwrap_or_else(|| "88:a2:9e:11:4e:cc".to_string()),
+                root,
+                server,
+                off_ms: flag("--off-ms=").and_then(|v| v.parse().ok()).unwrap_or(5000),
+                on_wait: flag("--on-wait=").and_then(|v| v.parse().ok()).unwrap_or(20),
+                until: flag("--until=").unwrap_or_else(|| "beacon".to_string()),
+                timeout: flag("--timeout=").and_then(|v| v.parse().ok()).unwrap_or(120),
+                text: flag("--text=").map(PathBuf::from),
+            };
+
+            let steps = board_run::plan(&run);
+            // Printed before anything moves. An operator standing over a board
+            // is entitled to know what is about to happen to its power BEFORE
+            // it happens, and on a laptop with no relay attached `--dry-run`
+            // is the only way to review this at all.
+            println!("board-run: the plan, in order —");
+            print!("{}", board_run::describe(&steps));
+
+            let repo_root = match os_root().and_then(|root| {
+                root.parent()
+                    .map(Path::to_path_buf)
+                    .ok_or_else(|| "could not resolve repository root".to_string())
+            }) {
+                Ok(root) => root,
+                Err(message) => {
+                    eprintln!("xtask: {message}");
+                    return ExitCode::from(XtaskExit::HarnessError as u8);
+                }
+            };
+
+            match board_run::execute(&repo_root, &steps, &plug, dry_run) {
+                board_run::RunOutcome::Completed => {
+                    println!("board-run: complete, board left ON");
+                    ExitCode::SUCCESS
+                }
+                board_run::RunOutcome::StepFailed(message) => {
+                    eprintln!("xtask: board-run: {message}");
+                    eprintln!("xtask: the board was still left ON.");
+                    ExitCode::FAILURE
+                }
+                // Its own exit code, because "the measurement failed" and "the
+                // bench is dark and needs a hand" call for different actions
+                // and a script must not confuse them.
+                board_run::RunOutcome::BoardMayBeOff => {
+                    eprintln!();
+                    eprintln!(
+                        "xtask: THE BOARD MAY BE OFF AND tos64-power COULD NOT SWITCH IT ON."
+                    );
+                    eprintln!("xtask: the next session needs a hand on the plug.");
+                    ExitCode::from(XtaskExit::BoardSilent as u8)
+                }
+            }
+        }
         "check-crate-sizes" => {
             let ceiling = args
                 .find_map(|a| a.strip_prefix("--ceiling=").map(str::to_string))
@@ -951,6 +1085,25 @@ fn main() -> ExitCode {
             }
             Err(message) => {
                 eprintln!("xtask: boot image check failed: {message}");
+                ExitCode::FAILURE
+            }
+        },
+        // `LE-92`. The sibling of `check-boot-images`, and it exists because
+        // that gate did not generalise itself: nothing local compiled the
+        // x86_64 kernel binary either, so a type error in a Tier 0 fixture
+        // reached CI on `fb3f36c` past a green local gate set. Compilation
+        // only — QEMU is what makes these fixtures CI-side, and the compile is
+        // the part that was missing.
+        "check-guest-images" => match check_guest_images() {
+            Ok(count) => {
+                println!(
+                    "guest-images-check: {count} x86_64 Tier 0 guest binary(ies) compiled — \
+                     every registered fixture, no QEMU"
+                );
+                ExitCode::SUCCESS
+            }
+            Err(message) => {
+                eprintln!("xtask: guest image check failed: {message}");
                 ExitCode::FAILURE
             }
         },
@@ -1386,6 +1539,50 @@ fn check_lints() -> Result<usize, String> {
 /// `-Z build-std` incantation `pi5_run` uses, against the same target spec, so
 /// this gate and the image-production path cannot drift into disagreeing about
 /// what "the AArch64 build" means.
+/// Compiles every registered x86_64 Tier 0 fixture binary (`LE-92`).
+///
+/// The mirror of [`check_boot_images`], one architecture over. It builds and
+/// does not boot: QEMU is what makes these fixtures expensive and CI-side, and
+/// the compile is the half that no local gate performed at all — which is how
+/// `E0308` in `fixture_measure.rs` reached the runner with `cargo test`,
+/// `cargo fmt`, `check-lints` and `check-boot-images` all green.
+fn check_guest_images() -> Result<usize, String> {
+    let os_root = os_root()?;
+    let target_spec = os_root.join("targets").join("x86_64-tinyos.json");
+    let plan = guest_images::build_plan(FIXTURES);
+
+    for build in &plan {
+        println!("guest-images: compiling {} for x86_64-tinyos", build.label);
+        let mut command = Command::new("cargo");
+        command
+            .current_dir(&os_root)
+            .arg("build")
+            .arg("-p")
+            .arg(build.package)
+            .arg("--target")
+            .arg(&target_spec)
+            .arg("-Z")
+            .arg("json-target-spec")
+            .arg("-Z")
+            .arg("build-std=core,compiler_builtins")
+            .arg("-Z")
+            .arg("build-std-features=compiler-builtins-mem");
+        if let Some(feature) = build.feature {
+            command.arg("--features").arg(feature);
+        }
+        let status = command.status().map_err(|e| format!("failed to invoke cargo build: {e}"))?;
+        if !status.success() {
+            return Err(format!(
+                "the {} x86_64 guest does not compile — this is the failure CI would have \
+                 reported, caught locally instead",
+                build.label
+            ));
+        }
+    }
+
+    Ok(plan.len())
+}
+
 fn check_boot_images() -> Result<usize, String> {
     let os_root = os_root()?;
     let target_spec = os_root.join("targets").join("aarch64-tinyos.json");

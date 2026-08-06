@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The second test project for a bench tool, and it exists for a harder
+       reason than the first. `netboot.tests` was written after `LE-87` cost
+       three power cycles. This one is written BEFORE the device it drives has
+       been bought, because the seam it covers is MAINS POWER on the only
+       Raspberry Pi 5 this project owns.
+
+       `LE-95`'s owner path states the fail-safe rules as contract: never leave
+       the board off on any error path, refuse to cycle mid-transfer, bound the
+       off-interval and the on-wait, and report a plug that does not confirm its
+       new state from a readback as UNKNOWN rather than done. Every one of those
+       four is a test in here, and each is a pure function in `tos64-power` for
+       exactly that reason.
+
+       It also references `netboot`. `TransferBeacon` writes the marker and
+       `TransferGuard` reads it, they live in two programs, and a format that
+       drifts between the writer and the reader would silently turn "a transfer
+       is in flight" into "no marker, go ahead" — which on this seam is a power
+       cut mid-image. The mirror test (`TransferGuardTests.The_beacon_netboot_
+       writes_is_the_marker_power_reads`) is the `LE-80` shape applied to a
+       second pair of programs. -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\power\power.csproj" />
+    <ProjectReference Include="..\netboot\netboot.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -28,7 +28,7 @@ park rungs at all.
 2. **Loss is reported as an exact count**, not inferred. A host that saw a gap says how many records it missed.
 3. **The boot and park rungs stamp spoors**, so a run produces a stream rather than a trickle, and `LE-56` can close on a captured kernel spoor rather than an asserted one.
 4. **Every Report on this Feature states what the stream does *not* yet cover.** Until the `dispatch`/`lock`/`wcet`/`actuation` call sites stamp on this path, the stream is boot-and-park behaviour only and must be described as such.
-5. **The receive path stays disabled**, and the Feature's evidence says so. `LE-67` records that with no IOMMU, "receive disabled" *is* the containment story.
+5. **This Feature holds no receive grant**, and its evidence says so. That sentence used to read "the receive path stays disabled" and it was a claim about the *board*; since [`STORY-P1-09-16`](../stories/STORY-P1-09-16.md) it is a claim about *this egress path only*. The image now has a receive path under `FEAT-P1-09`, its frames are counted and discarded, and no byte of one is ever handed to the spoor stream. `LE-67` is re-argued there rather than inherited here.
 
 ## Stories
 
@@ -49,10 +49,16 @@ to work.
 ## What this Feature deliberately does not do
 
 - **It does not enable receive.** Bidirectional exchange is a different risk class and is
-  specified in §7 of the architecture document rather than built here. Reversing
-  `no_path_in_this_module_ever_enables_receive` is a Security Charter change requiring
-  adversarial tests, a bounded command vocabulary, authenticity, and a replacement for the
-  containment argument `LE-67` currently rests on.
+  specified in §7 of the architecture document rather than built here. This paragraph
+  predicted that reversing `no_path_in_this_module_ever_enables_receive` would be a Security
+  Charter change requiring adversarial tests, a bounded command vocabulary, authenticity, and
+  a replacement for the containment argument `LE-67` rests on. `STORY-P1-09-16` took three of
+  those four and **owed the fourth nothing**: it read the charter in full, replaced the
+  containment argument, and enumerated the refusals — but it accepts no commands at all, so
+  there is no vocabulary to bound and no authenticity to establish. A counted frame needs
+  neither. Step 2 of [`hand-2026-08-06/03B`](../../session/hand-2026-08-06/03B-the-arms-are-built-the-board-booted-them-and-nobody-read-the-wire.md)
+  §5 is where both debts fall due, and that Story is where this paragraph's prediction still
+  holds in full.
 - **It does not deploy code over the wire.** Rule 9 of `agent.md` — remote bytes are data,
   never code. The charter-neutral route to ending the card-swap loop is Pi 5 *firmware*
   netboot, which loads an image before TinyOS exists; that is an investigation, not part of
@@ -78,6 +84,9 @@ to work.
   state exists.
 - **Announcement cadence.** `ANNOUNCE_EVERY = 5` is chosen, not measured — the same class of
   debt as ring sizing, and stated for the same reason.
-- **`LE-67`** applies unchanged: one pinned buffer, receive disabled, no device isolation.
-  `STORY-P1-10-04` adds no grant and no second buffer: the announcement rides the transmit
-  path `STORY-P1-10-02` already proved.
+- **`LE-67`** applies, and it moved: the image's grant is now *two* pinned regions, one per
+  direction, and neither aliases the other (`STORY-P1-09-16`). Nothing on **this** Feature's
+  path changed — `STORY-P1-10-04` adds no grant and no second buffer, the announcement rides
+  the transmit path `STORY-P1-10-02` already proved — but a reader who took "one pinned
+  buffer" from this bullet as a statement about the board would now be wrong, which is why
+  the bullet says so instead of staying quietly correct about its own half.

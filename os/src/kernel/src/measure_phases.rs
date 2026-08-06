@@ -341,6 +341,76 @@ pub fn phase_context_switch<S: CycleSource>(
     yields == (WARMUP + SAMPLES) as u64
 }
 
+/// `PERF-D04-G23`'s **spoor-enabled arm** — byte-for-byte
+/// [`phase_context_switch`] with one stamp per round trip.
+///
+/// The `G23` method, second application: see
+/// [`phase_pool_alloc_free_batched_spoored`] for why a ratio gate needs two
+/// arms and why the disabled one is *the committed function itself* rather
+/// than a copy of it. What differs here is only the subject and one caution.
+///
+/// **The caution, because it decides how the ratio may be quoted.** `D04`'s
+/// disabled arm is *unbatched*: `BOARD VERDICT 7` measured this round trip at
+/// 80 cycles p50 against a calibrated source overhead of the same order, which
+/// is `LE-24`'s residue regime. Both arms subtract the same calibration once
+/// per sample, so the **difference** between them is the stamp and is
+/// unaffected — but the **denominator** carries `D04`'s existing residue
+/// caveat, so the percentage is a ratio against a number already recorded as
+/// approximate. That is a limit on the ratio's precision, not on its sign: a
+/// 137-cycle stamp on an 80-cycle round trip is over the 2% allowance by a
+/// margin no plausible residue closes.
+///
+/// **One stamp per round trip is again the deliberate worst case** — it
+/// over-states overhead rather than flattering it, which is the direction a
+/// safety gate should err in.
+#[inline(never)]
+pub fn phase_context_switch_spoored<S: CycleSource>(
+    source: &S,
+    calibration: &Calibration,
+    samples: &mut Samples<SAMPLES>,
+) -> bool {
+    let mut stream: SpoorStream<BOARD_STREAM_CAPACITY> = SpoorStream::new();
+    stream.seed_epoch(0x5EED_0000_0000_0001);
+    // Close the certificate outside the timed region, exactly as the D07 pair
+    // does: the once-per-boot retain path is not what a steady-state ratio
+    // should carry.
+    stream.stamp(Rung::ParkIteration, Outcome::Ok, 0);
+
+    // SAFETY: this fixture is the only code running; `TASK_STACK` is used by
+    // exactly one `Context` for the whole phase and never moves, and
+    // `TASK_CTX`/`MEASURE_CTX` are switched strictly alternately below. The
+    // twin phase's abandoned task is not resumed — `Context::new` resets the
+    // shared stack, which is why re-entering these statics is sound.
+    unsafe {
+        let stack = core::slice::from_raw_parts_mut((&raw mut TASK_STACK).cast::<u8>(), STACK_SIZE);
+        let Ok(task) = Context::new(stack, yield_forever) else {
+            return false;
+        };
+        TASK_CTX = task;
+        YIELDS = 0;
+    }
+
+    for index in 0..(WARMUP + SAMPLES) {
+        let watch = Stopwatch::start(source);
+        // SAFETY: `TASK_CTX` was initialized above and is suspended at its
+        // entry point or its own `switch` call site; `MEASURE_CTX` is this
+        // context's own slot. Exactly `switch`'s documented contract.
+        unsafe { context::switch(&raw mut MEASURE_CTX, &raw mut TASK_CTX) };
+        stream.stamp(Rung::ParkIteration, Outcome::Ok, 0);
+        let cycles = watch.stop(calibration);
+        if index >= WARMUP {
+            samples.record(cycles);
+        }
+    }
+
+    // SAFETY: read after every switch above has returned; single-CPU.
+    let yields = unsafe { YIELDS };
+    // Every switch and every stamp accounted: a disagreement means the arm
+    // measured something other than the twin's workload plus exactly one
+    // stamp per round trip, which would make the ratio meaningless.
+    yields == (WARMUP + SAMPLES) as u64 && stream.next_sequence() == (1 + WARMUP + SAMPLES) as u64
+}
+
 /// D05: ready-queue selection alone — no switch in the timed region.
 #[inline(never)]
 pub fn phase_dispatch_select<S: CycleSource>(
@@ -450,6 +520,85 @@ pub fn phase_dispatch_round<S: CycleSource>(
         }
     }
     ok
+}
+
+/// `PERF-D05-G23`'s **spoor-enabled arm** — byte-for-byte
+/// [`phase_dispatch_round`] with one stamp per dispatch round.
+///
+/// The `G23` method, third application; see
+/// [`phase_pool_alloc_free_batched_spoored`] for the method itself.
+///
+/// **Paired with the round and not with [`phase_dispatch_select`]**, though
+/// both carry `D05`. Two reasons, and they agree. The round is the domain's
+/// *work unit* — selection alone is one step inside it — so a per-round
+/// overhead is the figure `G23`'s "adds <= 2% CPU cycles" is asking about.
+/// And it is the only place in this fixture that resembles a **real** stamp
+/// site: the shipping park loop stamps inside `tinyos_dispatch_round`, which
+/// makes this pair the one whose worst case is a scaled version of something
+/// the OS genuinely does, rather than of something no shipping path contains.
+/// That does not make it a measurement of shipping overhead — the density is
+/// still one stamp per round against a shipping beat of 1 Hz — but it makes
+/// the extrapolation a shorter one.
+#[inline(never)]
+pub fn phase_dispatch_round_spoored<S: CycleSource>(
+    source: &S,
+    calibration: &Calibration,
+    samples: &mut Samples<SAMPLES>,
+) -> bool {
+    let mut stream: SpoorStream<BOARD_STREAM_CAPACITY> = SpoorStream::new();
+    stream.seed_epoch(0x5EED_0000_0000_0001);
+    // Certificate closed outside the timed region — see the D04 arm.
+    stream.stamp(Rung::ParkIteration, Outcome::Ok, 0);
+
+    let mut scheduler: Scheduler<TASKS> = Scheduler::new();
+    let Ok(priority) = Priority::try_new(11) else {
+        return false;
+    };
+    let Ok(task) = scheduler.create_task(
+        priority,
+        WcetBudgetTicks(1_000),
+        OverrunPolicy::TripToSafeState,
+        dispatch_yield_forever,
+    ) else {
+        return false;
+    };
+    if task.index() != 0 {
+        return false;
+    }
+
+    // SAFETY: slot 0 is the only context this phase initializes or switches
+    // into; `DISPATCH_STACK` is a never-moving static owned solely by it and
+    // by its twin, which has finished and whose task is never resumed.
+    unsafe {
+        let stack =
+            core::slice::from_raw_parts_mut((&raw mut DISPATCH_STACK).cast::<u8>(), STACK_SIZE);
+        let Ok(context) = Context::new(stack, dispatch_yield_forever) else {
+            return false;
+        };
+        DISPATCH_CONTEXTS[0] = context;
+    }
+
+    let mut ok = true;
+    for index in 0..(WARMUP + SAMPLES) {
+        let watch = Stopwatch::start(source);
+        // SAFETY: `DISPATCH_CONTEXTS[0]` was initialized above and is
+        // suspended at its entry point or its own `switch` call site;
+        // `DISPATCHER_CTX` is this context's own slot — `run_once`'s
+        // documented contract.
+        let ran = unsafe {
+            dispatch::run_once(&mut scheduler, &raw mut DISPATCHER_CTX, &raw mut DISPATCH_CONTEXTS)
+        };
+        stream.stamp(Rung::ParkIteration, Outcome::Ok, 0);
+        let cycles = watch.stop(calibration);
+        if ran != Some(task) || scheduler.state_of(task) != Some(TaskState::Ready) {
+            ok = false;
+        }
+        if index >= WARMUP {
+            samples.record(cycles);
+        }
+    }
+    // Every round and every stamp accounted — see the D04 arm.
+    ok && stream.next_sequence() == (1 + WARMUP + SAMPLES) as u64
 }
 
 /// Stamps timed per sample of [`phase_spoor_stamp`], divided out — the same
@@ -604,6 +753,38 @@ mod spoor_phase_tests {
         (source, calibration)
     }
 
+    /// This file's own text, read at compile time — the only thing that can
+    /// see what a *timed region* contains, because the behaviour cannot.
+    const SOURCE: &str = include_str!("measure_phases.rs");
+
+    /// The lines between `Stopwatch::start` and `watch.stop` in `function`,
+    /// trimmed, with blanks and comments dropped.
+    ///
+    /// **The timed region specifically**, because that is the only part of
+    /// either arm the measurement can see. Setup outside it — the enabled
+    /// arm's stream, its certificate-closing stamp, its sequence assertion —
+    /// is allowed to differ and must, or there would be nothing to stamp with.
+    fn timed_region_of(function: &str) -> Vec<String> {
+        let body = SOURCE
+            .split_once(&format!("pub fn {function}<S: CycleSource>"))
+            .expect("the phase exists")
+            .1;
+        let region = body
+            .split_once("let watch = Stopwatch::start(source);")
+            .expect("the phase times something")
+            .1;
+        let region = region
+            .split_once("let cycles = watch.stop(calibration);")
+            .expect("the phase stops its watch")
+            .0;
+        region
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with("//"))
+            .map(str::to_string)
+            .collect()
+    }
+
     #[test]
     fn spoor_stamp_phase_fills_the_sample_set_and_reports_ok() {
         let (source, calibration) = harness();
@@ -643,8 +824,46 @@ mod spoor_phase_tests {
         assert_eq!(samples.dropped(), 0);
     }
 
-    /// The claim `PERF-D07-G23`'s ratio rests on: **inside the timed region
-    /// the two arms differ by exactly one stamp, and by nothing else.**
+    #[test]
+    fn the_d04_spoor_enabled_arm_fills_the_sample_set_and_accounts_every_stamp() {
+        let (source, calibration) = harness();
+        let mut samples: Samples<SAMPLES> = Samples::new();
+        assert!(
+            phase_context_switch_spoored(&source, &calibration, &mut samples),
+            "a false return means either a switch went missing or the stamp count disagreed, and \
+             `PERF-D04-G23`'s ratio would be dividing two different workloads"
+        );
+        assert_eq!(samples.len(), SAMPLES);
+        assert_eq!(samples.dropped(), 0);
+    }
+
+    #[test]
+    fn the_d05_spoor_enabled_arm_fills_the_sample_set_and_accounts_every_stamp() {
+        let (source, calibration) = harness();
+        let mut samples: Samples<SAMPLES> = Samples::new();
+        assert!(
+            phase_dispatch_round_spoored(&source, &calibration, &mut samples),
+            "a false return means either a dispatch round did not complete or the stamp count \
+             disagreed, and `PERF-D05-G23`'s ratio would be dividing two different workloads"
+        );
+        assert_eq!(samples.len(), SAMPLES);
+        assert_eq!(samples.dropped(), 0);
+    }
+
+    /// Every `G23` pair in this file, as `(gate, disabled arm, enabled arm)`.
+    ///
+    /// A table rather than three tests because the property is the *method's*,
+    /// not any one pair's: a fourth pair added without a row here is a pair
+    /// nothing holds to the sameness its ratio depends on, and
+    /// [`every_g23_pair_is_covered_by_the_sameness_table`] is what notices.
+    const G23_PAIRS: [(&str, &str, &str); 3] = [
+        ("PERF-D07-G23", "phase_pool_alloc_free_batched", "phase_pool_alloc_free_batched_spoored"),
+        ("PERF-D04-G23", "phase_context_switch", "phase_context_switch_spoored"),
+        ("PERF-D05-G23", "phase_dispatch_round", "phase_dispatch_round_spoored"),
+    ];
+
+    /// The claim every `G23` ratio rests on: **inside the timed region the two
+    /// arms differ by exactly one stamp, and by nothing else.**
     ///
     /// Checked against the source text, because the behaviour cannot show it.
     /// Two arms that had quietly diverged — a different pool capacity, a
@@ -661,49 +880,58 @@ mod spoor_phase_tests {
     /// differ and must, or there would be nothing to stamp with.
     #[test]
     fn the_two_g23_arms_differ_by_exactly_one_stamp_inside_the_timed_region() {
-        const SOURCE: &str = include_str!("measure_phases.rs");
         const STAMP: &str = "stream.stamp(Rung::ParkIteration, Outcome::Ok, 0);";
 
-        fn timed_region_of(function: &str) -> Vec<String> {
-            let body = SOURCE
-                .split_once(&format!("pub fn {function}<S: CycleSource>"))
-                .expect("the phase exists")
-                .1;
-            let region = body
-                .split_once("let watch = Stopwatch::start(source);")
-                .expect("the phase times something")
-                .1;
-            let region = region
-                .split_once("let cycles = watch.stop(calibration);")
-                .expect("the phase stops its watch")
-                .0;
-            region
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty() && !line.starts_with("//"))
-                .map(str::to_string)
-                .collect()
+        for (gate, disabled_arm, enabled_arm) in G23_PAIRS {
+            let disabled = timed_region_of(disabled_arm);
+            let enabled = timed_region_of(enabled_arm);
+
+            assert_eq!(
+                enabled.iter().filter(|line| *line == STAMP).count(),
+                1,
+                "{gate}: the enabled arm `{enabled_arm}` must carry exactly one stamp in its \
+                 timed region"
+            );
+            assert!(
+                !disabled.contains(&STAMP.to_string()),
+                "{gate}: the disabled arm `{disabled_arm}` must carry none"
+            );
+            let enabled_without_stamp: Vec<&String> =
+                enabled.iter().filter(|line| *line != STAMP).collect();
+            let disabled_lines: Vec<&String> = disabled.iter().collect();
+            assert_eq!(
+                disabled_lines, enabled_without_stamp,
+                "{gate}: the arms have diverged inside the timed region by something other than \
+                 the spoor stamp, so any percentage computed from them is not spoor overhead"
+            );
         }
+    }
 
-        let disabled = timed_region_of("phase_pool_alloc_free_batched");
-        let enabled = timed_region_of("phase_pool_alloc_free_batched_spoored");
-
-        assert_eq!(
-            enabled.iter().filter(|line| *line == STAMP).count(),
-            1,
-            "the enabled arm's timed region must carry exactly one stamp"
-        );
-        assert!(
-            !disabled.contains(&STAMP.to_string()),
-            "the disabled arm's timed region must carry none"
-        );
-        let enabled_without_stamp: Vec<&String> =
-            enabled.iter().filter(|line| *line != STAMP).collect();
-        let disabled_lines: Vec<&String> = disabled.iter().collect();
-        assert_eq!(
-            disabled_lines, enabled_without_stamp,
-            "the G23 arms have diverged inside the timed region by something other than the \
-             spoor stamp, so any percentage computed from them is not spoor overhead"
-        );
+    /// The table cannot silently fall behind the file: **every phase whose
+    /// name ends `_spoored` is an enabled arm and must appear in
+    /// [`G23_PAIRS`]**.
+    ///
+    /// Without this, the previous test passes vacuously for a pair nobody
+    /// added a row for — which is exactly the failure mode of a checklist kept
+    /// beside the thing it checks rather than derived from it (`LE-89`).
+    #[test]
+    fn every_g23_pair_is_covered_by_the_sameness_table() {
+        let declared: Vec<&str> = G23_PAIRS.iter().map(|(_, _, enabled)| *enabled).collect();
+        for line in SOURCE.lines() {
+            let Some(rest) = line.trim().strip_prefix("pub fn ") else {
+                continue;
+            };
+            let Some((name, _)) = rest.split_once('<') else {
+                continue;
+            };
+            if !name.ends_with("_spoored") {
+                continue;
+            }
+            assert!(
+                declared.contains(&name),
+                "`{name}` is a spoor-enabled arm with no row in G23_PAIRS, so nothing holds it \
+                 to differing from its disabled twin by exactly one stamp"
+            );
+        }
     }
 }

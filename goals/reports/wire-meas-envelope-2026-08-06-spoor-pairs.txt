@@ -1,0 +1,16 @@
+TOS64-MEAS/2 BEGIN tier=T1 arch=aarch64 platform=rpi5-bcm2712 qualification=none cycle_source=pmccntr_el0 overhead_cycles=43 cycles_per_us=2400
+TOS64-MEAS/2 METRIC domain=REF metric=fixed_integer_loop n=1000 dropped=0 warmup=100 min=2883 p50=2933 p99=2998 p99_9=3007 max=3915 unit=cycles
+TOS64-MEAS/2 METRIC domain=D07 metric=pool_u64x64_alloc_free_round_trip n=1000 dropped=0 warmup=100 min=373 p50=375 p99=375 p99_9=375 max=377 unit=cycles
+TOS64-MEAS/2 METRIC domain=D07 metric=pool_u64x4_alloc_denied_exhausted_per_op_of_64 n=1000 dropped=0 warmup=100 min=484 p50=486 p99=489 p99_9=489 max=489 unit=cycles
+TOS64-MEAS/2 METRIC domain=D04 metric=context_switch_yield_roundtrip_2switches n=1000 dropped=0 warmup=100 min=82 p50=82 p99=82 p99_9=82 max=83 unit=cycles
+TOS64-MEAS/2 METRIC domain=D05 metric=dispatch_select_highest_priority_ready n=1000 dropped=0 warmup=100 min=1524 p50=1524 p99=1524 p99_9=1524 max=1524 unit=cycles
+TOS64-MEAS/2 METRIC domain=D05 metric=dispatch_run_once_cooperative_round n=1000 dropped=0 warmup=100 min=1645 p50=1650 p99=1650 p99_9=1650 max=1651 unit=cycles
+TOS64-MEAS/2 METRIC domain=D02 metric=fault_brk_capture_escape_kernel_context n=1000 dropped=0 warmup=100 min=108 p50=108 p99=108 p99_9=108 max=108 unit=cycles
+TOS64-MEAS/2 METRIC domain=D07 metric=pool_u64x64_alloc_free_round_trip_per_op_of_8 n=1000 dropped=0 warmup=100 min=474 p50=475 p99=475 p99_9=475 max=476 unit=cycles
+TOS64-MEAS/2 METRIC domain=D11 metric=spoor_stamp_park_rung_per_op_of_8 n=1000 dropped=0 warmup=100 min=130 p50=136 p99=141 p99_9=142 max=143 unit=cycles
+TOS64-MEAS/2 METRIC domain=D11 metric=spoor_drain_full_ring_frame_of_181 n=1000 dropped=0 warmup=100 min=121212 p50=121466 p99=121483 p99_9=121779 max=121840 unit=cycles
+TOS64-MEAS/2 METRIC domain=D11 metric=spoor_announce_certificate_frame_of_3 n=1000 dropped=0 warmup=100 min=3068 p50=3084 p99=3084 p99_9=3097 max=3111 unit=cycles
+TOS64-MEAS/2 METRIC domain=D07 metric=pool_u64x64_alloc_free_round_trip_per_op_of_8_spoored n=1000 dropped=0 warmup=100 min=591 p50=592 p99=592 p99_9=592 max=592 unit=cycles
+TOS64-MEAS/2 METRIC domain=D04 metric=context_switch_yield_roundtrip_2switches_spoored n=1000 dropped=0 warmup=100 min=171 p50=183 p99=192 p99_9=199 max=210 unit=cycles
+TOS64-MEAS/2 METRIC domain=D05 metric=dispatch_run_once_cooperative_round_spoored n=1000 dropped=0 warmup=100 min=1750 p50=1756 p99=1760 p99_9=1776 max=1777 unit=cycles
+TOS64-MEAS/2 END metrics=14

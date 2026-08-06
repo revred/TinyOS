@@ -37,7 +37,8 @@
 use crate::context::{self, Context};
 use crate::measure::{Calibration, Environment, Metric, Report, Samples};
 use crate::measure_phases::{
-    phase_context_switch, phase_dispatch_round, phase_dispatch_select, phase_pool_alloc_free,
+    phase_context_switch, phase_context_switch_spoored, phase_dispatch_round,
+    phase_dispatch_round_spoored, phase_dispatch_select, phase_pool_alloc_free,
     phase_pool_alloc_free_batched, phase_pool_alloc_free_batched_spoored, phase_pool_denial,
     phase_reference_loop, phase_spoor_announce, phase_spoor_drain, phase_spoor_stamp,
     CALIBRATION_SAMPLES, CONFORMANCE_SAMPLES, SAMPLES, STACK_SIZE, WARMUP,
@@ -172,7 +173,7 @@ impl Write for BoardSink {
     }
 }
 
-const METRICS: usize = 12;
+const METRICS: usize = 14;
 
 struct Measured {
     domain: &'static str,
@@ -366,6 +367,28 @@ fn measure_run() -> bool {
         "pool_u64x64_alloc_free_round_trip_per_op_of_8_spoored",
         samples,
     );
+
+    // `PERF-D04-G23` and `PERF-D05-G23`, the same paired-arm method applied to
+    // the two domains that already have a committed disabled arm in this run.
+    // Slot 3 is D04's disabled arm and slot 5 is D05's; these are those two
+    // functions with one stamp inside the timed region and nothing else
+    // changed, which `kernel::measure_phases`' source-level test holds them to
+    // for all three pairs at once.
+    //
+    // Same run as their twins, for `G23`'s reason above: ~3% build-to-build
+    // movement against a 2% allowance means two boots cannot answer a ratio.
+    ok &= phase_context_switch_spoored(&source, &calibration, samples);
+    ok &= collect(
+        &mut collected,
+        12,
+        "D04",
+        "context_switch_yield_roundtrip_2switches_spoored",
+        samples,
+    );
+
+    ok &= phase_dispatch_round_spoored(&source, &calibration, samples);
+    ok &=
+        collect(&mut collected, 13, "D05", "dispatch_run_once_cooperative_round_spoored", samples);
 
     let environment = Environment {
         tier: "T1",

@@ -5,8 +5,19 @@
 //! `STORY-P1-09-03` (beacon) — `TEST-P1-09-0{1,2,3}-A`. The discipline
 //! throughout is the one `FEAT-P1-09` contracts: the device is a compromisable
 //! C2 subject, so every readback is validated before belief, every poll is a
-//! bounded countdown, receive is never enabled, and the only DMA grant is the
-//! single pinned beacon buffer.
+//! bounded countdown, **no path in this module ever enables receive**, and this
+//! module's only DMA grant is the single pinned beacon buffer.
+//!
+//! Those last two claims are now scoped to *this module* rather than to the
+//! board, and the scoping is deliberate. `STORY-P1-09-16` gave the image an
+//! inbound path in [`crate::gem_receive`] — a second pinned region, a ring of
+//! one wrapped descriptor, a hardware address filter and a MAC-enforced size
+//! bound. Keeping it in a separate module is what keeps
+//! [`tests::no_path_in_this_module_ever_enables_receive`] a checkable claim
+//! instead of a sentence that quietly stopped being true: the transmit path
+//! still does not enable receive, its double still fires on any `NCR` write
+//! carrying the bit, and a reader who wants the board-level statement is sent
+//! one module over rather than left with a stale one here.
 //!
 //! Everything in this file is pure over the [`crate::pl011::Mmio`] seam and
 //! host-tested; the aarch64 glue (real addresses, the pinned buffer, the

@@ -170,6 +170,11 @@ pub const PMU_Y: u32 = 296;
 /// The live `TOS64-TICK/1` line (`STORY-P1-07-04` clause 1) — repainted
 /// every second, the ratio evidence accumulating on screen.
 pub const TICK_Y: u32 = 336;
+/// The live `TOS64-RX/1` row (`STORY-P1-09-16`) — the board's first inbound
+/// channel, repainted every beat. It sits between the tick row and the
+/// transcript because it is *live* evidence like the tick, not painted-once
+/// evidence like the boot lines above it.
+pub const RX_Y: u32 = 372;
 /// First row of the measurement transcript (`STORY-P1-07-06`) — the
 /// `TOS64-MEAS/2` envelope at 1× scale (a `METRIC` line is ~130 columns,
 /// which the 2× body scale cannot fit), one line per [`TRANSCRIPT_STEP_Y`].
@@ -335,7 +340,11 @@ mod tests {
             // The title never collides with the report line.
             assert!(TITLE_Y + GLYPH_SIZE * TITLE_SCALE <= REPORT_Y);
             assert!(TICK_Y + GLYPH_SIZE * BODY_SCALE < board::SIMPLEFB_HEIGHT);
-            assert!(TICK_Y + GLYPH_SIZE * BODY_SCALE <= TRANSCRIPT_Y);
+            // `STORY-P1-09-16`'s inbound row sits between the tick and the
+            // transcript, and collides with neither.
+            assert!(TICK_Y + GLYPH_SIZE * BODY_SCALE <= RX_Y);
+            assert!(RX_Y + GLYPH_SIZE * BODY_SCALE < board::SIMPLEFB_HEIGHT);
+            assert!(RX_Y + GLYPH_SIZE * BODY_SCALE <= TRANSCRIPT_Y);
             // Every transcript row fits the canvas, at full occupancy.
             assert!(
                 TRANSCRIPT_Y
@@ -354,8 +363,116 @@ mod tests {
 /// The board-side surface: volatile 16-bit stores into the firmware's
 /// buffer at the pinned address. Same arithmetic as [`SliceSurface`],
 /// which is where it is tested.
+///
+/// # It cannot be constructed without evidence (`LE-98`)
+///
+/// There is no `SimplefbSurface` value that paints unconditionally any more.
+/// [`SimplefbSurface::permitted_by`] is the only constructor, it takes the
+/// firmware's own answer about the display, and it returns `None` when the
+/// firmware could not report one — so a boot with no display cannot reach the
+/// `write_volatile` below at all.
+///
+/// That matters beyond cosmetics: `SIMPLEFB_BASE` is a constant captured from
+/// a Raspberry Pi OS boot with no device-tree parser behind it (`BND-03`), and
+/// on 2026-08-06 the park loop wrote 4 MB there for a whole run on a board
+/// whose firmware had brought up no display. On a machine with no IOMMU an
+/// unjustified write to a fixed physical address is a safety question, and
+/// safety precedes correctness in this project's ordering.
+///
+/// **The refusal is not silent.** The type is `Option`, so every call site has
+/// to say what it does without one, and both of them report it.
 #[cfg(target_arch = "aarch64")]
-pub struct SimplefbSurface;
+pub struct SimplefbSurface {
+    /// Private and unit-like: existence *is* the permission.
+    _evidence: (),
+}
+
+#[cfg(target_arch = "aarch64")]
+impl SimplefbSurface {
+    /// The only way to get one. `None` when the firmware reported no display.
+    ///
+    /// Deliberately takes the whole [`crate::hdmi::DisplayOutcome`] rather than
+    /// a bare `bool`: a `bool` at a call site is a decision someone can make
+    /// wrongly there, and this decision has one right answer that lives in
+    /// `hdmi::canvas_permitted` with its own tests.
+    #[must_use]
+    pub fn permitted_by(outcome: &crate::hdmi::DisplayOutcome) -> Option<Self> {
+        crate::hdmi::canvas_permitted(outcome).then_some(Self { _evidence: () })
+    }
+}
+
+/// The canvas as the park loop and the fault reporter hold it: a surface that
+/// may not exist (`LE-98`).
+///
+/// A newtype rather than an `Option` threaded through fourteen call sites,
+/// because the alternative is fourteen places that each decide what to do
+/// without a display and one of them eventually decides wrong. Absent, it
+/// reports width and height **zero**, so every drawing routine's existing
+/// bounds arithmetic writes nothing — the refusal reuses the guard that is
+/// already proven rather than adding a second one beside it.
+///
+/// It is not silent: [`Canvas::is_dark`] exists so the call site can say so,
+/// and both call sites do. A surface that refuses and reports nothing is
+/// `LE-87`'s shape, which is what `LE-98` was raised about in the first place.
+#[cfg(target_arch = "aarch64")]
+pub struct Canvas(Option<SimplefbSurface>);
+
+#[cfg(target_arch = "aarch64")]
+impl Canvas {
+    /// The canvas the firmware's answer permits, painting or not.
+    #[must_use]
+    pub fn permitted_by(outcome: &crate::hdmi::DisplayOutcome) -> Self {
+        Self(SimplefbSurface::permitted_by(outcome))
+    }
+
+    /// Whether this canvas will paint nothing, so the caller can report it.
+    #[must_use]
+    pub const fn is_dark(&self) -> bool {
+        self.0.is_none()
+    }
+
+    /// The fault reporter's canvas: painted **without** display evidence, on
+    /// purpose (`LE-98` against `LE-47`).
+    ///
+    /// The only caller is [`crate::fault`], and the exception is named here
+    /// rather than left as an unexamined default, which is the whole
+    /// difference `LE-98` is about. The argument for it:
+    ///
+    /// - **Serial has never produced a byte on this bench** (`LE-47`), so the
+    ///   canvas is the only channel a fault report has. A fault that paints
+    ///   nothing and cannot speak is a board that hangs with no symptom, which
+    ///   is worse than the write this refuses.
+    /// - The fault path may run **before** the splash, so no display verdict
+    ///   exists to consult — unlike the park loop, which always has one.
+    /// - The board is already in a synchronous-fault path whose next act is
+    ///   `park()`. There is no run to protect from the write.
+    ///
+    /// It is still bounded by the same pinned geometry as every other write
+    /// here. What it is not is *justified* — it is a deliberate trade of one
+    /// hazard against a worse one, and it is the part of `LE-98` that a
+    /// device-tree parser would remove rather than argue.
+    #[must_use]
+    pub fn last_resort_for_fault_report() -> Self {
+        Self(Some(SimplefbSurface { _evidence: () }))
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+impl Surface for Canvas {
+    fn width(&self) -> u32 {
+        self.0.as_ref().map_or(0, Surface::width)
+    }
+
+    fn height(&self) -> u32 {
+        self.0.as_ref().map_or(0, Surface::height)
+    }
+
+    fn put(&mut self, x: u32, y: u32, color: u32) {
+        if let Some(surface) = self.0.as_mut() {
+            surface.put(x, y, color);
+        }
+    }
+}
 
 #[cfg(target_arch = "aarch64")]
 impl Surface for SimplefbSurface {

@@ -78,10 +78,86 @@ internal static class Program
 
     private static int Main(string[] args)
     {
+        // `LE-90`, first statement and nowhere else. Redirected stdout in .NET
+        // is buffered at 4 KiB and flushed on exit, and a `--live 300` capture
+        // does not exit for five minutes — so an operator tailing this tool's
+        // log in another window would see the banner and then nothing, while
+        // the board booted and beaconed through the silence. Found in
+        // tos64-netboot on 2026-08-06; the same defect was latent in every
+        // other tool under work/tools/ and this is that audit's fix here.
+        Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
+        Console.SetError(new StreamWriter(Console.OpenStandardError()) { AutoFlush = true });
+
         if (args.Length == 0 || args[0] is "-h" or "--help")
         {
             Usage();
             return args.Length == 0 ? 2 : 0;
+        }
+
+        // `--send` is handled before the capture argument walk: it is the one
+        // mode that transmits, it shares no state with the decoders, and a
+        // sender that could be silently combined with `--live` would make the
+        // operator guess which of the two a run was doing.
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "--send-frames" && i + 1 < args.Length)
+            {
+                Send.Emit(args[i + 1]);
+                return 0;
+            }
+            if (args[i] != "--send") continue;
+            if (i + 1 >= args.Length)
+            {
+                Send.Describe();
+                return 2;
+            }
+            var armName = args[++i];
+            var arm = Send.Find(armName);
+            if (arm is null)
+            {
+                Console.Error.WriteLine($"ti64dink: --send does not know the arm `{armName}`");
+                Console.Error.WriteLine();
+                Send.Describe();
+                return 2;
+            }
+            string? sendDevice = null;
+            var repeat = 1;
+            for (var j = 0; j < args.Length; j++)
+            {
+                if (args[j] == "--dev" && j + 1 < args.Length) sendDevice = args[j + 1];
+                if (args[j] == "--count" && j + 1 < args.Length
+                    && int.TryParse(args[j + 1], out var n) && n > 0)
+                {
+                    repeat = n;
+                }
+            }
+            var chosenSender = sendDevice ?? PickEthernet();
+            if (chosenSender is null)
+            {
+                Console.Error.WriteLine("ti64dink: no capture device found; try --list");
+                return 2;
+            }
+            var frame = Send.Frame(arm);
+            Console.WriteLine($"ti64dink: --send {arm.Name} on {chosenSender}");
+            Console.WriteLine($"    sends  : {arm.What}");
+            Console.WriteLine($"    expect : {arm.Expect}");
+            Console.WriteLine($"    frame  : {frame.Length} octets, {Convert.ToHexString(frame)}");
+            try
+            {
+                for (var k = 0; k < repeat; k++) Live.Send(chosenSender, frame);
+            }
+            catch (InvalidOperationException e)
+            {
+                // Never reported as a send: a frame that did not leave the
+                // adapter and an unchanged canvas would read as the board
+                // refusing something it never received.
+                Console.Error.WriteLine($"ti64dink: send failed, NOTHING was transmitted: {e.Message}");
+                return 1;
+            }
+            Console.WriteLine($"    sent   : {repeat} frame(s)");
+            Console.WriteLine();
+            Console.WriteLine("Now read the board's canvas TOS64-RX/1 row against `expect` above.");
+            return 0;
         }
 
         string? path = null;
@@ -568,6 +644,14 @@ internal static class Program
         Console.WriteLine("      epoch-change        a reboot (the boot epoch changed)");
         Console.WriteLine("      rung=<Name>         a fresh record with that rung (e.g. rung=ThermalSample)");
         Console.WriteLine("      text=<substring>    a TOS64 text line containing <substring>");
+        Console.WriteLine();
+        Console.WriteLine("  ti64dink --send <arm> [--dev X] [--count N]   TRANSMIT one raw frame at the");
+        Console.WriteLine("                                                board (STORY-P1-09-16 crit. 4)");
+        Console.WriteLine("  ti64dink --send                               list the arms and what each");
+        Console.WriteLine("                                                should do to the canvas RX row");
+        Console.WriteLine("      ping | unicast     the board must ACCEPT  (accepted +1)");
+        Console.WriteLine("      ethertype | prefix the board must REFUSE  (refused +1)");
+        Console.WriteLine("      notforus           the hardware filter must drop it (NEITHER moves)");
         Console.WriteLine();
         Console.WriteLine("Capture on Windows (elevated, until Npcap is installed):");
         Console.WriteLine("  pktmon filter remove");

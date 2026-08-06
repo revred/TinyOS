@@ -43,12 +43,15 @@ cargo run -p xtask -- help                     # every subcommand
 cargo run -p xtask -- list-fixtures            # every QEMU fixture and its owning TEST-*
 cargo run -p xtask -- check-assurance-spine    # contracts, loose ends, status headers
 cargo run -p xtask -- check-boot-images        # every AArch64 image variant + clippy (LE-72)
+cargo run -p xtask -- check-guest-images       # every x86_64 Tier 0 fixture, compile only (LE-92)
 ```
 
 `check-boot-images` is not optional before pushing a change to `kernel`, `hal-arm64` or
 `pi5-image`: nothing else you run locally — not `cargo test`, not `fmt`, not host clippy —
 compiles those crates for the board, and three pushes have already gone out green locally
-and red on the runner because of it.
+and red on the runner because of it. **`check-guest-images` is its sibling and running one
+is not running the other** — the same hole existed for x86_64 and let an `E0308` in a Tier 0
+fixture reach CI on 2026-08-06 with every other gate green (`LE-92`).
 
 Open defects live in [`goals/assurance/loose-ends.tsv`](goals/assurance/loose-ends.tsv)
 (`LE-*`), not in prose. Story and Feature status lives in the `Status:` header of each

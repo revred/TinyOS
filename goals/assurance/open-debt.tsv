@@ -36,3 +36,4 @@ STORY-P1-08-01	D21	design	CAN USB and field I O does not exist: no EtherCAT stac
 STORY-P1-08-02	D21	design	CAN USB and field I O does not exist: no EtherCAT stack NIC driver or field transport is built so no field-I/O guardrail can be closed; typed feedback ownership is data-plane contract work for that domain	2026-07-30
 STORY-P1-09-03	D20	design	The TCP IP data path domain has no stack behind it; a single raw broadcast beacon is its first fragment and none of the 25 guardrails can close before the stack exists	2026-08-03
 STORY-P1-07-10	D02	unbuilt	Interrupt entry and exit is unbuilt as a measured path; this Story fixes the scope of interrupt masking around the measurement region and instruments no entry cost	2026-08-04
+STORY-P1-09-16	D20	design	The TCP IP data path domain has no stack behind it; one counted inbound frame is its second fragment beside the beacon and none of the 25 guardrails can close before the stack exists	2026-08-06

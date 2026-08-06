@@ -88,11 +88,57 @@ internal static class Program
         }
 
         _clientMac = ParseMac(mac);
-        _serverIp = server is not null ? IPAddress.Parse(server) : GuessLinkLocalAddress();
+
+        // `LE-97`: A SERVER THAT CANNOT NAME ITS OWN ADDRESS DOES NOT START.
+        //
+        // This used to fall back to `IPAddress.Any`, and on 2026-08-06 it did:
+        // the bench NIC is `Disconnected` until the board powers, so discovery
+        // found nothing, `0.0.0.0` went into the DHCP OFFER, and the board would
+        // have been handed `siaddr=0.0.0.0`, failed to fetch, and looked like a
+        // board fault. It printed `0.0.0.0` in the same confident column it
+        // prints a real address, and only a human reading that line stood
+        // between it and a wasted power cycle diagnosed as hardware.
+        //
+        // Printing the value it chose is not the same as refusing a value it
+        // cannot justify — which is why the fix is a refusal and not a better
+        // guess. Ambiguity is refused too: this host holds four link-local
+        // addresses and first-one-wins fails the same way with a PLAUSIBLE
+        // address in the log, which is strictly harder to catch.
+        var host = ServerAddress.EnumerateHost();
+        var choice = ServerAddress.Choose(
+            server,
+            ServerAddress.LinkLocalCandidates(host),
+            ServerAddress.KnownHostAddresses(host));
+        if (!choice.CanServe)
+        {
+            Console.Error.WriteLine("tos64-netboot: REFUSING TO START — cannot name my own address.");
+            Console.Error.WriteLine($"  {choice.Explain()}");
+            foreach (var candidate in choice.Candidates)
+            {
+                Console.Error.WriteLine($"    candidate: {candidate}");
+            }
+            return 4;
+        }
+        _serverIp = choice.Address!;
 
         Console.WriteLine("tos64-netboot — Pi 5 firmware netboot, charter-neutral by construction");
         Console.WriteLine($"  answering ONLY   : {mac}");
         Console.WriteLine($"  server address   : {_serverIp}");
+        // Printed on EVERY path, refusal or not: the tool saying which of the
+        // six decisions it made is the difference between a line an operator
+        // can check and a line they can only read.
+        Console.WriteLine($"    {choice.Explain()}");
+        if (choice.IsWarning)
+        {
+            // Loud, and on stderr, because this is the last way LE-97 can still
+            // happen: syntax was checked and existence was not.
+            Console.Error.WriteLine();
+            Console.Error.WriteLine("  !! WARNING — the named address is not one this host appears to hold.");
+            Console.Error.WriteLine($"  !! {choice.Explain()}");
+            Console.Error.WriteLine("  !! Serving anyway: refusing here would refuse the case where the");
+            Console.Error.WriteLine("  !! board is not powered yet, which is the case that has to work.");
+            Console.Error.WriteLine();
+        }
         Console.WriteLine($"  offering client  : {_offeredIp}");
         Console.WriteLine($"  tftp root        : {(_logOnly ? "(log-only: no file will be served)" : Path.GetFullPath(_root))}");
         Console.WriteLine();
@@ -186,25 +232,10 @@ internal static class Program
         return parts.Select(p => Convert.ToByte(p, 16)).ToArray();
     }
 
-    /// The laptop's own address on the bench link.
-    ///
-    /// Link-local (169.254/16) by preference, because that is what a
-    /// point-to-point cable with no DHCP server produces on both ends, and it
-    /// is what the Pi is already using.
-    private static IPAddress GuessLinkLocalAddress()
-    {
-        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
-        {
-            if (nic.OperationalStatus != OperationalStatus.Up) continue;
-            foreach (var a in nic.GetIPProperties().UnicastAddresses)
-            {
-                if (a.Address.AddressFamily != AddressFamily.InterNetwork) continue;
-                var b = a.Address.GetAddressBytes();
-                if (b[0] == 169 && b[1] == 254) return a.Address;
-            }
-        }
-        return IPAddress.Any;
-    }
+    // The laptop's own address on the bench link is decided by
+    // `ServerAddress.Choose`, which is pure and tested. `GuessLinkLocalAddress`
+    // lived here and returned the FIRST match with `IPAddress.Any` as its
+    // fallback; both halves of that were defects (`LE-97`).
 
     // ---- DHCP -------------------------------------------------------------
 
@@ -242,19 +273,14 @@ internal static class Program
 
             if (messageType is not (1 or 3)) continue;          // DISCOVER, REQUEST
 
-            // The board's link comes up when the board does, so an address
-            // guessed at startup is an address guessed while the bench NIC was
-            // still down. Re-guess here, where the DISCOVER proves the link is
-            // live: 2026-08-05 the tool printed `server address : 0.0.0.0`,
-            // offered siaddr 0.0.0.0, and the broadcast had no route.
-            if (_serverIp.Equals(IPAddress.Any))
-            {
-                _serverIp = GuessLinkLocalAddress();
-                if (!_serverIp.Equals(IPAddress.Any))
-                {
-                    Console.WriteLine($"  server address resolved on link-up: {_serverIp}");
-                }
-            }
+            // The deferred re-guess that used to live here is GONE (`LE-97`).
+            // It existed because startup could produce `IPAddress.Any` and this
+            // is the first moment the link is provably live — but it was a
+            // second mechanism for the same decision, and the one that fired
+            // late could still pick the wrong one of four link-local addresses.
+            // `Main` now refuses to start without a single justified address, so
+            // `_serverIp` is never the wildcard by the time a DISCOVER arrives
+            // and there is exactly one place that decides it.
 
             var reply = BuildReply(buffer, messageType == 1 ? (byte)2 : (byte)5);
 
@@ -467,7 +493,19 @@ internal static class Program
             // to be comparable against what was built without a power cycle to
             // find out (LE-87).
             Console.WriteLine(TransferLog.Served(path, bytes));
-            Serve(socket, from, bytes);
+            // The marker that stops `tos64-power` cutting mains mid-image
+            // (`LE-95` clause 2). Cleared in a `finally`, because a marker left
+            // behind by a crash would block every later power cycle — the guard
+            // reads an old one as `Stale` and proceeds, but only because THIS
+            // side promises to clear it on the ordinary path.
+            try
+            {
+                Serve(socket, from, bytes, name);
+            }
+            finally
+            {
+                TransferBeacon.Clear(_root);
+            }
         }
     }
 
@@ -475,12 +513,18 @@ internal static class Program
     /// so a client that stops answering ends the transfer instead of pinning a
     /// thread forever — fail-safe over keep-trying, the same rule the board
     /// holds itself to.
-    private static void Serve(Socket socket, EndPoint client, byte[] data)
+    private static void Serve(Socket socket, EndPoint client, byte[] data, string name)
     {
         const int Block = 512;
         var total = (data.Length / Block) + 1;
         for (var index = 1; index <= total; index++)
         {
+            // Refreshed per block rather than stamped once at the start: the
+            // marker has to say "still progressing", not "began", or a slow
+            // transfer reads as stale after ten seconds and `tos64-power`
+            // cycles mains straight through the middle of it.
+            TransferBeacon.Mark(_root, name);
+
             var offset = (index - 1) * Block;
             var size = Math.Min(Block, data.Length - offset);
             var packet = new byte[4 + size];

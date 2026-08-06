@@ -62,6 +62,22 @@ const BOARD_PRIORITY: u8 = 11;
 /// rather than bypassed.
 const BOARD_BUDGET_TICKS: u32 = 1_000;
 
+/// Spoor stamps one call to [`tinyos_dispatch_round`] emits — **exactly one,
+/// on every path**, and `LE-99` is why that is a named constant.
+///
+/// `PERF-D05-G23` measured one stamp at +110 cycles p99 on a 1650-cycle
+/// dispatch round: +6.7% against a 2% allowance, a fail by 3.3x. Unlike
+/// `PERF-D07-G23`, whose 26% has no denominator in shipping code, **this ratio
+/// describes the shipping round** — the fixture arm and this function stamp at
+/// the same density, on schedulers built the same way. What keeps it harmless
+/// is `hal_arm64::ethernet::PARK_BEAT_MS`: one round per second, so the gate's
+/// CPU-cycles clause passes by roughly seven orders of magnitude.
+///
+/// A second stamp here doubles the rate that argument rests on, silently and
+/// with no symptom on the wire. The source-level test below is what makes it
+/// loud instead.
+pub const STAMPS_PER_DISPATCH_ROUND: u32 = 1;
+
 /// Returned by [`tinyos_dispatch_round`] when no task was dispatched.
 ///
 /// `u16::MAX` rather than zero, because zero is a legitimate task index and a
@@ -266,6 +282,94 @@ mod tests {
             scheduler.highest_priority_ready(),
             Some(task),
             "the one task is the one a round would pick"
+        );
+    }
+
+    /// `LE-99`'s kernel half: **one stamp per round, on every path.**
+    ///
+    /// Source-level, because it cannot be behavioural — `tinyos_dispatch_round`
+    /// drives a real context switch through statics, so a host cannot call it
+    /// and count. Same mechanism `kernel::measure_phases` uses on its timed
+    /// regions, and the same reason: the property is about what the code
+    /// contains, which only the text can see.
+    ///
+    /// The three call sites are the function's three mutually exclusive exits
+    /// (uninitialised, dispatched, dispatched-nothing), so three call sites is
+    /// one stamp per round. A fourth, or one inside a loop, breaks the density
+    /// `PERF-D05-G23` was read against — and this fails rather than the wire
+    /// going quiet about it.
+    ///
+    /// The needle is the **bare** identifier, not the qualified path. A
+    /// `use crate::spoor_stream::tinyos_spoor_stamp;` followed by an unqualified
+    /// call would otherwise count zero: stamps stays 3, exits stays 3, the
+    /// assertion passes, and the round stamps four times. Matching the bare
+    /// name catches both spellings, since the qualified one contains it.
+    #[test]
+    fn one_dispatch_round_stamps_exactly_once_on_every_path() {
+        // Assembled from halves so this test does not match its own text —
+        // `hal_arm64::ethernet`'s cadence guard learned that the hard way.
+        const SOURCE: &str = include_str!("board_dispatch.rs");
+        const SIGNATURE: &str = concat!("pub extern \"C\" fn ", "tinyos_dispatch_round() -> u16 {");
+        const STAMP: &str = concat!("tinyos_spoor", "_stamp(");
+
+        let body = SOURCE
+            .split_once(SIGNATURE)
+            .expect("the dispatch round exists")
+            .1
+            .split_once("\n}\n")
+            .expect("the dispatch round ends")
+            .0;
+
+        let stamps = body.matches(STAMP).count();
+        let exits = body.matches("return NO_TASK;").count()
+            + body.matches("            index\n").count()
+            + body.matches("            NO_TASK\n").count();
+
+        assert_eq!(
+            stamps, exits,
+            "every exit of a dispatch round stamps exactly once, or the stream cannot be read \
+             as one record per round (LE-99, PERF-D05-G23)"
+        );
+        assert_eq!(
+            stamps as u32,
+            exits as u32 * STAMPS_PER_DISPATCH_ROUND,
+            "STAMPS_PER_DISPATCH_ROUND no longer describes this function; PERF-D05-G23's density \
+             argument and hal_arm64::ethernet::PARK_BEAT_MS both rest on it (LE-99)"
+        );
+        assert_eq!(exits, 3, "the three exits are uninitialised, dispatched, and dispatched-none");
+    }
+
+    /// The other half, and the one the body scan above cannot see: **a stamp
+    /// added to a callee.**
+    ///
+    /// `tinyos_dispatch_round` calls `dispatch::run_once`, and a stamp placed
+    /// there raises the round's rate without changing a single line of this
+    /// module — which is precisely the silent breach `LE-99` was filed about
+    /// ("adding a second stamped call site inside the round"). Counting call
+    /// sites in one function proves *this function* stamps once; what
+    /// `PERF-D05-G23` rests on is that **one round** stamps once.
+    ///
+    /// So the round's transitive stamp surface is asserted empty. `dispatch` is
+    /// the only module the round enters that could reach the journal — the
+    /// scheduler and `context::switch` are `forbid`-clean of it — and keeping
+    /// it that way is the invariant: **the round's stamping lives at its own
+    /// exits and nowhere below them.** Anything wanting to stamp deeper has to
+    /// come through here and re-derive the gate's note.
+    #[test]
+    fn nothing_the_round_calls_stamps_underneath_it() {
+        const DISPATCH: &str = include_str!("dispatch.rs");
+        const STAMP: &str = concat!("tinyos_spoor", "_stamp(");
+
+        // Shipped code only: a test double below `#[cfg(test)]` may stamp all
+        // it likes, and does not run on the board.
+        let shipped = DISPATCH.split_once("#[cfg(test)]").map_or(DISPATCH, |(before, _)| before);
+
+        assert_eq!(
+            shipped.matches(STAMP).count(),
+            0,
+            "dispatch::run_once now stamps, so a round stamps more than once and neither the \
+             sibling test nor the wire would show it. PERF-D05-G23's density and \
+             hal_arm64::ethernet::PARK_BEAT_MS both rest on one stamp per round (LE-99)"
         );
     }
 

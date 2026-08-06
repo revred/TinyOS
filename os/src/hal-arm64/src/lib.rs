@@ -33,6 +33,7 @@ pub mod etherrors;
 pub mod exception_level;
 pub mod fault;
 pub mod gem;
+pub mod gem_receive;
 pub mod gic;
 pub mod hdmi;
 pub mod mmu;

@@ -25,6 +25,22 @@
 
 using System.Security.Cryptography;
 
+// `LE-90`, first statements and nowhere else. Redirected stdout in .NET is
+// buffered at 4 KiB and flushed on exit, so a tool that runs for minutes and is
+// tailed from another window shows its banner and then nothing while the work
+// it is narrating happens in silence. Found in tos64-netboot on 2026-08-06,
+// where it hid an entire netboot server's log and let one stale instance
+// masquerade as a healthy one (`LE-87`'s own cause, one level down).
+//
+// Applied here even where the tool exits quickly enough not to be bitten
+// today. Whether a program runs long enough for this to matter is a property
+// of its loops, and loops get added; a fix conditional on that is a fact
+// recorded beside the thing that determines it rather than derived from it,
+// which is the `LE-89`/`LE-91` family and the reason this is uniform.
+Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
+Console.SetError(new StreamWriter(Console.OpenStandardError()) { AutoFlush = true });
+
+
 const string BackupDirName = "pios-backup";
 string[] swapFiles = ["config.txt", "kernel8.img"];
 

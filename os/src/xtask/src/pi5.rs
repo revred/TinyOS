@@ -544,7 +544,35 @@ pub fn contains_complete_verdict_line(bytes: &[u8]) -> bool {
 ///   link to RP1 alive across the handoff, so the kernel's probe can find the
 ///   window instead of a reset controller. A card without this line is the
 ///   `rp1=absent reason=port-not-rc` outcome, honestly reported, not a hang.
-pub const CONFIG_TXT: &str = "os_check=0\nkernel=kernel8.img\npciex4_reset=0\n";
+/// - `hdmi_force_hotplug=1` — `LE-98`: makes the firmware behave as though a
+///   display is attached, so it allocates a framebuffer whether or not a
+///   monitor was awake at power-on.
+///
+/// # The hotplug line is a safety line, and it is UNVERIFIED on this firmware
+///
+/// It is here because of what happened on 2026-08-06: a netbooted run fetched
+/// the right image, ran the fixture, reached the park loop and transmitted 89
+/// spoor records with 0 lost and 0 refused — and the canvas was dark. The park
+/// loop paints and transmits, transmit is proven, so **TinyOS was writing 4 MB
+/// into `SIMPLEFB_BASE` the whole time and nothing was scanning it out.**
+///
+/// The claim this line makes is deliberately the weaker one. It is NOT that the
+/// monitor comes back — a display cabled to HDMI1 is not helped by forcing
+/// HDMI0's hotplug, and nothing here has been observed on a board yet. It is
+/// that a framebuffer gets allocated at all, so the fixed physical address the
+/// kernel paints into is memory the firmware owns rather than memory nobody
+/// assigned. On a machine with no IOMMU that is a safety property, and safety
+/// precedes correctness in this project's ordering.
+///
+/// **It does not close `LE-98`.** `SIMPLEFB_BASE = 0x3F80_0000` is still
+/// hardcoded from a Raspberry Pi OS capture with no device-tree parser behind
+/// it, and nothing verifies the firmware allocated a framebuffer *there* on
+/// *this* boot. The real fix is that the paint must be conditional on evidence.
+/// This line is the cheap half, it costs no rebuild — `kernel8.img` and its
+/// digest are untouched, `config.txt` is staged separately — and an unrecognised
+/// key is ignored by firmware, so it cannot make a working display stop working.
+pub const CONFIG_TXT: &str =
+    "os_check=0\nkernel=kernel8.img\npciex4_reset=0\nhdmi_force_hotplug=1\n";
 
 /// The SD-card placement instructions, printed after every build so nothing
 /// about the image is folklore held by whoever did it last (`TEST-P1-07-05-A`
@@ -559,11 +587,16 @@ pub fn placement_instructions(image_bytes: usize, image_sha256: &str) -> String 
          \x20                 os_check=0\n\
          \x20                 kernel=kernel8.img\n\
          \x20                 pciex4_reset=0\n\
+         \x20                 hdmi_force_hotplug=1\n\
          \x20   (without os_check=0 the Pi 5 firmware relocates the image to 0x200000 and\n\
          \x20    execution starts mid-image, as total silence — divergence record §3, the\n\
          \x20    one constant no test can check because config.txt lives on the card;\n\
          \x20    without pciex4_reset=0 the firmware resets the RP1 link and the kernel\n\
-         \x20    reports rp1=absent — FEAT-P1-09's honest no-network outcome)\n\
+         \x20    reports rp1=absent — FEAT-P1-09's honest no-network outcome;\n\
+         \x20    without hdmi_force_hotplug=1 a monitor absent or asleep at power-on leaves\n\
+         \x20    the firmware with no framebuffer and TinyOS painting 4 MB into RAM nobody\n\
+         \x20    allocated — LE-98, and the display must be on HDMI0, the port nearest the\n\
+         \x20    USB-C connector, and live BEFORE power is applied)\n\
          serial: the dedicated 3-pin debug connector (NOT the GPIO header), 115200 8N1;\n\
          \x20       loopback-test the adapter first (TEST-P1-07-01-A clause 1)\n\
          then: reinsert the card and power-cycle the board\n"
@@ -1276,7 +1309,31 @@ TOS64-MEAS/2 END metrics=8\n\
         // Pinned as exact contents: the card-prep tool checks line presence,
         // the firmware parses key=value, and any drift here is a staged card
         // that boots differently than the build intended.
-        assert_eq!(CONFIG_TXT, "os_check=0\nkernel=kernel8.img\npciex4_reset=0\n");
+        assert_eq!(
+            CONFIG_TXT,
+            "os_check=0\nkernel=kernel8.img\npciex4_reset=0\nhdmi_force_hotplug=1\n"
+        );
+    }
+
+    /// `LE-98`: on 2026-08-06 a netbooted run fetched the right image, ran the
+    /// fixture, reached the park loop and transmitted 89 spoor records — and
+    /// the canvas was dark. The park loop paints and transmits, transmit is
+    /// proven, so TinyOS was writing 4 MB to `SIMPLEFB_BASE` the whole time and
+    /// nothing was scanning it out.
+    ///
+    /// The line is pinned by its own test because **its value is not that the
+    /// monitor lights up.** It is that the firmware allocates a framebuffer
+    /// even when no display is detected at power-on, so the fixed physical
+    /// address the kernel paints into is memory the firmware owns rather than
+    /// memory nobody assigned. On a machine with no IOMMU that is a safety
+    /// property, and safety precedes correctness here.
+    #[test]
+    fn the_generated_config_forces_hotplug_so_a_framebuffer_exists_without_a_monitor() {
+        assert!(
+            CONFIG_TXT.lines().any(|line| line == "hdmi_force_hotplug=1"),
+            "without it a monitor absent or asleep at power-on leaves TinyOS painting 4 MB into \
+             RAM the firmware never allocated (LE-98)"
+        );
     }
 
     #[test]

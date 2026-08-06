@@ -192,6 +192,54 @@ pub struct FramebufferInfo {
     pub height: u32,
 }
 
+/// What the firmware said about the display, as two independent answers
+/// (`LE-98`).
+///
+/// They are separate because **this board answers them differently**: the
+/// framebuffer request is refused on this firmware (`fb=refused`, `BOARD
+/// VERDICT 4`) while the native-size query is a different property tag
+/// entirely. Collapsing them into one `Option` — which is what
+/// `show_splash` returned until 2026-08-06 — threw away the only evidence
+/// this board can produce about whether a display exists at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DisplayOutcome {
+    /// The firmware's answer to the native-size query. `Some` is evidence that
+    /// **a display is attached and the firmware has initialised its own
+    /// framebuffer**; `None` means it could not say, which on this board means
+    /// a monitor absent or asleep at power-on, or cabled to HDMI1.
+    pub native: Option<(u32, u32)>,
+    /// The mailbox-granted framebuffer, when the firmware grants one. This
+    /// board refuses it, so `None` here is the normal case and is not evidence
+    /// of anything about the display.
+    pub framebuffer: Option<FramebufferInfo>,
+}
+
+/// Whether the canvas may paint (`LE-98`).
+///
+/// **The whole of `LE-98`'s real half, as one pure function.** Until now the
+/// park loop wrote 4 MB to `board::SIMPLEFB_BASE` — a constant captured once
+/// from a Raspberry Pi OS boot, with no device-tree parser behind it
+/// (`BND-03`) — on **every** boot, whether or not the firmware had allocated
+/// anything there this time. On a machine with no IOMMU that is an unjustified
+/// write to a fixed physical address, and safety precedes correctness.
+///
+/// The evidence used is the one this firmware will actually produce. It is
+/// deliberately NOT the framebuffer grant: this board refuses that, so gating
+/// on it would turn the display off permanently on the only hardware the
+/// project owns. It is the native-size query — a different property tag, and
+/// one the firmware can only answer from a display it has brought up.
+///
+/// **What this does not prove**, stated because the gap is the reason `LE-98`
+/// stays open: a display existing is not the same as a framebuffer existing
+/// *at `SIMPLEFB_BASE`*. Only a device-tree parse or a firmware query this
+/// firmware refuses could show that. This narrows the unjustified write from
+/// "every boot" to "boots where the firmware reports a panel", which is
+/// strictly better and is not the whole answer.
+#[must_use]
+pub const fn canvas_permitted(outcome: &DisplayOutcome) -> bool {
+    outcome.native.is_some()
+}
+
 /// Why a firmware response was rejected whole. One typed arm per corruption,
 /// because a framebuffer descriptor is hostile input and a rejected one must
 /// paint nothing (`BND-02`, `PD-12`, `RCG-01`).
@@ -613,10 +661,15 @@ mod board {
     /// Every failure returns silently: the caller is post-verdict boot code
     /// whose next act is `park()`, and a dark screen is the accepted fallback
     /// (`TEST-P1-07-07-A` clause 4). Never called before the verdict.
-    pub fn show_splash() -> Option<FramebufferInfo> {
+    pub fn show_splash() -> DisplayOutcome {
         // Phase 1: the native-size query. A failed exchange or hostile
         // answer degrades to the fallback mode, never to an abort — the
         // splash owes the operator its best effort.
+        //
+        // `LE-98`: its verdict is now KEPT rather than folded into
+        // `choose_mode` and discarded. It is the only evidence this board's
+        // firmware produces about whether a display exists, and the canvas
+        // gate needs it — see `canvas_permitted`.
         let mut query = SizeQuery::new();
         let query_address = query.words().as_ptr() as usize as u32;
         // `STORY-P1-07-03`: the buffer is Normal cacheable now, and the
@@ -636,6 +689,7 @@ mod board {
             Err(FramebufferError::Timeout)
         };
         let (width, height) = choose_mode(native);
+        let native = native.ok();
 
         // Phase 2: the framebuffer request at the chosen mode.
         let mut message = PropertyMessage::framebuffer_request(width, height);
@@ -647,7 +701,7 @@ mod board {
             REQUEST_WORDS * core::mem::size_of::<u32>(),
         );
         if !exchange(buffer_address) {
-            return None;
+            return DisplayOutcome { native, framebuffer: None };
         }
         crate::mmu::clean_invalidate_dcache_range(
             buffer_address as usize,
@@ -658,33 +712,77 @@ mod board {
         // The *answer's* geometry is what gets drawn into — the firmware may
         // have granted something other than what was asked.
         let Ok(info) = parse_response(message.words_mut()) else {
-            return None;
+            return DisplayOutcome { native, framebuffer: None };
         };
         render_splash(&mut Framebuffer { info });
-        Some(info)
+        DisplayOutcome { native, framebuffer: Some(info) }
     }
 }
 
 #[cfg(target_arch = "aarch64")]
 pub(crate) use board::Framebuffer;
 
-/// Paints the splash on the board and returns the validated descriptor so
-/// the park loop can keep the surface alive (`STORY-P1-09-05`'s visual
-/// heartbeat); `None` on the host or on any silent splash failure.
-pub fn show_splash() -> Option<FramebufferInfo> {
+/// Paints the splash on the board and returns **both** of the firmware's
+/// answers: the validated framebuffer descriptor, so the park loop can keep
+/// that surface alive (`STORY-P1-09-05`'s visual heartbeat), and the
+/// native-size verdict, which is what `canvas_permitted` gates the canvas on
+/// (`LE-98`).
+///
+/// On the host both are `None`, which correctly forbids the canvas — there is
+/// no firmware to ask and therefore no evidence.
+pub fn show_splash() -> DisplayOutcome {
     #[cfg(target_arch = "aarch64")]
     {
         board::show_splash()
     }
     #[cfg(not(target_arch = "aarch64"))]
     {
-        None
+        DisplayOutcome { native: None, framebuffer: None }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- LE-98: the canvas paints only on evidence --------------------------
+
+    fn outcome(native: Option<(u32, u32)>) -> DisplayOutcome {
+        DisplayOutcome { native, framebuffer: None }
+    }
+
+    /// The 2026-08-06 case: no monitor answering, and the park loop wrote 4 MB
+    /// to a hardcoded physical address anyway for the whole run.
+    #[test]
+    fn a_firmware_that_cannot_report_a_display_does_not_get_painted() {
+        assert!(
+            !canvas_permitted(&outcome(None)),
+            "painting a constant physical address with no evidence is LE-98, and on a machine \
+             with no IOMMU it is a safety question rather than a cosmetic one"
+        );
+    }
+
+    /// And the refusal must not fire on the working case, or it removes the
+    /// only display path this board has.
+    #[test]
+    fn a_reported_panel_permits_the_canvas() {
+        assert!(canvas_permitted(&outcome(Some((1920, 1080)))));
+        assert!(canvas_permitted(&outcome(Some((1280, 720)))));
+    }
+
+    /// **The gate must not be the framebuffer grant.** This board's firmware
+    /// refuses that (`fb=refused`, `BOARD VERDICT 4`), so gating on it would
+    /// turn the display off permanently on the only hardware the project owns
+    /// — a fix that deletes the feature it was protecting.
+    #[test]
+    fn the_refused_framebuffer_grant_does_not_veto_the_canvas() {
+        let refused_grant_but_panel_present =
+            DisplayOutcome { native: Some((1920, 1080)), framebuffer: None };
+        assert!(
+            canvas_permitted(&refused_grant_but_panel_present),
+            "this is the normal state of the bench board and it must keep its canvas"
+        );
+    }
 
     // --- clause 1: the property message is exact bytes ----------------------
 

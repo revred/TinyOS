@@ -18,6 +18,22 @@ using System.Diagnostics;
 using System.Management;
 using System.Security.Cryptography;
 
+// `LE-90`, first statements and nowhere else. Redirected stdout in .NET is
+// buffered at 4 KiB and flushed on exit, so a tool that runs for minutes and is
+// tailed from another window shows its banner and then nothing while the work
+// it is narrating happens in silence. Found in tos64-netboot on 2026-08-06,
+// where it hid an entire netboot server's log and let one stale instance
+// masquerade as a healthy one (`LE-87`'s own cause, one level down).
+//
+// Applied here even where the tool exits quickly enough not to be bitten
+// today. Whether a program runs long enough for this to matter is a property
+// of its loops, and loops get added; a fix conditional on that is a fact
+// recorded beside the thing that determines it rather than derived from it,
+// which is the `LE-89`/`LE-91` family and the reason this is uniform.
+Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
+Console.SetError(new StreamWriter(Console.OpenStandardError()) { AutoFlush = true });
+
+
 const long DataGuardBytes = 1L << 30; // ~1 GiB
 
 int Fail(string message)
@@ -301,7 +317,12 @@ Console.WriteLine($"any volume, removable bus, under 1 GiB of data (~{usedBytes 
 Console.WriteLine();
 Console.WriteLine("Result: MBR + one 2 GiB FAT32 partition TOS64BOOT carrying:");
 Console.WriteLine($"  kernel8.img  sha256 {sourceHash}");
-Console.WriteLine("  config.txt   (os_check=0, kernel=kernel8.img)");
+// The build owns config.txt's contents (xtask `pi5::CONFIG_TXT`, pinned by
+// test), so this echoes what is actually being copied rather than a subset
+// remembered when this line was written -- it listed two of the four after
+// `pciex4_reset=0` and `hdmi_force_hotplug=1` were added, which is the
+// lying-by-omission shape LE-97 is about.
+Console.WriteLine($"  config.txt   ({string.Join(", ", File.ReadAllLines(configSrc).Where(l => l.Length > 0))})");
 Console.WriteLine();
 Console.WriteLine("diskpart will run exactly this script:");
 foreach (var line in diskpartScript.Split(Environment.NewLine))

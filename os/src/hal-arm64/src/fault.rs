@@ -549,13 +549,19 @@ pub extern "C" fn tinyos_arm64_exception_entry(
     // The same report, painted (`STORY-P1-07-03`): the serial line has never
     // produced a byte on this bench (`LE-47`), and the canvas is the proven
     // text channel. Rendered through the identical generic path via
-    // [`TranscriptSink`], so screen and wire cannot disagree; volatile
-    // stores into the pinned scan-out buffer are safe whether or not the
-    // display is attached, and bounded like everything else here.
+    // [`TranscriptSink`], so screen and wire cannot disagree.
+    //
+    // `LE-98`: this is the ONE canvas in the tree painted without display
+    // evidence, and the exception is named at its constructor rather than
+    // assumed here. The park loop refuses to paint when the firmware reports
+    // no display; a fault report cannot, because it may run before the splash
+    // has asked and because serial has never produced a byte on this bench
+    // (`LE-47`) — a fault that paints nothing is a board that hangs with no
+    // symptom. The trade is argued in `Canvas::last_resort_for_fault_report`.
     let sink = TranscriptSink::new();
     let sink_uart = Pl011::new(&sink);
     let _ = report(&sink_uart, &frame);
-    let mut console = crate::canvas::SimplefbSurface;
+    let mut console = crate::canvas::Canvas::last_resort_for_fault_report();
     crate::canvas::draw_frame(&mut console);
     sink.for_each_line(|row, line| {
         crate::canvas::draw_line(

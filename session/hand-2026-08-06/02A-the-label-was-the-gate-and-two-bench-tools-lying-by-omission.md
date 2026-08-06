@@ -227,6 +227,38 @@ type already carried. All 18 fixture features plus the featureless build were th
 **And the rule that caught it is `LE-64`'s, unchanged: push, then watch the run.** Until `LE-92`
 ships that is not a fallback, it is the gate.
 
+### `main` is red at close, on a second gate, and the fix is deliberately not taken
+
+With the compile error fixed (`420e875`), the fixture builds and runs — three runs, `metrics=9`,
+`n=1000 dropped=0` — and CI then fails on the **next** gate:
+
+```text
+xtask: `D07/pool_u64x64_alloc_free_round_trip_per_op_of_8_spoored` was measured
+       but has no baseline; commit one (`--update-baseline`) rather than leaving it ungated
+```
+
+Which is the timing-regression gate doing exactly its job: `01A` added a ninth metric to the
+x86_64 fixture and no baseline row exists for it. **The only way to add one is
+`xtask measure --update-baseline --date=…`, which rewrites the WHOLE of
+`goals/performance/baselines/tier0-x86_64.tsv`** from whichever machine runs it — replacing rows
+recorded on the CI runner on 2026-07-29 with a Windows laptop's, which is precisely what `LE-23`
+exists about.
+
+**Left red on the owner's decision, and the reason is that doing it now would mean doing it
+twice.** A concurrent session is mid-flight in this tree taking the paired-arm method to `D04`
+and `D05` — x86_64 to `METRICS = 11`, AArch64 to 14 — so the baseline needs regenerating **once,
+after that lands**, not now and again in an hour. Whoever takes it:
+
+```text
+cd os && cargo run -p xtask -- measure --update-baseline --date=YYYY-MM-DD
+```
+
+and the honest question to answer first is whether a Tier 0 baseline recorded off the runner is
+one this project wants committed, or whether `LE-23` should be discharged by recording it on the
+runner instead. The gate compares **same-run ratios** to a reference, so it is designed to be
+host-independent — but the `min_cycles`/`p50_cycles` columns beside them are not, and nobody has
+said which of the two a reader is entitled to trust.
+
 ## 7. The next session
 
 1. **Item 3, as `01A` wrote it** — `D04` and `D05` paired arms, both arms in one boot, reading
