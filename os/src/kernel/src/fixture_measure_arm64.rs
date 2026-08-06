@@ -35,7 +35,7 @@
 //! of a real boot image.
 
 use crate::context::{self, Context};
-use crate::measure::{Calibration, Environment, Metric, Report, Samples};
+use crate::measure::{Calibration, Environment, Metric, MetricLabel, Report, Samples};
 use crate::measure_phases::{
     phase_context_switch, phase_context_switch_spoored, phase_dispatch_round,
     phase_dispatch_round_spoored, phase_dispatch_select, phase_pool_alloc_free,
@@ -175,24 +175,113 @@ impl Write for BoardSink {
 
 const METRICS: usize = 14;
 
+/// Every metric this fixture emits, in slot order — `LE-91`'s declaration.
+///
+/// Each row states the **domain of what is measured** and the **Story whose
+/// contract must select it**, together, at one site.
+/// `cargo run -p xtask -- check-metric-labels` parses this table out of this
+/// file and holds every row against `goals/assurance/story-contracts.tsv`.
+///
+/// **This is the file the defect was found in.** Slots 8–10 carried `D07`
+/// from 2026-08-05 to 2026-08-06 because `STORY-P1-10-02`'s contract selected
+/// only `D07` — the metric bent to fit the contract instead of the contract
+/// extended to fit its subject — and the cost was that nobody read them
+/// against `D11`'s targets, which the stamp misses by 1.9× at the median.
+///
+/// The Story on each row is the one whose acceptance criteria the metric
+/// serves, and for the three `G23` spoor-overhead arms it is the Story
+/// `goals/assurance/guardrail-evidence.tsv` already names as the gate's owner
+/// — `STORY-P1-10-02` for `PERF-D07-G23`, `STORY-P1-07-06` for `PERF-D04-G23`
+/// and `PERF-D05-G23`. Two registers naming the same owner is what makes a
+/// disagreement between them findable.
+static METRIC_LABELS: [MetricLabel; METRICS] = [
+    MetricLabel { domain: "REF", story: "STORY-P1-01-04", name: "fixed_integer_loop" },
+    MetricLabel {
+        domain: "D07",
+        story: "STORY-P1-07-06",
+        name: "pool_u64x64_alloc_free_round_trip",
+    },
+    MetricLabel {
+        domain: "D07",
+        story: "STORY-P1-07-06",
+        name: "pool_u64x4_alloc_denied_exhausted_per_op_of_64",
+    },
+    MetricLabel {
+        domain: "D04",
+        story: "STORY-P1-07-06",
+        name: "context_switch_yield_roundtrip_2switches",
+    },
+    MetricLabel {
+        domain: "D05",
+        story: "STORY-P1-07-06",
+        name: "dispatch_select_highest_priority_ready",
+    },
+    MetricLabel {
+        domain: "D05",
+        story: "STORY-P1-07-06",
+        name: "dispatch_run_once_cooperative_round",
+    },
+    MetricLabel {
+        domain: "D02",
+        story: "STORY-P1-07-06",
+        name: "fault_brk_capture_escape_kernel_context",
+    },
+    MetricLabel {
+        domain: "D07",
+        story: "STORY-P1-07-06",
+        name: "pool_u64x64_alloc_free_round_trip_per_op_of_8",
+    },
+    MetricLabel {
+        domain: "D11",
+        story: "STORY-P1-10-02",
+        name: "spoor_stamp_park_rung_per_op_of_8",
+    },
+    MetricLabel {
+        domain: "D11",
+        story: "STORY-P1-10-02",
+        name: "spoor_drain_full_ring_frame_of_181",
+    },
+    MetricLabel {
+        domain: "D11",
+        story: "STORY-P1-10-02",
+        name: "spoor_announce_certificate_frame_of_3",
+    },
+    MetricLabel {
+        domain: "D07",
+        story: "STORY-P1-10-02",
+        name: "pool_u64x64_alloc_free_round_trip_per_op_of_8_spoored",
+    },
+    MetricLabel {
+        domain: "D04",
+        story: "STORY-P1-07-06",
+        name: "context_switch_yield_roundtrip_2switches_spoored",
+    },
+    MetricLabel {
+        domain: "D05",
+        story: "STORY-P1-07-06",
+        name: "dispatch_run_once_cooperative_round_spoored",
+    },
+];
+
 struct Measured {
-    domain: &'static str,
-    name: &'static str,
+    label: &'static MetricLabel,
     summary: crate::measure::Summary,
 }
 
+/// Summarizes the current phase into `slot`, taking its identity from
+/// [`METRIC_LABELS`] rather than from arguments at the call site — a name and
+/// a domain repeated at the call site is a second declaration of something
+/// already declared, and the two would be free to disagree.
 fn collect(
     collected: &mut [Option<Measured>; METRICS],
     slot: usize,
-    domain: &'static str,
-    name: &'static str,
     samples: &mut Samples<SAMPLES>,
 ) -> bool {
     let summarized = samples.summarize();
     samples.clear();
     match summarized {
         Some(summary) => {
-            collected[slot] = Some(Measured { domain, name, summary });
+            collected[slot] = Some(Measured { label: &METRIC_LABELS[slot], summary });
             true
         }
         None => false,
@@ -206,14 +295,7 @@ fn emit_all<W: Write>(
 ) -> Option<usize> {
     let mut report = Report::begin(sink, environment).ok()?;
     for measured in collected.iter().flatten() {
-        report
-            .metric(&Metric {
-                domain: measured.domain,
-                name: measured.name,
-                warmup: WARMUP,
-                summary: measured.summary,
-            })
-            .ok()?;
+        report.metric(&Metric::labelled(measured.label, WARMUP, measured.summary)).ok()?;
     }
     report.end().ok()
 }
@@ -293,35 +375,28 @@ fn measure_run() -> bool {
     let mut collected: [Option<Measured>; METRICS] = [const { None }; METRICS];
 
     ok &= phase_reference_loop(&source, &calibration, samples);
-    ok &= collect(&mut collected, 0, "REF", "fixed_integer_loop", samples);
+    ok &= collect(&mut collected, 0, samples);
 
     ok &= phase_pool_alloc_free(&source, &calibration, samples);
-    ok &= collect(&mut collected, 1, "D07", "pool_u64x64_alloc_free_round_trip", samples);
+    ok &= collect(&mut collected, 1, samples);
 
     ok &= phase_pool_denial(&source, &calibration, samples);
-    ok &= collect(
-        &mut collected,
-        2,
-        "D07",
-        "pool_u64x4_alloc_denied_exhausted_per_op_of_64",
-        samples,
-    );
+    ok &= collect(&mut collected, 2, samples);
 
     ok &= phase_context_switch(&source, &calibration, samples);
-    ok &= collect(&mut collected, 3, "D04", "context_switch_yield_roundtrip_2switches", samples);
+    ok &= collect(&mut collected, 3, samples);
 
     ok &= phase_dispatch_select(&source, &calibration, samples);
-    ok &= collect(&mut collected, 4, "D05", "dispatch_select_highest_priority_ready", samples);
+    ok &= collect(&mut collected, 4, samples);
 
     ok &= phase_dispatch_round(&source, &calibration, samples);
-    ok &= collect(&mut collected, 5, "D05", "dispatch_run_once_cooperative_round", samples);
+    ok &= collect(&mut collected, 5, samples);
 
     ok &= phase_fault_latency(source, &calibration);
-    ok &= collect(&mut collected, 6, "D02", "fault_brk_capture_escape_kernel_context", samples);
+    ok &= collect(&mut collected, 6, samples);
 
     ok &= phase_pool_alloc_free_batched(&source, &calibration, samples);
-    ok &=
-        collect(&mut collected, 7, "D07", "pool_u64x64_alloc_free_round_trip_per_op_of_8", samples);
+    ok &= collect(&mut collected, 7, samples);
 
     // `STORY-P1-10-02` criterion 6: the observability substrate's own cost,
     // through the same harness as everything it observes. The timed regions
@@ -337,14 +412,19 @@ fn measure_run() -> bool {
     // selects `D07,D11` and `PERF-D11-G01`/`G02`/`G03` are filed from this
     // metric. A domain label is what decides which targets a number is read
     // against, so a wrong one is not a naming defect, it is an unread gate.
+    //
+    // Since `LE-91` the label lives in [`METRIC_LABELS`] beside the Story that
+    // must select it, and `check-metric-labels` fails the build if it does
+    // not — correcting these three by hand left the next one free to be wrong
+    // the same way.
     ok &= phase_spoor_stamp(&source, &calibration, samples);
-    ok &= collect(&mut collected, 8, "D11", "spoor_stamp_park_rung_per_op_of_8", samples);
+    ok &= collect(&mut collected, 8, samples);
 
     ok &= phase_spoor_drain(&source, &calibration, samples);
-    ok &= collect(&mut collected, 9, "D11", "spoor_drain_full_ring_frame_of_181", samples);
+    ok &= collect(&mut collected, 9, samples);
 
     ok &= phase_spoor_announce(&source, &calibration, samples);
-    ok &= collect(&mut collected, 10, "D11", "spoor_announce_certificate_frame_of_3", samples);
+    ok &= collect(&mut collected, 10, samples);
 
     // `PERF-D07-G23`'s spoor-ENABLED arm, and the reason it is here at all:
     // the three costs above are **absolute**, and `G23`'s target is a
@@ -360,13 +440,7 @@ fn measure_run() -> bool {
     // paths, which is larger than the 2% the gate allows, so two arms from two
     // runs could not answer the question at all.
     ok &= phase_pool_alloc_free_batched_spoored(&source, &calibration, samples);
-    ok &= collect(
-        &mut collected,
-        11,
-        "D07",
-        "pool_u64x64_alloc_free_round_trip_per_op_of_8_spoored",
-        samples,
-    );
+    ok &= collect(&mut collected, 11, samples);
 
     // `PERF-D04-G23` and `PERF-D05-G23`, the same paired-arm method applied to
     // the two domains that already have a committed disabled arm in this run.
@@ -378,17 +452,10 @@ fn measure_run() -> bool {
     // Same run as their twins, for `G23`'s reason above: ~3% build-to-build
     // movement against a 2% allowance means two boots cannot answer a ratio.
     ok &= phase_context_switch_spoored(&source, &calibration, samples);
-    ok &= collect(
-        &mut collected,
-        12,
-        "D04",
-        "context_switch_yield_roundtrip_2switches_spoored",
-        samples,
-    );
+    ok &= collect(&mut collected, 12, samples);
 
     ok &= phase_dispatch_round_spoored(&source, &calibration, samples);
-    ok &=
-        collect(&mut collected, 13, "D05", "dispatch_run_once_cooperative_round_spoored", samples);
+    ok &= collect(&mut collected, 13, samples);
 
     let environment = Environment {
         tier: "T1",

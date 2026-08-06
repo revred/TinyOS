@@ -18,6 +18,7 @@ mod external_isolation;
 mod gate;
 mod governance;
 mod guest_images;
+mod metric_labels;
 mod performance_catalogue;
 mod pi5;
 mod probe_pe;
@@ -512,6 +513,10 @@ const SUBCOMMANDS: &[Subcommand] = &[
     Subcommand {
         name: "check-citations",
         summary: "Every STORY/FEAT/TEST id cited in a Rust doc comment resolves to a filed document",
+    },
+    Subcommand {
+        name: "check-metric-labels",
+        summary: "Every fixture metric's domain is selected by the contract of the Story it names",
     },
     Subcommand {
         name: "check-boot-images",
@@ -1028,6 +1033,37 @@ fn main() -> ExitCode {
                 }
             }
         }
+        // `LE-91`. A domain label decides which target column a measurement is
+        // read against, and nothing checked it: three spoor metrics carried
+        // `D07` for two days because the Story that owned them selected `D07`,
+        // and `D11`'s targets — which the stamp misses by 1.9x — went unread.
+        "check-metric-labels" => {
+            let result = os_root().and_then(|root| {
+                let repo_root = root.parent().ok_or_else(|| {
+                    format!("could not resolve repository root from {}", root.display())
+                })?;
+                metric_labels::check_metric_labels(repo_root)
+            });
+            match result {
+                Ok(summary) => {
+                    println!(
+                        "metric-label-check: {} declared metric(s) across {} fixture(s) in {} \
+                         Rust files — {} domain(s), {} owning Story(ies), every domain selected \
+                         by the contract of the Story that names it",
+                        summary.declaration_count,
+                        summary.declaring_file_count,
+                        summary.file_count,
+                        summary.domain_count,
+                        summary.story_count
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(message) => {
+                    eprintln!("xtask: metric label invalid: {message}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         // `LE-73`. The spine gates the documents that exist against each other,
         // so a source file citing an id that was never filed is invisible to all
         // of them. `kernel::udp_wire` was joined to the spine by exactly such a
@@ -1117,7 +1153,7 @@ fn main() -> ExitCode {
             match result {
                 Ok(summary) => {
                     println!(
-                        "assurance-spine-check: {} Features, {} Stories, {} Tests, {} Reports, {} containment classes, {} boundary tests, {} security controls, {} Protection Domain contracts, {} code-admission gates, {} class communication pairs, {} application/platform targets, {} landing zones, {} selected Story/performance contracts, {} selected application/performance contracts, {} loose ends ({} open), {} status headers, {} release gates with evidence, {} open-debt selections, {} platforms ({} qualified), {} bound claims checked, {} Feature/Story status rows agree, {} passing Reports cross-checked against headers, {} dashboard badges agree, {} manifests isolated from external/",
+                        "assurance-spine-check: {} Features, {} Stories, {} Tests, {} Reports, {} containment classes, {} boundary tests, {} security controls, {} Protection Domain contracts, {} code-admission gates, {} class communication pairs, {} application/platform targets, {} landing zones, {} selected Story/performance contracts, {} selected application/performance contracts, {} loose ends ({} open), {} status headers, {} release gates with evidence ({} measured under real-time conditions), {} open-debt selections, {} platforms ({} qualified), {} bound claims checked, {} Feature/Story status rows agree, {} passing Reports cross-checked against headers, {} dashboard badges agree, {} manifests isolated from external/",
                         summary.feature_count,
                         summary.story_count,
                         summary.test_count,
@@ -1136,6 +1172,7 @@ fn main() -> ExitCode {
                         summary.open_loose_end_count,
                         summary.status_header_count,
                         summary.guardrail_evidence_count,
+                        summary.realtime_evidence_count,
                         summary.open_debt_count,
                         summary.platform_count,
                         summary.qualified_platform_count,

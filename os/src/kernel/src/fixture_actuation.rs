@@ -63,7 +63,8 @@ use kernel::actuation::{ActuationError, ActuationPort, DeadlineStatus, DeadlineT
 use kernel::context::{self, Context};
 use kernel::dispatch;
 use kernel::measure::{
-    write_result, Calibration, Environment, Metric, Report, Samples, Stopwatch, Summary,
+    write_result, Calibration, Environment, Metric, MetricLabel, Report, Samples, Stopwatch,
+    Summary,
 };
 use kernel::preempt::{self, TickOutcome};
 use kernel::sched::{OverrunPolicy, Priority, Scheduler, TaskId, TaskState, WcetBudgetTicks};
@@ -929,9 +930,20 @@ fn check(serial: &mut SerialPort, ok: &mut bool, clause: &str, condition: bool) 
 /// pattern, for its own reason: a fixture that dies mid-measurement then
 /// produces no envelope at all rather than a half-open one, which `xtask`
 /// rejects as truncated instead of silently reading a short report.
+/// Every metric this fixture emits, in slot order — `LE-91`'s declaration.
+///
+/// Both are `D03` (decision-to-actuation) and both are `STORY-P1-06-01`'s,
+/// whose contract selects `D03,D05`. The refusal metric is `D03` and not
+/// `D05` even though a refused actuation never reaches a scheduling decision:
+/// what is timed is the actuation port declining, which is the same subject
+/// as the emit path it is the negative of.
+static METRIC_LABELS: [MetricLabel; METRICS] = [
+    MetricLabel { domain: "D03", story: "STORY-P1-06-01", name: "decision_to_actuation_emit" },
+    MetricLabel { domain: "D03", story: "STORY-P1-06-01", name: "actuation_refused_unauthorized" },
+];
+
 struct Measured {
-    domain: &'static str,
-    name: &'static str,
+    label: &'static MetricLabel,
     summary: Summary,
 }
 
@@ -943,14 +955,7 @@ fn emit_all<W: Write>(
 ) -> Option<usize> {
     let mut report = Report::begin(sink, environment).ok()?;
     for measured in collected.iter().flatten() {
-        report
-            .metric(&Metric {
-                domain: measured.domain,
-                name: measured.name,
-                warmup: WARMUP,
-                summary: measured.summary,
-            })
-            .ok()?;
+        report.metric(&Metric::labelled(measured.label, WARMUP, measured.summary)).ok()?;
     }
     report.end().ok()
 }
@@ -1180,16 +1185,8 @@ pub fn run() -> bool {
     // SAFETY: interrupts masked, both phases finished.
     let (emit_summary, denial_summary) = unsafe { (EMIT_SUMMARY, DENIAL_SUMMARY) };
     let collected: [Option<Measured>; METRICS] = [
-        emit_summary.map(|summary| Measured {
-            domain: "D03",
-            name: "decision_to_actuation_emit",
-            summary,
-        }),
-        denial_summary.map(|summary| Measured {
-            domain: "D03",
-            name: "actuation_refused_unauthorized",
-            summary,
-        }),
+        emit_summary.map(|summary| Measured { label: &METRIC_LABELS[0], summary }),
+        denial_summary.map(|summary| Measured { label: &METRIC_LABELS[1], summary }),
     ];
     let environment = Environment {
         tier: "T0",

@@ -4,7 +4,7 @@ Status: **Specified — written before implementation, per the TDD mandate**
 Story: [`STORY-P0-01-06`](../stories/STORY-P0-01-06.md)
 Tier: Host reasoning against the machine-readable catalogues, **plus** a Tier 0 QEMU measurement fixture for the `D09` work unit, per [Target Hardware & Test Matrix](../../README.md#target-hardware--test-matrix)
 Assurance contract: [`goals/assurance/story-contracts.tsv`](../assurance/story-contracts.tsv)
-Performance domains: `D01`
+Performance domains: `D01`, `D09`
 Security controls: `SEC-19`, `SEC-20`
 Containment classes: `C0`, `C1`
 Boundary tests: `BND-01`, `BND-02`, `BND-03`, `BND-17`, `BND-18`

@@ -1,5 +1,39 @@
-# Golden transcripts are byte-exact evidence (TEST-P2-07-01-A): no eol
-# smudging, ever — a Windows checkout with core.autocrlf=true must see the
-# same bytes CI's Linux checkout sees, or the host golden test reds on a
-# fake divergence (found 2026-07-30 while executing hand-2026-07-30/04A).
+# This repository is LF, everywhere, in the object store and in the checkout.
+#
+# `git ls-files --eol` reported **zero** committed files with CRLF when this
+# rule was written (2026-08-06), so it renormalises nothing — it records what
+# is already true and stops the two ways a Windows host quietly breaks it.
+#
+# Both ways have cost this project real time:
+#
+# 1. **Smudged checkouts break source-level guards.** Several tests in this tree
+#    `include_str!` their own file and assert on its text, because the property
+#    is about what the code *contains* and only the text can see it (`LE-99`'s
+#    stamp-density guard, `hal_arm64::ethernet`'s cadence guard,
+#    `kernel::measure_phases`' G23 pair equivalence). Those needles are
+#    whitespace-pinned, so a checkout that turns LF into CRLF fails them for a
+#    reason that has nothing to do with the property. It is not hypothetical and
+#    it is not rare: it fires in exactly the workflow `CONCURRENT_SESSIONS`
+#    rule 8 *mandates*. A `git worktree add` on a host with
+#    `core.autocrlf=true` gets CRLF, so the session verifying its own subset
+#    over clean `HEAD` — the prescribed way to work around another session's
+#    broken row — sees `board_dispatch`'s guard red on code it never touched,
+#    with no way to tell that from a real break (`LE-101`).
+#
+# 2. **Smudged *writes* land as diff noise.** An editor that rewrites a file
+#    with CRLF turns a one-line amendment into a whole-file rewrite: on
+#    2026-08-06 a single amended paragraph in `SeedMVP.md` staged as 1,270
+#    changed lines, and one added row in `EPIC-P1.md` as 125. That is history
+#    and blame destroyed for every line of both documents, in a commit about
+#    something else, and staging alone does not clean it — this attribute does.
+#
+# `text=auto` lets git decide what is text (binaries are untouched); `eol=lf`
+# fixes the checkout, which is the half `core.autocrlf` gets wrong.
+* text=auto eol=lf
+
+# Golden transcripts are byte-exact evidence (TEST-P2-07-01-A) and opt out of
+# all of the above: no conversion in either direction, ever. A Windows checkout
+# must see the same bytes CI's Linux checkout sees, or the host golden test reds
+# on a fake divergence (found 2026-07-30 while executing hand-2026-07-30/04A).
+# Last, so this rule wins over the blanket one above.
 *.golden.txt -text

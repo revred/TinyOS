@@ -29,7 +29,7 @@ use hal_x86_64::serial::SerialPort;
 use hal_x86_64::tsc::{self, Tsc};
 use kernel::context::{self, Context};
 use kernel::fault::{Disposition, FaultReport, FaultingContext};
-use kernel::measure::{Calibration, Environment, Metric, Report, Samples};
+use kernel::measure::{Calibration, Environment, Metric, MetricLabel, Report, Samples};
 use kernel::measure_phases::{
     phase_context_switch, phase_context_switch_spoored, phase_dispatch_round,
     phase_dispatch_round_spoored, phase_dispatch_select, phase_pool_alloc_free,
@@ -157,27 +157,98 @@ const METRICS: usize = 11;
 /// mid-measurement produces no envelope at all rather than a half-open one —
 /// which `xtask` rejects as truncated, the fail-closed outcome
 /// `TEST-P1-01-01-A` clause 6 requires.
+/// Every metric this fixture emits, in slot order — `LE-91`'s declaration.
+///
+/// Each row states the **domain of what is measured** and the **Story whose
+/// contract must select it**, at one site, so the two cannot be chosen
+/// independently; `cargo run -p xtask -- check-metric-labels` holds every row
+/// against `goals/assurance/story-contracts.tsv`.
+///
+/// **Why the Stories differ down the table.** `STORY-P1-01-01` owns this
+/// fixture and most of what it measures. `D02` is not its: the fault-latency
+/// phase exists because `LE-17` said the fault path had no timing baseline,
+/// and that loose end's owner is `STORY-P1-02-01` — the Story that built the
+/// handlers being timed. `D07`'s spoor-enabled arm serves `PERF-D07-G23`,
+/// which `goals/assurance/guardrail-evidence.tsv` files under
+/// `STORY-P1-10-02` criterion 6. Attributing all eleven to whichever Story
+/// happens to own the *file* is exactly the substitution `LE-91` is about,
+/// one field over.
+static METRIC_LABELS: [MetricLabel; METRICS] = [
+    MetricLabel { domain: "REF", story: "STORY-P1-01-04", name: "fixed_integer_loop" },
+    MetricLabel {
+        domain: "D07",
+        story: "STORY-P1-01-01",
+        name: "pool_u64x64_alloc_free_round_trip",
+    },
+    MetricLabel {
+        domain: "D07",
+        story: "STORY-P1-01-01",
+        name: "pool_u64x4_alloc_denied_exhausted_per_op_of_64",
+    },
+    MetricLabel {
+        domain: "D04",
+        story: "STORY-P1-01-01",
+        name: "context_switch_yield_roundtrip_2switches",
+    },
+    MetricLabel {
+        domain: "D05",
+        story: "STORY-P1-01-01",
+        name: "dispatch_select_highest_priority_ready",
+    },
+    MetricLabel {
+        domain: "D05",
+        story: "STORY-P1-01-01",
+        name: "dispatch_run_once_cooperative_round",
+    },
+    MetricLabel {
+        domain: "D02",
+        story: "STORY-P1-02-01",
+        name: "fault_ud2_capture_terminate_kernel_context",
+    },
+    MetricLabel {
+        domain: "D07",
+        story: "STORY-P1-01-01",
+        name: "pool_u64x64_alloc_free_round_trip_per_op_of_8",
+    },
+    MetricLabel {
+        domain: "D07",
+        story: "STORY-P1-10-02",
+        name: "pool_u64x64_alloc_free_round_trip_per_op_of_8_spoored",
+    },
+    MetricLabel {
+        domain: "D04",
+        story: "STORY-P1-01-01",
+        name: "context_switch_yield_roundtrip_2switches_spoored",
+    },
+    MetricLabel {
+        domain: "D05",
+        story: "STORY-P1-01-01",
+        name: "dispatch_run_once_cooperative_round_spoored",
+    },
+];
+
 struct Measured {
-    domain: &'static str,
-    name: &'static str,
+    label: &'static MetricLabel,
     summary: kernel::measure::Summary,
 }
 
 /// Summarizes the current phase's samples into `collected` and clears the
 /// buffer for the next phase. A phase that recorded nothing collects nothing
 /// and fails the run: silence is not a fast pass.
+///
+/// The metric's identity comes from [`METRIC_LABELS`] rather than from
+/// arguments here: a domain repeated at the call site is a second declaration
+/// of something already declared, and the two would be free to disagree.
 fn collect(
     collected: &mut [Option<Measured>; METRICS],
     slot: usize,
-    domain: &'static str,
-    name: &'static str,
     samples: &mut Samples<SAMPLES>,
 ) -> bool {
     let summarized = samples.summarize();
     samples.clear();
     match summarized {
         Some(summary) => {
-            collected[slot] = Some(Measured { domain, name, summary });
+            collected[slot] = Some(Measured { label: &METRIC_LABELS[slot], summary });
             true
         }
         None => false,
@@ -192,14 +263,7 @@ fn emit_all<W: Write>(
 ) -> Option<usize> {
     let mut report = Report::begin(sink, environment).ok()?;
     for measured in collected.iter().flatten() {
-        report
-            .metric(&Metric {
-                domain: measured.domain,
-                name: measured.name,
-                warmup: WARMUP,
-                summary: measured.summary,
-            })
-            .ok()?;
+        report.metric(&Metric::labelled(measured.label, WARMUP, measured.summary)).ok()?;
     }
     report.end().ok()
 }
@@ -265,44 +329,37 @@ pub fn run() -> bool {
     // compares, so a run in which it did not happen is not a run with one
     // metric missing — it is a run with no gated evidence at all.
     ok &= phase_reference_loop(&source, &calibration, samples);
-    ok &= collect(&mut collected, 0, "REF", "fixed_integer_loop", samples);
+    ok &= collect(&mut collected, 0, samples);
     let _ = writeln!(serial, "fixture-measure phase 1/11 done (REF gate reference)");
 
     ok &= phase_pool_alloc_free(&source, &calibration, samples);
-    ok &= collect(&mut collected, 1, "D07", "pool_u64x64_alloc_free_round_trip", samples);
+    ok &= collect(&mut collected, 1, samples);
     let _ = writeln!(serial, "fixture-measure phase 2/11 done (D07 alloc/free)");
 
     ok &= phase_pool_denial(&source, &calibration, samples);
-    ok &= collect(
-        &mut collected,
-        2,
-        "D07",
-        "pool_u64x4_alloc_denied_exhausted_per_op_of_64",
-        samples,
-    );
+    ok &= collect(&mut collected, 2, samples);
     let _ = writeln!(serial, "fixture-measure phase 3/11 done (D07 denial)");
 
     ok &= phase_context_switch(&source, &calibration, samples);
-    ok &= collect(&mut collected, 3, "D04", "context_switch_yield_roundtrip_2switches", samples);
+    ok &= collect(&mut collected, 3, samples);
     let _ = writeln!(serial, "fixture-measure phase 4/11 done (D04 context switch)");
 
     ok &= phase_dispatch_select(&source, &calibration, samples);
-    ok &= collect(&mut collected, 4, "D05", "dispatch_select_highest_priority_ready", samples);
+    ok &= collect(&mut collected, 4, samples);
     let _ = writeln!(serial, "fixture-measure phase 5/11 done (D05 selection)");
 
     ok &= phase_dispatch_round(&source, &calibration, samples);
-    ok &= collect(&mut collected, 5, "D05", "dispatch_run_once_cooperative_round", samples);
+    ok &= collect(&mut collected, 5, samples);
     let _ = writeln!(serial, "fixture-measure phase 6/11 done (D05 dispatch round)");
 
     ok &= phase_fault_latency(&calibration);
-    ok &= collect(&mut collected, 6, "D02", "fault_ud2_capture_terminate_kernel_context", samples);
+    ok &= collect(&mut collected, 6, samples);
     let _ = writeln!(serial, "fixture-measure phase 7/11 done (D02 fault latency)");
 
     // Last rather than beside its unbatched twin, so the six pre-existing
     // phases keep their order and their chatter unchanged.
     ok &= phase_pool_alloc_free_batched(&source, &calibration, samples);
-    ok &=
-        collect(&mut collected, 7, "D07", "pool_u64x64_alloc_free_round_trip_per_op_of_8", samples);
+    ok &= collect(&mut collected, 7, samples);
     let _ = writeln!(serial, "fixture-measure phase 8/11 done (D07 batched round trip, LE-24)");
 
     // `PERF-D07-G23`'s spoor-ENABLED arm. Immediately after its twin and
@@ -314,13 +371,7 @@ pub fn run() -> bool {
     // computed by a reader from these two rows rather than asserted here --
     // the fixture emits measurements, never verdicts.
     ok &= phase_pool_alloc_free_batched_spoored(&source, &calibration, samples);
-    ok &= collect(
-        &mut collected,
-        8,
-        "D07",
-        "pool_u64x64_alloc_free_round_trip_per_op_of_8_spoored",
-        samples,
-    );
+    ok &= collect(&mut collected, 8, samples);
     let _ = writeln!(serial, "fixture-measure phase 9/11 done (D07 G23 spoor-enabled arm)");
 
     // `PERF-D04-G23` and `PERF-D05-G23`: the same paired-arm method on the two
@@ -330,18 +381,11 @@ pub fn run() -> bool {
     // hidden -- on this host tier the alternative is re-running the disabled
     // arms and having two D04 rows that disagree.
     ok &= phase_context_switch_spoored(&source, &calibration, samples);
-    ok &= collect(
-        &mut collected,
-        9,
-        "D04",
-        "context_switch_yield_roundtrip_2switches_spoored",
-        samples,
-    );
+    ok &= collect(&mut collected, 9, samples);
     let _ = writeln!(serial, "fixture-measure phase 10/11 done (D04 G23 spoor-enabled arm)");
 
     ok &= phase_dispatch_round_spoored(&source, &calibration, samples);
-    ok &=
-        collect(&mut collected, 10, "D05", "dispatch_run_once_cooperative_round_spoored", samples);
+    ok &= collect(&mut collected, 10, samples);
     let _ = writeln!(serial, "fixture-measure phase 11/11 done (D05 G23 spoor-enabled arm)");
 
     let environment = Environment {

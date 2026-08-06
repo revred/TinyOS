@@ -16,6 +16,10 @@ The first *adversarial-by-design* Feature (Goal **G-SEC-12**; `SeedMVP.md` §7's
 
 `FEAT-P1-04` (RT reserves under load are only meaningful with real preemption and deadline enforcement), `FEAT-P1-01` (degradation is measured against baselines, not eyeballed).
 
+**[`FEAT-P1-12`](FEAT-P1-12.md) — split out of `STORY-P1-05-01` on 2026-08-06, and it gates *criterion 1* rather than the Feature.** The RT reserve and per-class budget do not exist: `Tcb` carries no containment class and the pool is one flat capacity with no reservation floor, so `BND-15` and `RCG-08` are selected by the contract row below against a mechanism that is not there. That is Feature-sized design work and is now its own Feature at this Story's own recommendation.
+
+**What that changes here is which work is blocked, and the answer is less than four sessions assumed.** The standing do-not-start rule names *"`FEAT-P1-05`'s RT reserve"* and always did — but while the reserve sat as item 1 inside `STORY-P1-05-01`'s scope, the rule was read as covering the Story, and therefore this Feature. Items 2 (denial attribution, which pairs with `LE-82`), 3 (property-test infrastructure) and 4 (the campaign harness) were never blocked, are each session-sized, and **items 3 and 4 are what `FEAT-P1-06`'s half 3 actually needs** — `PERF-D05-G19` and `PERF-D05-G21` ask for measurements under load, not for the guarantee a reserve provides.
+
 ## Stories
 
 | Story | Summary | Status |

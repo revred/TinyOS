@@ -40,6 +40,18 @@ jobs:
       - name: Assurance spine coverage (Stories, performance, security)
         run: cargo run -p xtask -- check-assurance-spine
 
+      # LE-91. A fixture metric's domain decides which target column it is read
+      # against, and until this gate existed nothing checked it: three spoor
+      # metrics carried D07 for two days because their Story's contract selected
+      # D07, and D11's targets -- which the stamp misses by 1.9x -- went unread.
+      #
+      # A step here rather than only a unit test, because this workflow runs
+      # `cargo clippy --all-targets` and never `cargo test`: a #[test] gates the
+      # pre-commit hook and a developer's own run, and gates nothing on the
+      # runner.
+      - name: Metric domain labels resolve against their owning Story's contract
+        run: cargo run -p xtask -- check-metric-labels
+
       - name: missing_docs check
         run: cargo doc --workspace --no-deps
         env:

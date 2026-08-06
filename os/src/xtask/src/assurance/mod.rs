@@ -90,9 +90,40 @@ const LANDING_ZONE_FIELD_COUNT: usize = 10;
 const FEATURE_CONTRACT_FIELD_COUNT: usize = 9;
 const CONTRACT_FIELD_COUNT: usize = 7;
 const LOOSE_END_FIELD_COUNT: usize = 8;
-const GUARDRAIL_EVIDENCE_HEADER: &str =
-    "guardrail_id\tdomain\tstory_id\tevidence_kind\tevidence_path\trecorded_in\tnote";
-const GUARDRAIL_EVIDENCE_FIELD_COUNT: usize = 7;
+const GUARDRAIL_EVIDENCE_HEADER: &str = "guardrail_id\tdomain\tstory_id\tevidence_kind\t\
+     evidence_path\tplatform_id\tirq_state\tcore_count\timage_kind\trecorded_in\tnote";
+const GUARDRAIL_EVIDENCE_FIELD_COUNT: usize = 11;
+
+/// The closed `irq_state` vocabulary (`ADR 0015` decision 2).
+///
+/// The four measurement-condition columns exist because every timing number
+/// this project held on 2026-08-06 was produced with interrupts masked, on a
+/// single core, from a fixture rather than the shipping image — and
+/// `guardrail-evidence.tsv` had nowhere to say so. The conditions lived in
+/// free-text `note` prose, so nothing checked them and nothing could refuse a
+/// row for them: the `LE-89`/`LE-91` family a fourth time, a fact recorded
+/// *beside* the thing it determines rather than derived from it.
+///
+/// **`unrecorded` is a value, not a gap.** It is the accurate statement that a
+/// row was filed without saying what it was measured under, and it must never
+/// be tidied into a guess — retro-fitting a condition is the exact failure the
+/// ADR exists to stop. `n-a` is different and the difference is load-bearing:
+/// structural evidence is a property of the code rather than of a run, so its
+/// conditions do not *apply* rather than being unknown.
+const IRQ_STATES: [&str; 4] = ["live", "masked", "n-a", UNRECORDED];
+
+/// The closed `image_kind` vocabulary. `fixture` is the measurement binary;
+/// `shipping` is the `os` image a deployment would run (`LE-20`, `LE-85`).
+const IMAGE_KINDS: [&str; 4] = ["fixture", "shipping", "n-a", UNRECORDED];
+
+/// Filed before conditions were recorded. Never a guess.
+const UNRECORDED: &str = "unrecorded";
+
+/// The condition does not apply, as against being unknown. Structural evidence
+/// is a property of the code rather than of a run, so it has no interrupt state
+/// to record — and collapsing that into [`UNRECORDED`] would make the honest
+/// value mean two different things.
+const NOT_APPLICABLE: &str = "n-a";
 /// The closed `evidence_kind` vocabulary.
 ///
 /// `structural` is a property the compiler or the type system enforces, so it
@@ -177,6 +208,14 @@ pub struct AssuranceSummary {
     /// it is; it is never "passed". No Story's assurance state is derived from
     /// this number — that conversion still requires every applicable gate.
     pub guardrail_evidence_count: usize,
+    /// Of [`Self::guardrail_evidence_count`], the gates whose evidence was
+    /// measured under conditions a deployment will actually meet — interrupts
+    /// live, shipping image, qualified platform (`ADR 0015` decision 2).
+    ///
+    /// Published **beside** the evidence count rather than replacing it,
+    /// because the difference between the two numbers is the finding. On
+    /// 2026-08-06 it was 25 and 0.
+    pub realtime_evidence_count: usize,
     /// Number of `(Story, domain)` selections initialised as stated open debt
     /// because the domain's subsystem does not exist yet (`LE-35`).
     pub open_debt_count: usize,
@@ -292,6 +331,19 @@ struct GuardrailEvidenceIndex {
     /// itself, and it inflates fastest precisely when a domain is popular
     /// rather than when evidence is added.
     count: usize,
+    /// Of [`Self::count`], the gates whose evidence was measured under
+    /// conditions a deployment will actually meet — interrupts **live**, on the
+    /// **shipping** image, on a platform holding a secure-world qualification
+    /// record (`ADR 0015` decision 2, `ADR 0005`).
+    ///
+    /// **This is deliberately a second number rather than a filter on the
+    /// first.** The existing rows keep their value as *mechanism* evidence:
+    /// they show the mechanism works and what it costs under stated conditions.
+    /// What they stop doing is standing as evidence about a running system.
+    /// Publishing both makes the gap visible instead of reclassifying it away —
+    /// and on the day this landed the value was **0**, which is the honest
+    /// answer and the reason the column exists.
+    realtime_count: usize,
     /// Gates carrying at least one `refused` row: **measured, read against the
     /// gate's `target` column, and declined.**
     ///
@@ -498,10 +550,23 @@ fn walk_spine(
     // `PERF-Dnn-G11` row can never outlive the property it records.
     validate_no_heap(repo_root)?;
 
+    // `LE-33`: a bound-class gate cannot be closed from a source `ADR 0004` or
+    // `ADR 0005` disqualifies. The platform register is read first because a
+    // platform absent from it is unqualified, never presumed clean.
+    //
+    // Moved above the evidence register on 2026-08-06 (`ADR 0015` decision 2):
+    // an evidence row now names the platform it was measured on, and a register
+    // that validates a name against a list it has not read yet validates
+    // nothing.
+    let platform_path = repo_root.join("goals").join("assurance").join("qualified-platforms.tsv");
+    let platform_contents = fs::read_to_string(&platform_path)
+        .map_err(|error| format!("failed to read {}: {error}", platform_path.display()))?;
+    let platforms = bound_provenance::validate_platforms(&platform_contents, &report_files)?;
+
     let evidence_path = repo_root.join("goals").join("assurance").join("guardrail-evidence.tsv");
     let evidence_contents = fs::read_to_string(&evidence_path)
         .map_err(|error| format!("failed to read {}: {error}", evidence_path.display()))?;
-    let evidence = validate_guardrail_evidence(&evidence_contents, &contracts)?;
+    let evidence = validate_guardrail_evidence(&evidence_contents, &contracts, &platforms)?;
 
     // `LE-35`: a domain whose subsystem does not exist yet cannot be selected
     // as a satisfiable obligation, only as stated open debt.
@@ -517,13 +582,6 @@ fn walk_spine(
     )?;
     validate_open_debt_coverage(&contracts, &readiness, &open_debt)?;
 
-    // `LE-33`: a bound-class gate cannot be closed from a source `ADR 0004` or
-    // `ADR 0005` disqualifies. The platform register is read first because a
-    // platform absent from it is unqualified, never presumed clean.
-    let platform_path = repo_root.join("goals").join("assurance").join("qualified-platforms.tsv");
-    let platform_contents = fs::read_to_string(&platform_path)
-        .map_err(|error| format!("failed to read {}: {error}", platform_path.display()))?;
-    let platforms = bound_provenance::validate_platforms(&platform_contents, &report_files)?;
     let bound_claim_count =
         bound_provenance::check_bound_evidence(repo_root, &evidence.bound_rows, &platforms)?;
 
@@ -608,6 +666,7 @@ fn walk_spine(
     Ok((
         AssuranceSummary {
             guardrail_evidence_count: evidence.count,
+            realtime_evidence_count: evidence.realtime_count,
             open_debt_count: open_debt.len(),
             platform_count: platforms.count(),
             qualified_platform_count: platforms.qualified_count(),

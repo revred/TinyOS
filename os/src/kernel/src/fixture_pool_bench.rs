@@ -59,7 +59,9 @@ use core::fmt::Write;
 use hal::time::{CycleSource, Timebase};
 use hal_x86_64::serial::SerialPort;
 use hal_x86_64::tsc::{self, Tsc};
-use kernel::measure::{Calibration, Environment, Metric, Report, Samples, Stopwatch, Summary};
+use kernel::measure::{
+    Calibration, Environment, Metric, MetricLabel, Report, Samples, Stopwatch, Summary,
+};
 use kernel::mem::{Pool, PoolError, PoolHandle};
 
 /// Upper bound on any single phase's sample count below — sized to the largest
@@ -99,11 +101,48 @@ const METRICS: usize = 9;
 
 static mut SAMPLE_BUFFER: Samples<MAX_SAMPLES> = Samples::new();
 
+/// Every metric this fixture emits, in slot order — `LE-91`'s declaration.
+///
+/// All nine are `D07`, and all nine are `STORY-P0-03-01`'s: this is that
+/// Story's Tier 0 `PERF-D07` fixture, refactored onto the shared harness by
+/// `STORY-P1-01-01` (`LE-06`) without changing whose criteria the numbers
+/// answer. The domain was previously a single literal at the emit site,
+/// applied to all nine at once — correct here, and correct only because every
+/// phase in this file happens to measure the same subsystem. `LE-91` is what
+/// happens when that stops being true and nothing notices.
+static METRIC_LABELS: [MetricLabel; METRICS] = [
+    MetricLabel { domain: "D07", story: "STORY-P0-03-01", name: "pool_u64x64_alloc_free" },
+    MetricLabel { domain: "D07", story: "STORY-P0-03-01", name: "pool_u64x64_tail" },
+    MetricLabel {
+        domain: "D07",
+        story: "STORY-P0-03-01",
+        name: "pool_u64x64_occupancy_best_slot0",
+    },
+    MetricLabel {
+        domain: "D07",
+        story: "STORY-P0-03-01",
+        name: "pool_u64x64_occupancy_middle_slot32",
+    },
+    MetricLabel {
+        domain: "D07",
+        story: "STORY-P0-03-01",
+        name: "pool_u64x64_occupancy_last_slot63",
+    },
+    MetricLabel { domain: "D07", story: "STORY-P0-03-01", name: "pool_u64x64_free_o1" },
+    MetricLabel { domain: "D07", story: "STORY-P0-03-01", name: "pool_u64x64_deny_then_recover" },
+    MetricLabel { domain: "D07", story: "STORY-P0-03-01", name: "pool_u64x4_denial_exhausted" },
+    MetricLabel {
+        domain: "D07",
+        story: "STORY-P0-03-01",
+        name: "pool_u64x4_denial_invalid_handle",
+    },
+];
+
 /// One measured phase, held until every phase has run so the envelope is
 /// emitted in one piece (a `Report` borrows its sink for its whole lifetime,
 /// and this fixture also prints non-percentile self-check lines).
 struct Measured {
-    name: &'static str,
+    label: &'static MetricLabel,
     warmup: usize,
     summary: Summary,
 }
@@ -111,10 +150,12 @@ struct Measured {
 /// Summarizes the current phase's samples into `collected` and clears the
 /// buffer for the next phase. A phase that recorded nothing collects nothing
 /// and fails the run: silence is not a fast pass.
+///
+/// `warmup` stays an argument because it genuinely differs per phase; the
+/// name and domain do not, because they are declared in [`METRIC_LABELS`].
 fn collect(
     collected: &mut [Option<Measured>; METRICS],
     slot: usize,
-    name: &'static str,
     warmup: usize,
     samples: &mut Samples<MAX_SAMPLES>,
 ) -> bool {
@@ -122,7 +163,7 @@ fn collect(
     samples.clear();
     match summarized {
         Some(summary) => {
-            collected[slot] = Some(Measured { name, warmup, summary });
+            collected[slot] = Some(Measured { label: &METRIC_LABELS[slot], warmup, summary });
             true
         }
         None => false,
@@ -522,31 +563,31 @@ pub fn run() -> bool {
         [None, None, None, None, None, None, None, None, None];
 
     ok &= phase_primary_alloc_free(&source, &calibration, buffer);
-    ok &= collect(&mut collected, 0, "pool_u64x64_alloc_free", PRIMARY_WARMUP, buffer);
+    ok &= collect(&mut collected, 0, PRIMARY_WARMUP, buffer);
 
     ok &= phase_tail(&source, &calibration, buffer);
-    ok &= collect(&mut collected, 1, "pool_u64x64_tail", TAIL_WARMUP, buffer);
+    ok &= collect(&mut collected, 1, TAIL_WARMUP, buffer);
 
     ok &= phase_occupancy_best(&source, &calibration, buffer);
-    ok &= collect(&mut collected, 2, "pool_u64x64_occupancy_best_slot0", 0, buffer);
+    ok &= collect(&mut collected, 2, 0, buffer);
 
     ok &= phase_occupancy_middle(&source, &calibration, buffer);
-    ok &= collect(&mut collected, 3, "pool_u64x64_occupancy_middle_slot32", 0, buffer);
+    ok &= collect(&mut collected, 3, 0, buffer);
 
     ok &= phase_occupancy_last(&source, &calibration, buffer);
-    ok &= collect(&mut collected, 4, "pool_u64x64_occupancy_last_slot63", 0, buffer);
+    ok &= collect(&mut collected, 4, 0, buffer);
 
     ok &= phase_occupancy_free(&source, &calibration, buffer);
-    ok &= collect(&mut collected, 5, "pool_u64x64_free_o1", 0, buffer);
+    ok &= collect(&mut collected, 5, 0, buffer);
 
     ok &= phase_occupancy_deny_then_recover(&source, &calibration, buffer);
-    ok &= collect(&mut collected, 6, "pool_u64x64_deny_then_recover", 0, buffer);
+    ok &= collect(&mut collected, 6, 0, buffer);
 
     ok &= phase_denial_exhausted(&mut serial, &source, &calibration, buffer);
-    ok &= collect(&mut collected, 7, "pool_u64x4_denial_exhausted", 0, buffer);
+    ok &= collect(&mut collected, 7, 0, buffer);
 
     ok &= phase_denial_invalid_handle(&mut serial, &source, &calibration, buffer);
-    ok &= collect(&mut collected, 8, "pool_u64x4_denial_invalid_handle", 0, buffer);
+    ok &= collect(&mut collected, 8, 0, buffer);
 
     ok &= phase_drain_cycles(&mut serial);
     ok &= phase_size_of(&mut serial);
@@ -565,12 +606,7 @@ pub fn run() -> bool {
     };
     for measured in collected.iter().flatten() {
         if report
-            .metric(&Metric {
-                domain: "D07",
-                name: measured.name,
-                warmup: measured.warmup,
-                summary: measured.summary,
-            })
+            .metric(&Metric::labelled(measured.label, measured.warmup, measured.summary))
             .is_err()
         {
             return false;

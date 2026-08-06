@@ -36,6 +36,15 @@ job rather than a test-writing one. In cost order:
    reservation floor, and a repository-wide search for a scheduling or allocation reserve finds
    none. So `BND-15` and `RCG-08` have nothing behind them. **This is Feature-sized design work
    and probably its own Feature rather than a Story of this one.**
+
+   **Acted on 2026-08-06: it is now [`FEAT-P1-12`](../features/FEAT-P1-12.md).** This item is
+   no longer a prerequisite recorded inside this Story, and the reason for moving it is the
+   effect it was having here. The standing do-not-start rule names *"`FEAT-P1-05`'s RT
+   reserve"* and always did — but a rule naming one item inside a Story that holds four gets
+   applied to the Story, and four consecutive handovers carried it that way while
+   `FEAT-P1-06`'s half 3 waited behind it. **Items 2, 3 and 4 below were never blocked and are
+   startable now.** Nothing about the scope changed in the move; `FEAT-P1-12` restates the
+   audit above and adds no design surface to it.
 2. **Denial is not attributable to an offender.** `Actor` is a three-value nibble — `Kernel`,
    `Exec`, `Session`. Criterion 2 wants every denial charged to the offender and
    spoor-attributed; today a spoor can say the kernel denied something, not *which task, of
@@ -54,6 +63,16 @@ job rather than a test-writing one. In cost order:
 
 Steps 1 and 2 are the honest answer to "what will it take". Steps 3 and 4 are the part this
 document describes, and they are the smaller half.
+
+**Re-read 2026-08-06, after step 1 moved to `FEAT-P1-12`.** "The smaller half" undersold what
+is reachable. Steps 3 and 4 together are what `FEAT-P1-06`'s half 3 needs — `PERF-D05-G19`
+(`loaded_degradation`) and `PERF-D05-G21` (`fault_completion`) ask for *measurements under
+load*, not for a guarantee, so a flooding fixture plus a campaign harness produces both
+numbers with no reserve in the tree. Step 2 pairs with `LE-82`, already open: both are "the
+spoor vocabulary cannot say the thing the contract requires", and this Story already says to
+do them together. **Three session-sized items, none blocked** — and if `G19` fails without a
+reserve, that failing row is what turns `FEAT-P1-12` from architecture prose into a number,
+which is the order this repository holds every other claim to.
 
 ## Acceptance criteria (draft — to be finalized when this Story starts)
 

@@ -324,6 +324,52 @@ pub struct Environment<'a> {
     pub qualification: &'a str,
 }
 
+/// One metric's declared identity: **what it measures, which performance
+/// domain that subject belongs to, and which Story's contract must select
+/// that domain.**
+///
+/// `LE-91`. A domain label is not a name — it is the choice of which target
+/// column the number is read against — and until this type existed nothing
+/// machine-checked it. From 2026-08-05 to 2026-08-06 `fixture_measure_arm64`
+/// emitted `spoor_stamp_park_rung_per_op_of_8`,
+/// `spoor_drain_full_ring_frame_of_181` and
+/// `spoor_announce_certificate_frame_of_3` as `domain=D07` for no better
+/// reason than that `STORY-P1-10-02`'s contract selected `D07`. `D07` is
+/// fixed-capacity pool allocation; `D11` is spoor stamp and journal, which is
+/// exactly and only what those three measure. The numbers reached the wire, a
+/// Report, a handover and a Story's status header, and were **never once
+/// compared to `D11`'s targets** — which the stamp misses by 1.9× at the
+/// median (`PERF-D11-G01`). A wrong label is not a naming defect; it is an
+/// unread gate.
+///
+/// **Why the Story travels with the domain.** The defect is not that a domain
+/// was misspelled, it is that the domain was chosen *from* the contract. So
+/// the declaration states both, at one site, and
+/// `cargo run -p xtask -- check-metric-labels` parses these declarations out
+/// of the fixture sources and asserts each domain is selected by the named
+/// Story's contract in `goals/assurance/story-contracts.tsv`. That is the
+/// same rule `check-assurance-spine` already applies to
+/// `guardrail-evidence.tsv` — a Story may only record evidence in a domain it
+/// selects — moved one level earlier, to where the number is produced rather
+/// than to where it is filed.
+///
+/// **The fix a failure asks for is not always the label.** If the domain
+/// names the subject correctly and the Story does not select it, the contract
+/// is what is wrong. Bending the label back is the defect this type exists to
+/// prevent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MetricLabel {
+    /// The `goals/performance/catalogue.tsv` domain of what is measured
+    /// (`D04`, `D11`, ...), or `REF` for the reference denominator, which is
+    /// not a domain and has no target column of its own.
+    pub domain: &'static str,
+    /// The `STORY-Pn-NN-NN` whose acceptance criteria this metric serves, and
+    /// whose contract row must select [`domain`](Self::domain).
+    pub story: &'static str,
+    /// Metric name, unique within one report.
+    pub name: &'static str,
+}
+
 /// One metric's identity plus its summary, as emitted on one `METRIC` line.
 #[derive(Debug, Clone, Copy)]
 pub struct Metric<'a> {
@@ -337,6 +383,20 @@ pub struct Metric<'a> {
     pub warmup: usize,
     /// The percentiles.
     pub summary: Summary,
+}
+
+impl<'a> Metric<'a> {
+    /// Builds a `METRIC` line's identity from a declared [`MetricLabel`].
+    ///
+    /// Every fixture emits through this rather than writing `domain:` with a
+    /// string literal, so the domain a number is published under is always
+    /// the one a declaration states beside its owning Story — never one
+    /// chosen at the emit site where nothing reads it. `check-metric-labels`
+    /// enforces exactly that: a literal domain outside a `MetricLabel`
+    /// declaration is a build failure.
+    pub fn labelled(label: &'a MetricLabel, warmup: usize, summary: Summary) -> Self {
+        Metric { domain: label.domain, name: label.name, warmup, summary }
+    }
 }
 
 /// Emits the versioned `TOS64-MEAS/2` envelope to any [`Write`] sink — COM1
@@ -410,6 +470,39 @@ mod tests {
     use super::*;
 
     use core::cell::Cell;
+
+    /// `LE-91`. A metric's domain decides which target column it is read
+    /// against, and until this type existed a fixture chose that label with
+    /// nothing to check it: three spoor metrics carried `D07` for two days
+    /// because the Story that happened to own the fixture selected `D07`, and
+    /// nobody ever compared them to `D11`'s targets. The label now carries
+    /// both halves — the domain *and* the Story whose contract must select it
+    /// — in one declaration, so `xtask` can hold one against the other.
+    #[test]
+    fn a_metric_takes_its_domain_and_name_from_one_declared_label() {
+        const LABEL: MetricLabel = MetricLabel {
+            domain: "D11",
+            story: "STORY-P1-10-02",
+            name: "spoor_stamp_park_rung_per_op_of_8",
+        };
+        let summary = Summary { n: 1, dropped: 0, min: 1, p50: 1, p99: 1, p99_9: 1, max: 1 };
+        let metric = Metric::labelled(&LABEL, 8, summary);
+        assert_eq!(metric.domain, "D11");
+        assert_eq!(metric.name, "spoor_stamp_park_rung_per_op_of_8");
+        assert_eq!(metric.warmup, 8);
+    }
+
+    /// The point of the type: the two fields cannot be chosen independently
+    /// because they are written at one site. A label whose domain is bent to
+    /// fit a Story that does not select it is now a *statement* the build can
+    /// refuse, rather than a silence.
+    #[test]
+    fn a_label_states_its_owning_story_beside_its_domain() {
+        const LABEL: MetricLabel =
+            MetricLabel { domain: "D02", story: "STORY-P1-02-01", name: "fault_latency" };
+        assert_eq!(LABEL.story, "STORY-P1-02-01");
+        assert_eq!(LABEL.domain, "D02");
+    }
 
     // `TEST-P1-01-02-A` clause 1: the UART-borne verdict.
     #[test]

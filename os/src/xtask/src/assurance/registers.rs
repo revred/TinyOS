@@ -27,6 +27,7 @@ use super::*;
 pub(super) fn validate_guardrail_evidence(
     contents: &str,
     contracts: &ContractIndex,
+    platforms: &bound_provenance::PlatformIndex,
 ) -> Result<GuardrailEvidenceIndex, String> {
     let mut lines = contents.lines();
     let header = lines
@@ -41,6 +42,7 @@ pub(super) fn validate_guardrail_evidence(
 
     let mut seen = BTreeSet::new();
     let mut evidenced_gates = BTreeSet::new();
+    let mut realtime_gates = BTreeSet::new();
     let mut refused_gates = BTreeSet::new();
     let mut story_domain_pairs = BTreeSet::new();
     let mut bound_rows = Vec::new();
@@ -110,6 +112,71 @@ pub(super) fn validate_guardrail_evidence(
             }
         }
 
+        // `ADR 0015` decision 2: the measurement conditions, as data.
+        //
+        // Validated as closed vocabularies for the same reason `evidence_kind`
+        // became one on 2026-08-05 — it accepted any string until then, so
+        // `refused` could not be relied on to mean anything because a typo read
+        // as a novel kind and counted as evidence in silence. A misspelled
+        // `irq_state` would do worse here: it would read as *not* `masked` and
+        // quietly promote a row to real-time evidence.
+        let platform_id = fields[5];
+        if platform_id != NOT_APPLICABLE
+            && platform_id != UNRECORDED
+            && platforms.get(platform_id).is_none()
+        {
+            return Err(format!(
+                "guardrail-evidence line {line_number}: `{platform_id}` is not a platform in \
+                 qualified-platforms.tsv (use `{UNRECORDED}` if the row never said, or \
+                 `{NOT_APPLICABLE}` for structural evidence)"
+            ));
+        }
+
+        let irq_state = fields[6];
+        if !IRQ_STATES.contains(&irq_state) {
+            return Err(format!(
+                "guardrail-evidence line {line_number}: `{irq_state}` is not an interrupt state; \
+                 expected one of {}",
+                IRQ_STATES.join(", ")
+            ));
+        }
+
+        let image_kind = fields[8];
+        if !IMAGE_KINDS.contains(&image_kind) {
+            return Err(format!(
+                "guardrail-evidence line {line_number}: `{image_kind}` is not an image kind; \
+                 expected one of {}",
+                IMAGE_KINDS.join(", ")
+            ));
+        }
+
+        let core_count = fields[7];
+        if core_count != NOT_APPLICABLE
+            && core_count != UNRECORDED
+            && core_count.parse::<u32>().is_err()
+        {
+            return Err(format!(
+                "guardrail-evidence line {line_number}: `{core_count}` is not a core count; \
+                 expected a number, `{UNRECORDED}`, or `{NOT_APPLICABLE}`"
+            ));
+        }
+
+        // **The number this schema exists to publish.** A measurement supports a
+        // real-time claim only if it was taken under conditions a deployment
+        // will actually meet: interrupts live, on the shipping image, on a
+        // platform that holds a secure-world qualification record (`ADR 0005`).
+        //
+        // On the day this was written the answer is ZERO, and that is the
+        // point. `ADR 0015`: a number that looks like evidence and is not is
+        // worse than a gap, because a gap is visible.
+        if fields[3] != EVIDENCE_KIND_REFUSED
+            && irq_state == "live"
+            && image_kind == "shipping"
+            && platforms.get(platform_id).is_some_and(|row| row.state == "qualified")
+        {
+            realtime_gates.insert(guardrail_id.to_string());
+        }
+
         // Bound-class rows are handed to `bound_provenance`, which is where
         // `ADR 0004`'s and `ADR 0005`'s refusals live. Filtering here rather
         // than there keeps the register's parser in one place.
@@ -131,6 +198,7 @@ pub(super) fn validate_guardrail_evidence(
     // ones covered by a row that is actually evidence.
     Ok(GuardrailEvidenceIndex {
         count: evidenced_gates.len(),
+        realtime_count: realtime_gates.len(),
         refused_gates,
         story_domain_pairs,
         bound_rows,

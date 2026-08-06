@@ -38,9 +38,16 @@ pub(super) fn validate_loose_ends(contents: &str) -> Result<LooseEndIndex, Strin
             non_empty_tsv_fields(raw_line, line_number, LOOSE_END_FIELD_COUNT, "loose-ends")?;
 
         let id = fields[0];
-        let Some(number) = id.strip_prefix("LE-").filter(|suffix| is_two_digits(suffix)) else {
+        // Two digits, or three since the register passed `LE-99` on
+        // 2026-08-06. Zero-padding to a fixed width was considered and
+        // rejected: it would renumber every existing row and every citation of
+        // one, across the whole tree, to buy nothing but alignment.
+        let Some(number) = id.strip_prefix("LE-").filter(|suffix| {
+            is_loose_end_number_width(suffix.len()) && suffix.bytes().all(|b| b.is_ascii_digit())
+        }) else {
             return Err(format!(
-                "loose-ends line {line_number}: `{id}` is not a valid id (expected `LE-NN`)"
+                "loose-ends line {line_number}: `{id}` is not a valid id (expected `LE-NN` or \
+                 `LE-NNN`)"
             ));
         };
         if !ids.insert(id.to_string()) {
@@ -250,7 +257,15 @@ pub(super) fn validate_loose_end_citations(
     Ok(citations.len())
 }
 
-/// Extracts every `LE-NN` token from one line.
+/// Extracts every `LE-NN` or `LE-NNN` token from one line.
+///
+/// **The whole digit run, not the first two.** Until 2026-08-06 this took
+/// `digits[..2]`, which was correct while the register held fewer than a
+/// hundred rows and became a silent misreading the moment it did not:
+/// `LE-100` in prose resolved to a citation of `LE-10`, a real row about
+/// something else. A decoder that confidently names the wrong record is
+/// `LE-80`'s family, and it is worse than one that refuses — so a run of four
+/// or more digits is refused here rather than truncated to three.
 pub(super) fn loose_end_tokens(line: &str) -> Vec<String> {
     let bytes = line.as_bytes();
     let mut tokens = Vec::new();
@@ -264,9 +279,19 @@ pub(super) fn loose_end_tokens(line: &str) -> Vec<String> {
             }
         }
         let digits = &line[index + 3..];
-        if digits.len() >= 2 && digits.as_bytes()[..2].iter().all(u8::is_ascii_digit) {
-            tokens.push(format!("LE-{}", &digits[..2]));
+        let run = digits.bytes().take_while(u8::is_ascii_digit).count();
+        if is_loose_end_number_width(run) {
+            tokens.push(format!("LE-{}", &digits[..run]));
         }
     }
     tokens
+}
+
+/// The widths a loose-end number may have: two, or three since `LE-100`.
+///
+/// One place, so the extractor and the id validator cannot disagree about
+/// what an id is — which is exactly how a register ends up accepting a row
+/// that nothing can then cite.
+pub(super) fn is_loose_end_number_width(digits: usize) -> bool {
+    digits == 2 || digits == 3
 }

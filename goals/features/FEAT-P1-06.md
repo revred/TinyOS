@@ -60,7 +60,7 @@ gate each closes against:
 |---|---|---|---|
 | 1 | **Mechanism and enforcement at Tier 0** | `STORY-P1-06-01` functionally `Verified` + `REPORT-2026-07-29-02` | **Done, 2026-07-29.** Re-derived and reproduced on the current tree 2026-08-05, seven days and one `TOS64-*` rename later |
 | 2 | **Cheap, state-free denial** | `PERF-D03-G20` | **Measured and refused**, not unmeasured — 55% run-to-run p99 CV. The refusal is now a `refused` row in `guardrail-evidence.tsv` rather than Report prose only |
-| 3 | **Under hostile load** | `PERF-D05-G19`, `PERF-D05-G21` | `FEAT-P1-05`, whose mechanism is unbuilt — see that Feature's Story scope section |
+| 3 | **Under hostile load** | `PERF-D05-G19`, `PERF-D05-G21` | `FEAT-P1-05`'s items 3 and 4 — a flooding fixture and a campaign harness, **both session-sized and neither blocked**. Re-read 2026-08-06: this row previously said "`FEAT-P1-05`, whose mechanism is unbuilt", which pointed at the RT reserve (now [`FEAT-P1-12`](FEAT-P1-12.md)) and was wrong about what this half needs |
 | 4 | **The bound** | `PERF-D03-G04`, `PERF-D05-G04` | `ADR 0005` + zero qualified platforms. **The owner's decision, not this Feature's** |
 
 **Three things this Feature's evidence does not cover, all found by checking rather than reading,

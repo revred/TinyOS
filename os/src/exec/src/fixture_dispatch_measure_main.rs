@@ -57,7 +57,21 @@ use hal_x86_64::serial::SerialPort;
 use hal_x86_64::tsc::{self, Tsc};
 use kernel::context::{self, Context};
 use kernel::dispatch;
-use kernel::measure::{write_result, Calibration, Environment, Metric, Report, Samples, Stopwatch};
+use kernel::measure::{
+    write_result, Calibration, Environment, Metric, MetricLabel, Report, Samples, Stopwatch,
+};
+
+/// Every metric this fixture emits, in emission order — `LE-91`'s declaration.
+///
+/// Both are `D04` and both are `STORY-P1-03-03`'s, whose contract selects
+/// `D04,D05,D08`. `D04` and not `D05`: what is timed is a whole dispatch
+/// round *including the address-space transfer*, and the same-space arm exists
+/// only as the denominator that isolates that transfer — the subject is the
+/// switch, which is `D04`.
+static METRIC_LABELS: [MetricLabel; 2] = [
+    MetricLabel { domain: "D04", story: "STORY-P1-03-03", name: "dispatch_round_same_space" },
+    MetricLabel { domain: "D04", story: "STORY-P1-03-03", name: "dispatch_round_cross_space" },
+];
 use kernel::mem::Pool;
 use kernel::sched::{OverrunPolicy, Priority, Scheduler, TaskState, WcetBudgetTicks};
 
@@ -345,14 +359,7 @@ fn run() -> bool {
     ok &= phase_dispatch(&source, &calibration, samples, supervisor_cr3, None);
     match samples.summarize() {
         Some(summary) => {
-            ok &= report
-                .metric(&Metric {
-                    domain: "D04",
-                    name: "dispatch_round_same_space",
-                    warmup: WARMUP,
-                    summary,
-                })
-                .is_ok();
+            ok &= report.metric(&Metric::labelled(&METRIC_LABELS[0], WARMUP, summary)).is_ok();
         }
         None => ok = false,
     }
@@ -361,14 +368,7 @@ fn run() -> bool {
     ok &= phase_dispatch(&source, &calibration, samples, image_cr3, Some(supervisor_cr3));
     match samples.summarize() {
         Some(summary) => {
-            ok &= report
-                .metric(&Metric {
-                    domain: "D04",
-                    name: "dispatch_round_cross_space",
-                    warmup: WARMUP,
-                    summary,
-                })
-                .is_ok();
+            ok &= report.metric(&Metric::labelled(&METRIC_LABELS[1], WARMUP, summary)).is_ok();
         }
         None => ok = false,
     }

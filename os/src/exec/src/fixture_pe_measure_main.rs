@@ -52,7 +52,29 @@ use hal_x86_64::fault::FaultFrame;
 use hal_x86_64::qemu_exit::{exit_qemu, QemuExitCode};
 use hal_x86_64::serial::SerialPort;
 use hal_x86_64::tsc::{self, Tsc};
-use kernel::measure::{write_result, Calibration, Environment, Metric, Report, Samples, Stopwatch};
+use kernel::measure::{
+    write_result, Calibration, Environment, Metric, MetricLabel, Report, Samples, Stopwatch,
+};
+
+/// Every metric this fixture emits, in emission order — `LE-91`'s declaration.
+///
+/// Both are `D09` — *"PE64 loading and import validation"*, which is exactly
+/// and only what the two phases parse — and both serve `STORY-P0-01-06`,
+/// whose whole subject is `D09`'s disposition and whose criterion 2 is this
+/// fixture.
+///
+/// **This pair is `LE-91`'s second instance, found by the gate rather than by
+/// a reader, and it points the opposite way from the first.** The three spoor
+/// metrics were bent *to* a contract; here the label was right all along and
+/// the contract simply never selected `D09` — `STORY-P0-01-06`'s row read
+/// `D01` alone while the Story's title, its acceptance criteria and its
+/// evidence were all about `D09`. Nothing had ever compared the two, because
+/// nothing read the emit site against the register at all. The contract now
+/// selects `D01,D09`.
+static METRIC_LABELS: [MetricLabel; 2] = [
+    MetricLabel { domain: "D09", story: "STORY-P0-01-06", name: "pe_parse_blue_sharc_accept" },
+    MetricLabel { domain: "D09", story: "STORY-P0-01-06", name: "pe_parse_denied_truncated" },
+];
 
 /// Section capacity, matching `blue-sharc-fixture`'s own figure for the same
 /// artifact.
@@ -241,14 +263,7 @@ fn run() -> bool {
     ok &= phase_parse_accept(&source, &calibration, samples);
     match samples.summarize() {
         Some(summary) => {
-            ok &= report
-                .metric(&Metric {
-                    domain: "D09",
-                    name: "pe_parse_blue_sharc_accept",
-                    warmup: WARMUP,
-                    summary,
-                })
-                .is_ok();
+            ok &= report.metric(&Metric::labelled(&METRIC_LABELS[0], WARMUP, summary)).is_ok();
         }
         None => ok = false,
     }
@@ -257,14 +272,7 @@ fn run() -> bool {
     ok &= phase_parse_denied(&source, &calibration, samples);
     match samples.summarize() {
         Some(summary) => {
-            ok &= report
-                .metric(&Metric {
-                    domain: "D09",
-                    name: "pe_parse_denied_truncated",
-                    warmup: WARMUP,
-                    summary,
-                })
-                .is_ok();
+            ok &= report.metric(&Metric::labelled(&METRIC_LABELS[1], WARMUP, summary)).is_ok();
         }
         None => ok = false,
     }

@@ -98,10 +98,15 @@ export CARGO_TARGET_DIR
 
 cd "$staged/os"
 
-echo "pre-commit: checking the staged tree — assurance spine, performance catalogue, crate sizes..."
+echo "pre-commit: checking the staged tree — assurance spine, performance catalogue, crate sizes, metric labels..."
 
 cargo run -q -p xtask -- check-assurance-spine
 cargo run -q -p xtask -- check-performance-catalogue
 cargo run -q -p xtask -- check-crate-sizes
+# LE-91: a metric labelled to fit its Story's contract rather than to name its
+# own subject is a number nobody reads against the right target column. Cheap,
+# deterministic, and about the repository rather than about the machine — the
+# same three properties the checks above are chosen for.
+cargo run -q -p xtask -- check-metric-labels
 
 echo "pre-commit: ok (validated the index, not the working tree)"

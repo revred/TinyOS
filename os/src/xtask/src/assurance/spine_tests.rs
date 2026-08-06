@@ -370,11 +370,44 @@ fn evidence_contracts() -> ContractIndex {
 }
 
 fn evidence_row(guardrail: &str, domain: &str, story: &str) -> String {
-    format!("{guardrail}\t{domain}\t{story}\tstructural\tpath\t2026-07-28\tnote\n")
+    format!(
+        "{guardrail}\t{domain}\t{story}\tstructural\tpath\tn-a\tn-a\tn-a\tn-a\t2026-07-28\tnote\n"
+    )
 }
 
 fn refused_row(guardrail: &str, domain: &str, story: &str) -> String {
-    format!("{guardrail}\t{domain}\t{story}\trefused\tpath\t2026-07-28\tnote\n")
+    format!("{guardrail}\t{domain}\t{story}\trefused\tpath\tn-a\tn-a\tn-a\tn-a\t2026-07-28\tnote\n")
+}
+
+/// One measured row with its conditions spelled out (`ADR 0015` decision 2).
+fn measured_row(
+    guardrail: &str,
+    domain: &str,
+    story: &str,
+    platform: &str,
+    irq: &str,
+    image: &str,
+) -> String {
+    format!(
+        "{guardrail}\t{domain}\t{story}\tmeasured\tpath\t{platform}\t{irq}\t1\t{image}\t2026-08-06\tnote\n"
+    )
+}
+
+/// A platform register with one qualified and one unqualified entry, so the
+/// real-time condition check can be exercised in both directions. The committed
+/// register holds **zero** qualified platforms, which is why a qualified one
+/// only exists as a fixture.
+fn evidence_platforms() -> bound_provenance::PlatformIndex {
+    // The qualified entry carries a Report id because the register refuses a
+    // bare `qualified` state — `ADR 0005`: qualification is Q1-Q4 in a dated
+    // Report, never a state word on its own. Discovered by this fixture failing
+    // to be well-formed, which is the rule proving itself.
+    let contents = "platform_id\tarch\tdescription\tfirmware\tstate\tqualification_record\trecorded_in\n\
+         rpi5-bcm2712\taarch64\tthe board\tunknown\tunqualified\t-\t2026-07-28\n\
+         qualified-board\taarch64\ta platform that holds a record\tpinned\tqualified\tREPORT-2026-07-28-08\t2026-07-28\n";
+    let reports = BTreeSet::from(["REPORT-2026-07-28-08".to_string()]);
+    bound_provenance::validate_platforms(contents, &reports)
+        .expect("the fixture register is well-formed")
 }
 
 // ---- `TEST-P0-01-07-A` clause 3: `LE-35`, the open-debt rule -----------
@@ -605,8 +638,9 @@ fn guardrail_evidence_counts_valid_rows() {
         evidence_row("PERF-D01-G11", "D01", "STORY-P0-01-01"),
         evidence_row("PERF-D05-G11", "D05", "STORY-P0-02-01"),
     );
-    let evidence = validate_guardrail_evidence(&fixture, &evidence_contracts())
-        .expect("valid register passes");
+    let evidence =
+        validate_guardrail_evidence(&fixture, &evidence_contracts(), &evidence_platforms())
+            .expect("valid register passes");
     assert_eq!(evidence.count, 2);
     assert!(evidence.bound_rows.is_empty(), "no G11 row is bound-class");
 }
@@ -629,8 +663,9 @@ fn a_refused_row_records_the_reading_without_counting_as_evidence() {
         evidence_row("PERF-D01-G11", "D01", "STORY-P0-01-01"),
         refused_row("PERF-D05-G11", "D05", "STORY-P0-02-01"),
     );
-    let evidence = validate_guardrail_evidence(&fixture, &evidence_contracts())
-        .expect("a refused row is a legal row");
+    let evidence =
+        validate_guardrail_evidence(&fixture, &evidence_contracts(), &evidence_platforms())
+            .expect("a refused row is a legal row");
     assert_eq!(evidence.count, 1, "only the structural row is evidence");
     assert!(evidence.refused_gates.contains("PERF-D05-G11"));
     assert!(
@@ -650,7 +685,8 @@ fn a_gate_carrying_both_a_refusal_and_evidence_counts_once_as_evidenced() {
         refused_row("PERF-D05-G11", "D05", "STORY-P0-02-03"),
     );
     let evidence =
-        validate_guardrail_evidence(&fixture, &evidence_contracts()).expect("both rows are legal");
+        validate_guardrail_evidence(&fixture, &evidence_contracts(), &evidence_platforms())
+            .expect("both rows are legal");
     assert_eq!(evidence.count, 1);
     assert!(evidence.refused_gates.contains("PERF-D05-G11"));
 }
@@ -662,12 +698,75 @@ fn a_gate_carrying_both_a_refusal_and_evidence_counts_once_as_evidenced() {
 #[test]
 fn guardrail_evidence_rejects_an_evidence_kind_outside_the_vocabulary() {
     let fixture = format!(
-            "{GUARDRAIL_EVIDENCE_HEADER}\nPERF-D01-G11\tD01\tSTORY-P0-01-01\thearsay\tpath\t2026-07-28\tnote\n"
+            "{GUARDRAIL_EVIDENCE_HEADER}\nPERF-D01-G11\tD01\tSTORY-P0-01-01\thearsay\tpath\tn-a\tn-a\tn-a\tn-a\t2026-07-28\tnote\n"
         );
-    let error = validate_guardrail_evidence(&fixture, &evidence_contracts())
+    let error = validate_guardrail_evidence(&fixture, &evidence_contracts(), &evidence_platforms())
         .expect_err("an unknown evidence kind must fail");
     assert!(error.contains("hearsay"), "{error}");
     assert!(error.contains("structural"), "the error must name the vocabulary: {error}");
+}
+
+/// `ADR 0015` decision 2. **A measurement supports a real-time claim only if it
+/// was taken under conditions a deployment will actually meet**, and all three
+/// have to hold at once — interrupts live, shipping image, qualified platform.
+///
+/// The committed register scores **zero** on this today and that is the finding
+/// rather than a defect: every timing number this project holds was produced
+/// with interrupts masked, on a single core, from a fixture. Those rows keep
+/// their value as *mechanism* evidence; what they stop doing is standing as
+/// evidence about a running system.
+#[test]
+fn real_time_evidence_needs_every_condition_and_not_merely_a_number() {
+    let all_three = format!(
+        "{GUARDRAIL_EVIDENCE_HEADER}\n{}",
+        measured_row(
+            "PERF-D01-G11",
+            "D01",
+            "STORY-P0-01-01",
+            "qualified-board",
+            "live",
+            "shipping"
+        ),
+    );
+    let evidence =
+        validate_guardrail_evidence(&all_three, &evidence_contracts(), &evidence_platforms())
+            .expect("a fully-conditioned row is legal");
+    assert_eq!(evidence.count, 1);
+    assert_eq!(evidence.realtime_count, 1, "live + shipping + qualified is real-time evidence");
+
+    // Each condition removed on its own, because a rule that only fires when
+    // everything is wrong is a rule that never fires in practice.
+    for (irq, image, platform, why) in [
+        ("masked", "shipping", "qualified-board", "interrupts masked is not a running system"),
+        ("live", "fixture", "qualified-board", "a fixture is not the shipping image (LE-20)"),
+        ("live", "shipping", "rpi5-bcm2712", "an unqualified platform cannot carry the claim"),
+        ("unrecorded", "shipping", "qualified-board", "unrecorded is never promoted to live"),
+    ] {
+        let fixture = format!(
+            "{GUARDRAIL_EVIDENCE_HEADER}\n{}",
+            measured_row("PERF-D01-G11", "D01", "STORY-P0-01-01", platform, irq, image),
+        );
+        let evidence =
+            validate_guardrail_evidence(&fixture, &evidence_contracts(), &evidence_platforms())
+                .expect("the row is well-formed either way");
+        assert_eq!(evidence.count, 1, "it is still evidence of the mechanism");
+        assert_eq!(evidence.realtime_count, 0, "{why}");
+    }
+}
+
+/// The conditions are closed vocabularies for the same reason `evidence_kind`
+/// became one: a typo that reads as "not masked" would quietly promote a row.
+#[test]
+fn a_misspelled_condition_is_refused_rather_than_read_as_not_masked() {
+    for row in [
+        measured_row("PERF-D01-G11", "D01", "STORY-P0-01-01", "rpi5-bcm2712", "maskd", "fixture"),
+        measured_row("PERF-D01-G11", "D01", "STORY-P0-01-01", "rpi5-bcm2712", "live", "fixure"),
+        measured_row("PERF-D01-G11", "D01", "STORY-P0-01-01", "no-such-board", "live", "fixture"),
+    ] {
+        let fixture = format!("{GUARDRAIL_EVIDENCE_HEADER}\n{row}");
+        validate_guardrail_evidence(&fixture, &evidence_contracts(), &evidence_platforms())
+            .expect_err("an unrecognised condition must be refused, never interpreted");
+    }
 }
 
 // `TEST-P0-01-05-A` clause 1: the check the register exists for. Evidence
@@ -679,7 +778,7 @@ fn guardrail_evidence_rejects_a_domain_the_story_does_not_select() {
         "{GUARDRAIL_EVIDENCE_HEADER}\n{}",
         evidence_row("PERF-D05-G11", "D05", "STORY-P0-01-01"),
     );
-    let error = validate_guardrail_evidence(&fixture, &evidence_contracts())
+    let error = validate_guardrail_evidence(&fixture, &evidence_contracts(), &evidence_platforms())
         .expect_err("a domain outside the contract must fail");
     assert!(error.contains("STORY-P0-01-01"), "{error}");
     assert!(error.contains("D05"), "{error}");
@@ -691,7 +790,7 @@ fn guardrail_evidence_rejects_a_domain_disagreeing_with_its_own_id() {
         "{GUARDRAIL_EVIDENCE_HEADER}\n{}",
         evidence_row("PERF-D01-G11", "D05", "STORY-P0-02-01"),
     );
-    let error = validate_guardrail_evidence(&fixture, &evidence_contracts())
+    let error = validate_guardrail_evidence(&fixture, &evidence_contracts(), &evidence_platforms())
         .expect_err("a mismatched domain must fail");
     assert!(error.contains("D01"), "{error}");
 }
@@ -702,7 +801,7 @@ fn guardrail_evidence_rejects_an_unknown_story() {
         "{GUARDRAIL_EVIDENCE_HEADER}\n{}",
         evidence_row("PERF-D01-G11", "D01", "STORY-P9-99-99"),
     );
-    let error = validate_guardrail_evidence(&fixture, &evidence_contracts())
+    let error = validate_guardrail_evidence(&fixture, &evidence_contracts(), &evidence_platforms())
         .expect_err("an unmapped Story must fail");
     assert!(error.contains("STORY-P9-99-99"), "{error}");
 }
@@ -713,7 +812,7 @@ fn guardrail_evidence_rejects_a_malformed_guardrail_id() {
         "{GUARDRAIL_EVIDENCE_HEADER}\n{}",
         evidence_row("PERF-D01-G99", "D01", "STORY-P0-01-01"),
     );
-    validate_guardrail_evidence(&fixture, &evidence_contracts())
+    validate_guardrail_evidence(&fixture, &evidence_contracts(), &evidence_platforms())
         .expect_err("G99 is not a guardrail");
 }
 
@@ -721,7 +820,7 @@ fn guardrail_evidence_rejects_a_malformed_guardrail_id() {
 fn guardrail_evidence_rejects_duplicates() {
     let row = evidence_row("PERF-D01-G11", "D01", "STORY-P0-01-01");
     let fixture = format!("{GUARDRAIL_EVIDENCE_HEADER}\n{row}{row}");
-    let error = validate_guardrail_evidence(&fixture, &evidence_contracts())
+    let error = validate_guardrail_evidence(&fixture, &evidence_contracts(), &evidence_platforms())
         .expect_err("a duplicate pair must fail");
     assert!(error.contains("duplicate"), "{error}");
 }
@@ -729,7 +828,7 @@ fn guardrail_evidence_rejects_duplicates() {
 #[test]
 fn guardrail_evidence_rejects_a_wrong_header() {
     let fixture = "guardrail_id\tdomain\n";
-    validate_guardrail_evidence(fixture, &evidence_contracts())
+    validate_guardrail_evidence(fixture, &evidence_contracts(), &evidence_platforms())
         .expect_err("a changed header must fail");
 }
 
@@ -916,6 +1015,22 @@ fn loose_end_tokens_are_extracted_without_false_positives() {
     assert_eq!(loose_end_tokens("`LE-19(b)` is open"), vec!["LE-19"]);
     assert!(loose_end_tokens("SAMPLE-01 and TITLE-02").is_empty());
     assert!(loose_end_tokens("LE-1 is too short").is_empty());
+}
+
+/// The register reached `LE-99` on 2026-08-06 and the next row would not
+/// parse. Widening the id is only half of it: this extractor took the **first
+/// two digits**, so `LE-100` in prose read as a citation of `LE-10` — a
+/// silently wrong cross-reference, which is worse than a refusal because
+/// nothing surfaces it. Same family as `LE-80`: a decoder that names the
+/// wrong record confidently.
+#[test]
+fn a_three_digit_loose_end_is_one_token_and_not_the_first_two_of_it() {
+    assert_eq!(loose_end_tokens("closes LE-100."), vec!["LE-100"]);
+    assert_eq!(loose_end_tokens("LE-99 and LE-101 differ"), vec!["LE-99", "LE-101"]);
+    // Two digits still stop at two when what follows is not a digit.
+    assert_eq!(loose_end_tokens("`LE-19(b)` is open"), vec!["LE-19"]);
+    // Four digits are not an id, and are refused rather than truncated to three.
+    assert!(loose_end_tokens("LE-1000 is not an id").is_empty());
 }
 
 #[test]
