@@ -541,6 +541,95 @@ enforces is a comment. So the honest ordering is: the *shape* is now settled
 enough to stop re-deriving, and the first mechanism it needs is one the project
 has already scoped and deliberately not started.
 
+## 5f. Related files, and integrity as an invariant rather than a dial — 2026-08-07
+
+Two more from the owner, in one sentence:
+
+> *A cluster represents a collection of **related** files stored in a DB instead
+> of a file system. **The integrity of data is always ensured within a cluster.***
+
+The first sharpens §5c's split criterion. The second **contradicts §5e**, and the
+contradiction is the useful part.
+
+### "Related" must be co-extensive with containment and lifetime, or the boundary lies
+
+§5c concluded that stores split by *containment*, never by size; §5e added
+lifetime and entitlement. "A collection of related files" could quietly reopen
+the size argument under a friendlier word — *related* is exactly the kind of
+criterion that starts as containment and decays into convenience, because
+everything is related to something.
+
+So the form to carry is the constraining one: **files belong in one cluster when
+they share a fate.** Same authority, same lifetime, same budget, same integrity
+obligation. If two files are "related" but one is transient scratch and the other
+is the audit journal, they are *not* one cluster no matter how naturally a person
+would group them — because §5e's boundary carries authority and lifetime, and a
+boundary that carries two different lifetimes carries neither.
+
+That gives a testable rule rather than a feeling: **relatedness is not the
+criterion; shared fate is, and relatedness is how a person recognises it.**
+
+### The contradiction, stated plainly
+
+§5e says integrity is per-scope and declarable — *"a journal cluster can demand
+checksums-on-read; a scratch cluster can decline them and say so."* The owner
+says integrity is **always** ensured within a cluster. Both cannot stand, and the
+owner's is the better contract for three reasons this project already argues
+elsewhere:
+
+- **A dial gets set wrong once and is silent about it.** §5e's own case for the
+  dial was that a global choice is "set by whichever workload is most paranoid
+  and paid for by all of them" — but the failure mode of a per-scope dial is
+  worse than paying for paranoia: it is a scratch cluster that was cheap on
+  Tuesday and load-bearing on Friday, with nothing marking the transition.
+- **An invariant can be tested; a dial can only be inspected.** The whole
+  assurance spine is built on absence-tested properties, and "no cluster
+  anywhere is readable without its integrity check" is exactly that shape.
+- **It costs what it costs, in the open.** Uniform integrity means the cost is in
+  every declared budget rather than hidden in the ones that opted in — which is
+  `ADR 0015`'s posture applied to storage: declare and enforce a budget.
+
+**So §5e's integrity dial is withdrawn.** Entitlement still varies per cluster
+(who may read and write it); integrity does not (what a read is allowed to
+return). §5e's other three properties — access bound, resource draw, lifetime —
+are unaffected.
+
+### The question this raises, which is not yet answered
+
+**"Always ensured" has two readings, and they cost very differently:**
+
+1. **Always *detected*.** Every read is checksum-verified; a mismatch is a named,
+   fail-closed refusal and never a returned byte. Bounded, cheap, and exactly
+   this project's posture everywhere else — a refusal is spoken, never a plausible
+   value. It needs no redundancy.
+2. **Always *repaired*.** Corruption is corrected transparently. This cannot be
+   done without redundancy *inside the cluster* — a second copy, ZFS's ditto
+   blocks or a mirror — so it changes the space contract, and a cluster's declared
+   reservation must then cover its own replicas.
+
+Reading 1 is achievable now and consistent with `SECURITY_CHARTER.md`'s
+fail-closed default. Reading 2 is a storage-redundancy Feature with its own
+budget arithmetic. **Until this is decided, the note should not be read as
+promising either** — and the decision belongs in the ADR §6 already requires,
+not in a Story.
+
+### What "within a cluster" excludes, and why that is a feature
+
+The guarantee is scoped to a cluster, so **there are no cross-cluster
+transactions** and none should be added. That falls out of §5a's no-shared-
+structure rule and is worth stating as a positive: an operation spanning two
+clusters has no atomicity guarantee, which is precisely what keeps the write
+bound *local* and the blast radius one boundary wide. A design that later wants
+multi-cluster atomicity is asking for a global commit, and a global commit is a
+global bound — the thing §5d removed.
+
+### Where 5f lands
+
+The shape is now settled to the point of being repetitive, which is the signal to
+stop refining it. §6's conditions are unchanged and still unmet; the first
+mechanism is still `FEAT-P1-12`'s reservation floor, which still does not exist.
+This section adds no surface, exactly as §7 says the note must not.
+
 ## 6. If this is ever picked up
 
 Not a plan — the conditions under which a plan would be worth writing.
@@ -561,6 +650,14 @@ Not a plan — the conditions under which a plan would be worth writing.
 1e. **A cluster declares its entitlement and its lifetime at creation** (§5e) — authority
    is a property of the store, not of the caller's path to it, and transient-versus-persistent
    is a value rather than a retrofit. Say *bounded*, not *deterministic* (`ADR 0015`).
+1f. **Integrity is an invariant of every cluster, not a per-cluster dial** (§5f), and the
+   ADR states which of *always detected* and *always repaired* it means before a Story
+   exists — the second needs redundancy inside the cluster and therefore changes the
+   reservation arithmetic of 1a. Files share a cluster when they share a **fate**
+   (authority, lifetime, budget, integrity obligation); "related" is how a person
+   recognises that, never the criterion itself. **No cross-cluster transactions**, ever:
+   a guarantee spanning two clusters is a global commit, and a global commit is the global
+   bound §5d removed.
 2. **TinyOS can read a persistent device.** Today it cannot, on this board, at all.
 3. **It is a user-layer application**, per `tinydb-rt-scope.md` §5 — never kernel code, and
    never in `kernel` or `hal-arm64`.
