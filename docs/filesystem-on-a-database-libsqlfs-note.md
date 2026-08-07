@@ -630,6 +630,104 @@ stop refining it. §6's conditions are unchanged and still unmet; the first
 mechanism is still `FEAT-P1-12`'s reservation floor, which still does not exist.
 This section adds no surface, exactly as §7 says the note must not.
 
+## 5g. Transactional mutation is the mechanism — and §5f asked the wrong question, 2026-08-07
+
+The owner, closing §5f's open question:
+
+> *Integrity always ensured ⇒ **files are mutated as a transaction**. This is
+> clearly the foundation on which ZFS is based.*
+> *Even if you pull the plug, the files are not corrupted.*
+
+**§5f's question was mis-framed and is withdrawn.** It offered *always detected*
+versus *always repaired* — both of which are about **corruption of stored bytes**.
+The guarantee being made is about **atomicity of mutation**: there is never a
+torn intermediate state to detect in the first place. That is a different axis,
+and it is the foundational one. Getting the axis wrong would have sent the ADR
+looking for redundancy when what it actually needs is a commit protocol.
+
+### Three separable properties, and which one this is
+
+ZFS holds all three; they are independent, cost differently, and only the last is
+still open:
+
+| property | mechanism | needs redundancy? | status here |
+|---|---|---|---|
+| **Atomicity** — no torn state, ever | copy-on-write, then one atomic root swap | no | **this is the owner's guarantee** |
+| **Detection** — a bad block is never returned as good | checksum in the parent block pointer, verified on read | no | cheap, ZFS-native, assume yes |
+| **Repair** — a bad block is transparently corrected | a second copy: mirror, ditto blocks, RAIDZ | **yes** | still open; changes §5a's reservation arithmetic |
+
+Atomicity and detection together are what "even if you pull the plug, the files
+are not corrupted" actually requires. Repair is a separate Feature with a space
+cost, and the ADR should say so rather than letting it ride in on the same
+sentence.
+
+### This ratifies §4 item 2 rather than extending it
+
+§4 item 2 already identified *"crash consistency by construction rather than by
+repair"* as the strongest argument in the whole idea, and asked that it be stated
+in exactly those terms whenever this resurfaces. It has resurfaced, and it is
+stated in exactly those terms. **Two independent arrivals at the same conclusion
+is the signal to stop re-litigating the mechanism and start costing it.**
+
+### What copy-on-write costs, and why the cluster boundary is what makes it affordable
+
+This is the part the note has not yet drawn, and it is where the real-time goal
+and the storage design meet.
+
+- **A mutation ripples to the root.** Under COW nothing is overwritten in place,
+  so changing one leaf rewrites every block on the path above it, up to and
+  including the root that gets swapped. A single small write therefore costs
+  `O(depth)` block writes. **§5d's per-cluster `MAX_DEPTH` is exactly that bound**
+  — the cluster's indexing depth and its write-amplification bound are *the same
+  number*. That convergence is the strongest argument for the cluster boundary
+  yet made in this note: a drive-wide tree would force every write to be budgeted
+  against the deepest path the drive could ever hold, and a cluster lets a small
+  scope declare a small write cost and mean it (`ADR 0015`: declare and enforce).
+- **Transaction groups cannot be inherited as ZFS batches them.** ZFS accumulates
+  dirty state and commits periodically, and the flush's size is a function of how
+  much accumulated — unbounded work wearing an amortised disguise, which is
+  `tinydb-rt-scope.md` §4's exact objection to page splits. A bounded form exists
+  and is the same mechanism as everything else here: **a per-cluster dirty
+  ceiling, declared at creation and flushed when reached**, which is `FEAT-P1-12`'s
+  reservation floor once more.
+- **COW makes a free-space structure mandatory, which §5c warned against — and
+  ZFS answers it.** §5c said an extent allocator is a free-space manager and a
+  free-space manager is `fsck`; §4 item 2 celebrated having *no* free-block
+  bitmap. Neither survives COW unamended, because always-allocate-elsewhere
+  requires knowing what is free. ZFS's resolution is the one to copy: **the
+  allocator's own state is committed inside the same transaction as the data**, so
+  there is still no second structure that can disagree with the first, and still
+  no `fsck`. §4 item 2's conclusion holds; §5c's simplification does not, and the
+  cost it warned about is real but is paid *per cluster, over a fixed
+  reservation*, rather than drive-wide.
+
+### The payoff is a boot-time bound, not only a safety property
+
+Worth stating in the project's own currency: the reason no-`fsck` matters here is
+not merely that data survives. **A repair-on-mount pass is unbounded startup
+work.** An OS that intends to boot to a deadline cannot have one. Crash
+consistency by construction is therefore a *real-time* property as much as a
+durability one, and it belongs in the RT fitness argument, not only in the
+storage chapter.
+
+### The claim is now falsifiable on this bench, which it was not yesterday
+
+*"Even if you pull the plug, the files are not corrupted"* is a claim of exactly
+the kind `CODING_STANDARDS.md` refuses to accept on assertion — "iron clad" is
+never evidence by itself. It has always been untestable here because pulling the
+plug required a hand.
+
+**As of 2026-08-07 it does not** (`LE-95`, closed in `hand-2026-08-07/17A`):
+`tos64-power cycle` switches real mains under software control, and the board
+comes back and reports on the wire at exit 0. The experiment that would earn this
+claim is therefore now writable as a fixture rather than wished for — **N cycles
+cut at randomised points inside a write workload, then every cluster mounted and
+verified, with the cut points recorded** — and the failure it hunts is the one
+that only ever appears at the moment of the cut.
+
+That experiment does not exist and nothing above should be read as though it did.
+But the instrument does, and it arrived the same day as the claim.
+
 ## 6. If this is ever picked up
 
 Not a plan — the conditions under which a plan would be worth writing.
@@ -650,10 +748,16 @@ Not a plan — the conditions under which a plan would be worth writing.
 1e. **A cluster declares its entitlement and its lifetime at creation** (§5e) — authority
    is a property of the store, not of the caller's path to it, and transient-versus-persistent
    is a value rather than a retrofit. Say *bounded*, not *deterministic* (`ADR 0015`).
-1f. **Integrity is an invariant of every cluster, not a per-cluster dial** (§5f), and the
-   ADR states which of *always detected* and *always repaired* it means before a Story
-   exists — the second needs redundancy inside the cluster and therefore changes the
-   reservation arithmetic of 1a. Files share a cluster when they share a **fate**
+1f. **Integrity is an invariant of every cluster, not a per-cluster dial** (§5f), and it is
+   delivered by **transactional mutation** — copy-on-write with one atomic root swap, so
+   there is never a torn state to detect (§5g). Atomicity and checksum *detection* need no
+   redundancy and are assumed in; **only transparent *repair* is still open**, and it needs
+   a second copy inside the cluster and therefore changes 1a's reservation arithmetic. The
+   write bound is `O(depth)` and **§5d's per-cluster `MAX_DEPTH` is that bound** — say
+   *bounded*, not *deterministic*. A per-cluster dirty ceiling replaces ZFS's transaction
+   groups, whose flush size is unbounded. The allocator COW forces on us is committed
+   **inside** the transaction, which is how §4 item 2's no-`fsck` conclusion survives §5c's
+   warning. Files share a cluster when they share a **fate**
    (authority, lifetime, budget, integrity obligation); "related" is how a person
    recognises that, never the criterion itself. **No cross-cluster transactions**, ever:
    a guarantee spanning two clusters is a global commit, and a global commit is the global
