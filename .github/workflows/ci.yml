@@ -149,6 +149,43 @@ jobs:
       - name: cargo test --workspace
         run: cargo test --workspace
 
+  # LE-114 — an entire top-level code directory was outside every gate this
+  # project owns, and it is the one holding the bench instruments that have
+  # already lied twice: LE-80 (ti64dink decoding a live rung as an absence and
+  # exiting 1 as a timeout) and LE-87 (a stale tos64-netboot silently winning
+  # the UDP-69 bind and serving a wrong image). netboot.tests and power.tests
+  # were passing on a Windows bench and gating nothing here.
+  #
+  # ITS OWN JOB, beside host-tests rather than inside the fast governance job,
+  # for the same reason the host suite is: the deterministic gates exist to
+  # fail in seconds and must not queue behind a test run. BLOCKING from day
+  # one — LE-100's argument, unchanged. Landed ALONE, as the loose end asks:
+  # these tools do NIC enumeration and raw capture, so the first runs may
+  # surface tests that pass on the Windows bench and fail here (LE-64's
+  # family), and that signal must arrive untangled from anyone else's change.
+  #
+  # Routed through `cargo run -p xtask -- check-tool-tests` rather than a bare
+  # `dotnet test` so the gate has ONE spelling everywhere: the same command
+  # gates a bench and this runner, discovery is derived from the directory and
+  # refuses to match nothing, and `check-ci-gates` — whose CI_ENFORCED list
+  # carries xtask subcommands — refuses a workflow that drops this job.
+  #
+  # The runner does not ship the .NET SDK the tools target, so it is installed
+  # explicitly — LE-114's own caution that this is not a one-line addition.
+  tool-tests:
+    name: LE-114 — the bench-instrument test suites under work/tools
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Install pinned toolchain
+        run: |
+          rustup toolchain install --profile minimal "$(grep -oP 'channel\s*=\s*"\K[^"]+' rust-toolchain.toml)"
+      - name: Every work/tools *.tests suite, discovered and run
+        run: cargo run -p xtask -- check-tool-tests
+
   kernel-boot-x86_64:
     name: TEST-P0-01-01-A / TEST-P0-01-03-A — kernel boots to halt under QEMU
     runs-on: ubuntu-latest

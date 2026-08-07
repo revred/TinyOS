@@ -27,6 +27,7 @@ mod probe_pe;
 mod shell_parity;
 mod spine_files;
 mod timing;
+mod tool_tests;
 mod txe;
 
 use std::env;
@@ -539,6 +540,10 @@ const SUBCOMMANDS: &[Subcommand] = &[
     Subcommand {
         name: "check-guest-images",
         summary: "Compile EVERY x86_64 Tier 0 fixture binary — the same hole, the other arch",
+    },
+    Subcommand {
+        name: "check-tool-tests",
+        summary: "Run every work/tools *.tests suite — the bench instruments gate nothing until this runs",
     },
     Subcommand {
         name: "board-run",
@@ -1241,6 +1246,32 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        // `LE-114`. The bench-instrument suites — 6,000+ lines of C# whose two
+        // most expensive defects (`LE-80`, `LE-87`) each cost a board session —
+        // gated nothing anywhere until this subcommand existed. Discovery is
+        // derived from the directory, refuses to match nothing, and one
+        // spelling serves the bench and the runner alike.
+        "check-tool-tests" => {
+            let result = os_root().and_then(|root| {
+                let repo_root = root.parent().ok_or_else(|| {
+                    format!("could not resolve repository root from {}", root.display())
+                })?;
+                tool_tests::check_tool_tests(repo_root)
+            });
+            match result {
+                Ok(count) => {
+                    println!(
+                        "tool-tests-check: {count} bench-instrument suite(s) discovered and \
+                         passed — the instruments gate something now"
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(message) => {
+                    eprintln!("xtask: tool test check failed: {message}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         "check-assurance-spine" => {
             let result = os_root().and_then(|root| {
                 let repo_root = root.parent().ok_or_else(|| {

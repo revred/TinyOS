@@ -87,7 +87,7 @@ const GOVERNANCE_JOB: &str = "governance-gates";
 /// should be equally deliberate, and is now equally visible.
 ///
 /// `check-ci-gates` is in its own list on purpose — see rule 4.
-pub const CI_ENFORCED: [&str; 7] = [
+pub const CI_ENFORCED: [&str; 8] = [
     "check-assurance-spine",
     "check-performance-catalogue",
     "check-crate-sizes",
@@ -101,6 +101,11 @@ pub const CI_ENFORCED: [&str; 7] = [
     // re-derived by hand — a mechanism nobody is required to run is a mechanism
     // that does not run.
     "check-feasibility",
+    // The bench-instrument suites (`LE-114`). This row is the half `LE-106`
+    // shows is load-bearing: a job someone adds can be a job someone later
+    // drops, and dropping this one must fail the build rather than quietly
+    // returning work/tools/ to the ungated state it sat in for its whole life.
+    "check-tool-tests",
 ];
 
 /// What the gate found, for the operator line.
