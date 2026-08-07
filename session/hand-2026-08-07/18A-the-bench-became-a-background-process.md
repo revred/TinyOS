@@ -6,9 +6,16 @@ Written at the owner's ask for an **aspirational agenda, and its achievement**.
 **The one sentence, if only one survives:** *The Q3 residency campaign — the one
 piece of evidence in this project that a manual bench cannot produce by
 definition, and the single locked gate behind `0/102` assurance-verified
-Stories — ran twice, unattended, in one command each time; and its result is not
-a qualification but a refutation of its own instrument, which is a far better
-outcome than the pass would have been.*
+Stories — ran four times unattended, refuted its own instrument, was fixed,
+re-ran clean against a passing positive control, and
+**`rpi5-bcm2712` is now this project's first qualified platform**
+([`REPORT-2026-08-07-02`](../../goals/reports/REPORT-2026-08-07-02.md)).*
+
+> **Amended in place, §7.** §3 and §5 below were written *before* the fix, and
+> they say Q3 cannot close on this data and the gate stayed shut. That was true
+> when written and is no longer. They are left standing rather than rewritten —
+> the refutation is the more instructive half of this session — and §7 carries
+> what happened after. Where they disagree, §7 wins.
 
 ## 1. The agenda, and why it was the right one
 
@@ -138,6 +145,61 @@ immediately.
    harness arm moves ten gates. This is the work that a background bench was
    supposed to unlock, and it is now unblocked in principle and gated only on
    item 1 in practice.
+
+## 7. What happened after §5 was written — the gate opened
+
+§5 named `LE-121` as the first item and said the qualification record was "one
+boot away, a boot that now costs one command." That was tested immediately, and
+it was true.
+
+**The fix.** `pi5::CONFIG_TXT` gained `force_turbo=1`, globally rather than
+per-fixture, because the `cycles_per_us=2400` conversion it protects is used by
+every measured fixture and not only by the campaign that exposed it. The
+confound is *removed* rather than corrected, and the reason is not laziness:
+within one window a core at 62.5% for the whole window and a core at 100% for
+62.5% of it produce identical counter totals, so window arithmetic cannot
+separate DVFS from EL3 residency **even in principle**.
+
+**The experiment.** Same 6,000 windows, same 60 s of accumulated window time,
+one line of `config.txt` apart:
+
+```text
+unpinned   unaccounted  min=0  p50=0  p99=202499  p99_9=202500  max=202500
+pinned     unaccounted  min=0  p50=0  p99=0       p99_9=0       max=0
+```
+
+**And the zero was not accepted on its own**, because `13A`'s warning cuts both
+ways — a distribution of zeros is the cleanest possible pass while measuring
+nothing. The `qual-control` arm ran next and **passed**: one benign
+`PSCI_VERSION` SMC cost `control_unaccounted=15` physical ticks against
+`idle_unaccounted_max=0` over 16 idle windows, with `event_fired=true` **and**
+`seen=true`. At 54 MHz that is ≈ **278 ns** of resolution, so the campaign's
+floor is not "we saw nothing" but "we saw nothing with an instrument
+demonstrated on the same boot to resolve a sub-microsecond EL3 excursion."
+
+**The filing, which is what makes any of it count.**
+[`REPORT-2026-08-07-02`](../../goals/reports/REPORT-2026-08-07-02.md) carries
+the raw evidence, states Q3's four honest limits (a pinned clock, one core, 60
+seconds, a near-idle system), and **files the confound alongside the result on
+purpose** — a future reader who sees a large `unaccounted` distribution should
+suspect the clock before the secure world.
+`qualified-platforms.tsv` moves `rpi5-bcm2712` to **`qualified`**, and the spine
+now reports **`5 platforms (1 qualified)`** where it has read zero for the
+project's entire life.
+
+**What that does and does not mean.** It does not close a single `G04` gate; it
+makes them *reachable*, each still owing its own measured evidence. `ADR 0015`'s
+distinction holds exactly: a qualification record is what makes a measured bound
+quotable at all, and is not itself a bound. `LE-121` also stays open on its
+remaining half — the confound is removed and *proven* removed, but the
+**refusal** is not built, and `force_turbo=1` lives in a `config.txt` on a card,
+the same class of constant no test can reach that the divergence record's
+`os_check=0` lesson is about.
+
+**Four boots, all four cycled by software, roughly 78 s each.** That is the
+sentence §4 was really about: the second run existed only because the first
+found a defect, and the fourth existed only because the third's zero needed a
+witness.
 
 ## 6. Read next
 
