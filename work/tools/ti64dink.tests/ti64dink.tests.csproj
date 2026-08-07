@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The test project for the operator's terminal, and the register says why
+       it was overdue: ti64dink has the project's most expensive instrument
+       defect history (LE-80: a live rung decoded as an absence, a 300 s watch
+       exiting 1 as a timeout over a stream full of the event) and its newest
+       changes shipped untested (LE-114). Before M4 makes this tool *the*
+       interface to the OS (hand-2026-08-07/10A §3 S3), its console and send
+       paths get the same scripted-seam discipline the netboot server got
+       after LE-87.
+
+       The pure paths are tested here: decode, harvest, envelope assembly,
+       the watch conditions, the send arms, and the arrival-time cadence
+       (LE-115). The wpcap P/Invoke seam is deliberately not — that is a
+       platform semantic a host without Npcap cannot exercise, and faking it
+       would test the fake. -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ti64dink\ti64dink.csproj" />
+  </ItemGroup>
+
+</Project>

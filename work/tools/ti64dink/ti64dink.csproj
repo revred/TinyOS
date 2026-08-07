@@ -20,4 +20,8 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="ti64dink.tests" />
+  </ItemGroup>
+
 </Project>

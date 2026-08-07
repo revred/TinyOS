@@ -284,10 +284,21 @@ internal static class Program
                 : $"ti64dink: listening {window}s on {chosen}");
             var startedAt = DateTime.UtcNow;
             var wholeFrames = rawPath is null ? null : new List<byte[]>();
+            // LE-115: every live frame prints with its arrival stamp as it
+            // lands, and the beacons among them become the beat-cadence
+            // samples. Printed from the capture loop so an operator tailing
+            // the log sees the board live rather than after the window.
+            var samples = new List<Cadence.BeatSample>();
             var payloads = Live.Capture(
-                chosen, window, watch is null ? null : watch.Offer, out var seen, wholeFrames);
+                chosen, window, watch is null ? null : watch.Offer, out var seen, wholeFrames,
+                (seconds, payload) =>
+                {
+                    Console.WriteLine(Cadence.ArrivalLine(seconds, payload));
+                    if (Cadence.FromPayload(seconds, payload) is { } sample) samples.Add(sample);
+                });
             if (rawPath is not null) WriteRawBeacons(wholeFrames!, rawPath);
             Console.WriteLine($"ti64dink: {seen} TOS64 frame(s) captured");
+            foreach (var line in Cadence.Summarise(samples)) Console.WriteLine(line);
             Console.WriteLine();
             // Each captured payload is decoded on its own: a TOS64 frame may be
             // a beacon or a transcript line rather than a spoor frame, and only
@@ -367,7 +378,11 @@ internal static class Program
     /// name — an epoch change, a rung appearing, a value crossing a bound (the
     /// last via `text=`, since every envelope value rides a text line). An
     /// unknown condition or rung name is refused at parse, not guessed at.
-    private sealed class Watch
+    ///
+    /// Internal for `ti64dink.tests`: the watch that once reported a live
+    /// event as an absence for 300 seconds (`LE-80`) is exactly the code that
+    /// must never again be testable only from a bench.
+    internal sealed class Watch
     {
         private enum Kind { EpochChange, Rung, Text }
 
@@ -495,7 +510,9 @@ internal static class Program
     /// comparing the frame to itself.
     private static void WriteRawBeacons(List<byte[]> frames, string rawPath)
     {
-        const string Prefix = "TOS64-PRESENT/1 board=pi5-bcm2712 seq=";
+        // One constant with the cadence sampler (LE-115), so the two readers
+        // of the beacon line cannot drift apart — the LE-80 shape, avoided.
+        const string Prefix = Cadence.BeaconSeqPrefix;
         var lines = new List<string>
         {
             "# FEAT-P1-09 exit criterion: beacon frames as captured, whole, with the",
@@ -529,7 +546,7 @@ internal static class Program
         }
     }
 
-    private static void HarvestText(byte[] bytes, List<string> into)
+    internal static void HarvestText(byte[] bytes, List<string> into)
     {
         var at = 0;
         while (at < bytes.Length)
@@ -638,6 +655,10 @@ internal static class Program
         Console.WriteLine("                                      envelope the board transmits as text");
         Console.WriteLine("                                      frames, for `xtask parse-meas`");
         Console.WriteLine();
+        Console.WriteLine("  Live frames print with a +seconds arrival stamp (monotonic, from capture");
+        Console.WriteLine("  start), and captured beacons yield a mean-rate cadence summary (LE-115).");
+        Console.WriteLine("  The mean over the span is the evidence; per-frame jitter is the host's.");
+        Console.WriteLine();
         Console.WriteLine("  ti64dink --until <cond> [--timeout 120]   wait for a board event instead");
         Console.WriteLine("                                            of guessing a window; exits 0 the");
         Console.WriteLine("                                            moment it is sighted, 1 on timeout");
@@ -707,7 +728,7 @@ internal static class Program
         return -1;
     }
 
-    private sealed record Frame(ulong Seq, int Count, uint Epoch, ushort Flags, List<ulong> Records)
+    internal sealed record Frame(ulong Seq, int Count, uint Epoch, ushort Flags, List<ulong> Records)
     {
         /// A re-announcement of the boot certificate rather than fresh stream.
         internal bool Retained => (Flags & FlagRetained) != 0;
@@ -720,7 +741,7 @@ internal static class Program
         internal ulong? ExpectedNext => Retained ? null : Seq + (ulong)Count;
     }
 
-    private static List<Frame> DecodeAll(byte[] bytes)
+    internal static List<Frame> DecodeAll(byte[] bytes)
     {
         var frames = new List<Frame>();
         var at = 0;
@@ -1096,7 +1117,7 @@ internal static class Program
     /// exit 1. That is `LE-76` exactly - a text channel with no retention - and
     /// the honest reading of an exit 1 here is "the envelope parsed and the
     /// verdict was never on the wire during this window", not "the parse failed".
-    private static List<string> EnvelopeForParser(List<string> text)
+    internal static List<string> EnvelopeForParser(List<string> text)
     {
         var envelope = text.FindAll(line => line.StartsWith("TOS64-MEAS/2", StringComparison.Ordinal));
         var begin = envelope.FindIndex(line => line.Contains(" BEGIN ", StringComparison.Ordinal));
@@ -1175,7 +1196,7 @@ internal static class Program
     /// agree with what the kernel says that rung stamps as. A task index cannot
     /// masquerade as a rung unless it also arrives under that rung's own pair,
     /// and no rung has id 0.
-    private static readonly (int Target, string Name, string Category, string Action)[] Rungs =
+    internal static readonly (int Target, string Name, string Category, string Action)[] Rungs =
     [
         (1, "MmuEnabled", "Boot", "Create"),
         (2, "GicRouted", "Boot", "Create"),

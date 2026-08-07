@@ -209,9 +209,15 @@ internal static class Live
     /// output — so a comparison against a header-stripped payload would silently
     /// skip the three fields most likely to be wrong, and pass while proving
     /// less than it claimed.
+    ///
+    /// `onArrival`, when given, receives each admitted payload WITH its arrival
+    /// time in seconds since capture start (`LE-115`). Stopwatch-based because
+    /// it must be monotonic and only differences matter; invoked inside the
+    /// loop so an operator tailing the log sees frames as they land rather
+    /// than a banner and five minutes of silence (`LE-90`'s lesson).
     internal static List<byte[]> Capture(
         string device, int seconds, Func<byte[], bool>? sighted, out int framesSeen,
-        List<byte[]>? wholeFrames = null)
+        List<byte[]>? wholeFrames = null, Action<double, byte[]>? onArrival = null)
     {
         var errbuf = new byte[ErrbufSize];
         // 65536 snaplen so nothing is ever truncated; promiscuous because the
@@ -226,6 +232,7 @@ internal static class Live
         var payloads = new List<byte[]>();
         framesSeen = 0;
         var deadline = DateTime.UtcNow.AddSeconds(seconds);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             while (DateTime.UtcNow < deadline)
@@ -249,6 +256,7 @@ internal static class Live
                 framesSeen++;
                 wholeFrames?.Add(frame);
                 var payload = frame[14..];
+                onArrival?.Invoke(clock.Elapsed.TotalSeconds, payload);
                 payloads.Add(payload);
                 if (sighted is not null && sighted(payload)) break;
             }
