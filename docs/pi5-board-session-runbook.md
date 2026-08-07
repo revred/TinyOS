@@ -21,6 +21,39 @@ TinyOS's bring-up image has no display output. The debug UART (115200 8N1) is th
 only place the board can speak; without the adapter a working boot and a dead board
 look identical.
 
+## 0b. Pre-flight, added 2026-08-07 — binding before any capture on the wire era's bench
+
+Three checks, each earned by a recorded incident, each cheaper than the failure
+it prevents:
+
+1. **One server, and it is the one you mean (`LE-87`).** Before serving
+   anything: `netstat -abno | findstr :69` (elevated) or
+   `Get-Process tos64-netboot`. Exactly one `tos64-netboot` may hold UDP 69,
+   and it must be serving the root and image *you* built this sitting — a
+   stale server silently winning the bind served a wrong image with a
+   complete, plausible, entirely wrong envelope once already. If a server is
+   already running that you did not start this sitting (one was observed live
+   on 2026-08-07, `hand-2026-08-07/11A` §1), stop it and start your own.
+2. **The qualification record's tripwire (`LE-117`).** If the SD card's Pi OS
+   role boots for any reason this sitting — and always before filing new wire
+   evidence — read the bootloader version (`vcgencmd bootloader_version` over
+   ssh on the Pi OS role) and compare against
+   `REPORT-2026-08-07-01`'s pinned EEPROM
+   `086b83e3332dfc8927c56762771d082f3077a1ae` (2026-05-26). **A mismatch is
+   not a failure; it is the record's void clause firing** — stop, and the
+   response is a new qualification Report, never a quiet re-pin.
+3. **If the canvas matters this sitting:** power the board while the monitor
+   is *actively displaying a live source*, not merely awake — firmware scanout
+   bring-up at power-on is nondeterministic (`hand-2026-08-07/07F` §7b holds
+   the procedure). The wire is unaffected either way.
+
+**Channel note.** §1's adapter loopback and the serial-capture halves of §3–§4
+describe the PL011 era. Since 2026-08-07, `TEST-P1-07-01-A`'s dated amendment
+retires the PL011 from the evidence path (`LE-47`): evidence rides Ethernet —
+netboot with transfer digests, `ti64dink` captures (with arrival timestamps
+since `LE-115`), and `xtask parse-meas` verdicts. Serial steps remain below as
+the historical procedure and for a bench that someday has a working adapter.
+
 ## 1. Loopback-test the adapter first (`TEST-P1-07-01-A` clause 1)
 
 **Why this exists.** Between the keyboard and the Pi's silicon there are five
