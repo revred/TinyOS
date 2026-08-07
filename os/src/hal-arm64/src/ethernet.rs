@@ -425,9 +425,42 @@ pub fn receive_line(
         gem_receive::ReceiveState::Refused(gem_receive::EnableError::MisalignedRing) => {
             line.push("refused reason=align");
         }
+        gem_receive::ReceiveState::Refused(gem_receive::EnableError::AliasedGrants) => {
+            line.push("refused reason=alias");
+        }
     }
     line.push(" accepted=");
     line.push_dec(accepted);
+    line.push(" refused=");
+    line.push_dec(refused);
+    line.push("\n");
+    (line.bytes, line.at)
+}
+
+/// Builds one `TOS64-CMD/1` line (`STORY-P1-09-17`): what the command channel
+/// has actually done, repainted every beat beside the inbound row.
+///
+/// Small by design. The canvas is UX and the wire is evidence, so this row
+/// exists so an operator at the bench can see the OS respond without opening a
+/// capture — not so that the canvas becomes a second, weaker evidence channel.
+/// Every number here also leaves on the cable in an answer or a refusal.
+///
+/// `last=none` is printed rather than the field omitted, for the reason the
+/// receive row prints `accepted=0`: nothing-yet is a claim, and a missing field
+/// is only an absence of information.
+pub fn command_line(
+    last: Option<crate::tos64_cmd::Verb>,
+    answered: u32,
+    refused: u32,
+) -> ([u8; LINK_LINE_CAPACITY], usize) {
+    let mut line = LineBuilder::new();
+    line.push("TOS64-CMD/1 last=");
+    match last {
+        Some(verb) => line.push(verb.name()),
+        None => line.push("none"),
+    }
+    line.push(" answered=");
+    line.push_dec(answered);
     line.push(" refused=");
     line.push_dec(refused);
     line.push("\n");
@@ -1184,11 +1217,55 @@ mod tests {
             (ReceiveState::Stopped(ReceiveError::BufferUnavailable), "stopped reason=nobuffer"),
             (ReceiveState::Refused(EnableError::UnencodableBufferSize), "refused reason=size"),
             (ReceiveState::Refused(EnableError::MisalignedRing), "refused reason=align"),
+            (ReceiveState::Refused(EnableError::AliasedGrants), "refused reason=alias"),
         ] {
             let (bytes, len) = receive_line(state, 2, 5);
             let text = core::str::from_utf8(&bytes[..len]).unwrap();
             assert_eq!(text, format!("TOS64-RX/1 state={expected} accepted=2 refused=5\n"));
         }
+    }
+
+    // TEST-P1-09-17-A clause 3, the canvas half (`hand-2026-08-07/15A` Part
+    // III): the command channel's state, painted the way the RX row already is.
+
+    #[test]
+    fn the_command_line_names_the_last_verb_answered_and_both_counts() {
+        use crate::tos64_cmd::{CommandChannel, Verb, ANSWER_CAPACITY};
+        let (bytes, len) = command_line(None, 0, 0);
+        assert_eq!(
+            core::str::from_utf8(&bytes[..len]).unwrap(),
+            "TOS64-CMD/1 last=none answered=0 refused=0\n",
+            "a board that has answered nothing says so; a blank row is not a claim"
+        );
+
+        // Driven through the channel rather than from literals, so the row and
+        // the thing it reports cannot drift.
+        let mut channel = CommandChannel::new();
+        let mut out = [0u8; ANSWER_CAPACITY];
+        let mut payload = [0u8; crate::tos64_cmd::COMMAND_PAYLOAD_BYTES];
+        payload[crate::tos64_cmd::field::PREFIX]
+            .copy_from_slice(crate::gem_receive::ENVELOPE_PREFIX);
+        payload[crate::tos64_cmd::field::MAGIC].copy_from_slice(crate::tos64_cmd::COMMAND_MAGIC);
+        payload[crate::tos64_cmd::field::VERB].copy_from_slice(&Verb::Ping.id().to_be_bytes());
+        channel.offer(&payload);
+        channel.take(b"", &mut out);
+        let (bytes, len) = command_line(channel.last(), channel.answered(), channel.refused());
+        assert_eq!(
+            core::str::from_utf8(&bytes[..len]).unwrap(),
+            "TOS64-CMD/1 last=PING answered=1 refused=0\n"
+        );
+
+        let (bytes, len) = command_line(Some(Verb::Status), 4, 9);
+        assert_eq!(
+            core::str::from_utf8(&bytes[..len]).unwrap(),
+            "TOS64-CMD/1 last=STATUS answered=4 refused=9\n"
+        );
+    }
+
+    #[test]
+    fn the_command_line_never_overruns_its_buffer_at_the_widest_counts() {
+        let (_, len) = command_line(Some(crate::tos64_cmd::Verb::Status), u32::MAX, u32::MAX);
+        assert!(len <= LINK_LINE_CAPACITY);
     }
 
     #[test]
@@ -1565,6 +1642,19 @@ mod glue {
     /// canvas can say which one, and nothing is enabled in that case.
     fn arm_receive<M: Mmio>(device: &M) -> gem_receive::ReceiveState {
         let buffer_dma = receive_buffer_dma();
+        // `LE-67`, re-read for `STORY-P1-09-17` rather than inherited: the
+        // answer this Story transmits leaves from the beacon's staging region,
+        // and if that region ever aliased the one the device writes, an
+        // inbound fault would become an outbound lie. The two statics are
+        // separately declared and obviously disjoint today; the check is here
+        // because "obviously" is what a future edit changes silently, and the
+        // failure mode is the only one on this path with no symptom.
+        if let Err(refused) = gem_receive::check_grants(
+            (beacon_frame_dma(), gem::SPOOR_FRAME_CAPACITY),
+            (buffer_dma, gem_receive::RECEIVE_BUFFER_BYTES),
+        ) {
+            return gem_receive::ReceiveState::Refused(refused);
+        }
         let Some(ring) = gem_receive::receive_ring(buffer_dma) else {
             // The static is `align(64)`, so this is unreachable by
             // construction — and it is checked rather than asserted, because
@@ -1594,8 +1684,15 @@ mod glue {
     }
 
     /// One bounded inbound poll: at most **one** descriptor examined, at most
-    /// one frame admitted, per beat. Returns the new state and how much to add
-    /// to each counter.
+    /// one frame admitted, per beat. Returns the new state, how much to add to
+    /// each counter, and — when the frame was admitted — the payload offered
+    /// to the command channel.
+    ///
+    /// The payload is copied out of `RECEIVE_MEMORY` into the caller's buffer
+    /// rather than borrowed from it. The device owns that region and may write
+    /// it again the instant the descriptor is handed back, so a classifier
+    /// reading it in place would be classifying bytes that can change under it
+    /// — the one hazard a bounded copy removes for the price of 46 octets.
     ///
     /// The device wrote this memory behind the CPU's caches, so the region is
     /// cleaned-and-invalidated before the descriptor is read — the mirror of
@@ -1603,23 +1700,19 @@ mod glue {
     fn poll_receive<M: Mmio>(
         device: &M,
         state: gem_receive::ReceiveState,
-    ) -> (gem_receive::ReceiveState, u32, u32) {
+        admitted: &mut [u8; crate::tos64_cmd::ADMITTED_CAPACITY],
+    ) -> (gem_receive::ReceiveState, u32, u32, usize) {
         if state != gem_receive::ReceiveState::Listening {
-            return (state, 0, 0);
+            return (state, 0, 0, 0);
         }
         // Status first: an overrun makes whatever is in the buffer suspect,
         // so it is read before the descriptor rather than after.
-        match gem_receive::read_status(device) {
-            Ok(_) => {}
-            Err(error) => {
-                gem_receive::disable_receive(device);
-                return (gem_receive::ReceiveState::Stopped(error), 0, 0);
-            }
-        }
+        let status = gem_receive::read_status(device);
         // SAFETY: as `arm_receive`. The read is of memory this core owns and
         // the device writes; the maintenance below makes the device's stores
         // visible before either word is read.
-        let (word0, word1, admission) = unsafe {
+        let mut payload_len = 0usize;
+        let (plan, admission) = unsafe {
             let memory = core::ptr::addr_of_mut!(RECEIVE_MEMORY);
             crate::mmu::clean_invalidate_dcache_range(
                 memory as usize,
@@ -1627,16 +1720,13 @@ mod glue {
             );
             let word0 = core::ptr::read_volatile(core::ptr::addr_of!((*memory).ring[0]));
             let word1 = core::ptr::read_volatile(core::ptr::addr_of!((*memory).ring[1]));
-            let admission = match gem_receive::classify_descriptor(word0, word1) {
-                gem_receive::DescriptorState::MacOwns => None,
-                gem_receive::DescriptorState::Refused(_) => {
-                    // A descriptor that cannot be a frame is counted as a
-                    // refusal and the buffer is re-armed; it is not an error
-                    // condition, because the device is exactly the thing this
-                    // Feature contracts as compromisable.
-                    Some(gem_receive::Admission::Refused(gem_receive::FrameRefusal::TooShort))
-                }
-                gem_receive::DescriptorState::Frame { length } => {
+            // The whole decision — including whether the descriptor is handed
+            // back — belongs to the host-tested plan. This glue performs it and
+            // decides nothing (`TEST-P1-09-16-A` clause 10).
+            let plan =
+                gem_receive::beat_plan(status, gem_receive::classify_descriptor(word0, word1));
+            let admission = match plan {
+                gem_receive::BeatPlan::Classify { length } => {
                     // `length` is bounded by `classify_descriptor` against
                     // the region, which is what makes this slice safe — the
                     // device's own number is never trusted as a length.
@@ -1645,29 +1735,55 @@ mod glue {
                     // static is ever created (`dangerous_implicit_autorefs`).
                     let buffer = core::ptr::addr_of!((*memory).buffer).cast::<u8>();
                     let frame = core::slice::from_raw_parts(buffer, length);
-                    Some(gem_receive::admit(frame, gem::BEACON_SOURCE_MAC))
+                    let admission = gem_receive::admit(frame, gem::BEACON_SOURCE_MAC);
+                    if admission == gem_receive::Admission::Accepted {
+                        // The payload, copied out at a fixed width before the
+                        // descriptor goes back to the device. `take` is
+                        // bounded by both lengths, so a frame shorter or
+                        // longer than the envelope copies what there is and
+                        // the classifier refuses it by its own name.
+                        let payload = &frame[gem_receive::HEADER_BYTES..];
+                        payload_len = payload.len().min(admitted.len());
+                        admitted[..payload_len].copy_from_slice(&payload[..payload_len]);
+                    }
+                    Some(admission)
                 }
+                _ => None,
             };
-            (word0, word1, admission)
+            (plan, admission)
         };
-        let _ = (word0, word1);
-        let Some(admission) = admission else {
-            return (state, 0, 0);
-        };
-        // Re-arm: one descriptor, handed back explicitly. Until this happens
-        // the MAC has nowhere to put a second frame, which is the property
-        // that makes one-poll-per-beat a bound rather than a hope.
-        // SAFETY: as above.
-        unsafe {
-            let memory = core::ptr::addr_of_mut!(RECEIVE_MEMORY);
-            if let Some(ring) = gem_receive::rearm(receive_buffer_dma()) {
-                (*memory).ring = ring;
+        // The hand-back: one descriptor, returned explicitly, at most once per
+        // beat. Until it happens the MAC has nowhere to put a second frame,
+        // which is what makes one poll per beat a bound rather than a hope —
+        // and `hands_descriptor_back` is false on every error arm, so a
+        // terminal receive is still deaf on this pass and every later one.
+        if plan.hands_descriptor_back() {
+            // SAFETY: as above.
+            unsafe {
+                let memory = core::ptr::addr_of_mut!(RECEIVE_MEMORY);
+                if let Some(ring) = gem_receive::rearm(receive_buffer_dma()) {
+                    (*memory).ring = ring;
+                }
+                crate::mmu::clean_dcache_range(
+                    memory as usize,
+                    core::mem::size_of::<ReceiveMemory>(),
+                );
             }
-            crate::mmu::clean_dcache_range(memory as usize, core::mem::size_of::<ReceiveMemory>());
         }
-        match admission {
-            gem_receive::Admission::Accepted => (state, 1, 0),
-            gem_receive::Admission::Refused(_) => (state, 0, 1),
+        match plan {
+            gem_receive::BeatPlan::Quiet => (state, 0, 0, 0),
+            gem_receive::BeatPlan::Stop(error) => {
+                gem_receive::disable_receive(device);
+                (gem_receive::ReceiveState::Stopped(error), 0, 0, 0)
+            }
+            // A descriptor that cannot be a frame is counted as a refusal by
+            // its own name; the ear stays open, because the device is exactly
+            // the thing this Feature contracts as compromisable.
+            gem_receive::BeatPlan::Malformed(_) => (state, 0, 1, 0),
+            gem_receive::BeatPlan::Classify { .. } => match admission {
+                Some(gem_receive::Admission::Accepted) => (state, 1, 0, payload_len),
+                _ => (state, 0, 1, 0),
+            },
         }
     }
 
@@ -1730,8 +1846,57 @@ mod glue {
         stage_bytes(&frame, len)
     }
 
-    /// Stages one transcript line as a text frame (`STORY-P1-07-06`).
-    #[cfg(feature = "fixture-measure")]
+    /// How much of a boot verdict line a `STATUS` answer can carry.
+    const STATUS_TEXT_CAPACITY: usize = 64;
+
+    /// The board's own boot verdict line, copied out of the transcript.
+    ///
+    /// `STATUS` **replays** this; it does not compose one. That is the whole
+    /// reason the verb is admissible under `PD-02`: the line is already public
+    /// on the wire every transcript cycle, so answering it to an
+    /// unauthenticated peer discloses nothing the beacon did not.
+    ///
+    /// An image with no transcript (the featureless build) has no verdict line
+    /// to replay and returns zero, which renders as `status=none` — an honest
+    /// absence rather than a fabricated verdict.
+    fn boot_verdict(out: &mut [u8; STATUS_TEXT_CAPACITY]) -> usize {
+        #[cfg(feature = "fixture-measure")]
+        for nth in 0..crate::transcript::line_count() {
+            let mut line = [0u8; STATUS_TEXT_CAPACITY];
+            let Some(len) = crate::transcript::copy_line(nth, &mut line) else { continue };
+            let len = len.min(STATUS_TEXT_CAPACITY);
+            if !line[..len].starts_with(b"TOS64-RESULT/1") {
+                continue;
+            }
+            // Trailing whitespace trimmed rather than carried: the answer is
+            // one line and a stray newline mid-field would split it in two on
+            // every reader that splits on newlines, this project's own
+            // included.
+            let mut end = len;
+            while end > 0 && (line[end - 1] == b'\n' || line[end - 1] == b'\r') {
+                end -= 1;
+            }
+            out[..end].copy_from_slice(&line[..end]);
+            return end;
+        }
+        let _ = out;
+        0
+    }
+
+    /// The DMA address of the transmit staging frame, as the device sees it —
+    /// the other half of the disjointness `arm_receive` checks.
+    fn beacon_frame_dma() -> u64 {
+        // SAFETY: address-of only; no reference to the mutable static is
+        // taken and nothing is dereferenced.
+        unsafe {
+            let memory = core::ptr::addr_of!(BEACON_MEMORY);
+            board::RP1_DMA_RAM_BASE + core::ptr::addr_of!((*memory).frame) as u64
+        }
+    }
+
+    /// Stages one transcript line as a text frame (`STORY-P1-07-06`), and
+    /// since `STORY-P1-09-17` the command channel's answers and refusals —
+    /// one staging region, one frame builder, no second grant.
     fn stage_text_line(line: &[u8]) -> u64 {
         let (frame, len) = gem::text_frame(line);
         stage_bytes(&frame, len)
@@ -1934,6 +2099,12 @@ mod glue {
         let mut receive = gem_receive::ReceiveState::Idle;
         let mut rx_accepted: u32 = 0;
         let mut rx_refused: u32 = 0;
+        // `STORY-P1-09-17`: the command channel. Deny-by-default, two rows,
+        // one line per beat. It holds no authority and reaches nothing — the
+        // whole of its state is one pending line, one drop count and two
+        // counters.
+        let mut commands = crate::tos64_cmd::CommandChannel::new();
+        let mut admitted = [0u8; crate::tos64_cmd::ADMITTED_CAPACITY];
         let (rx_text, rx_len) = receive_line(receive, rx_accepted, rx_refused);
         crate::canvas::draw_line(
             &mut console,
@@ -2182,14 +2353,59 @@ mod glue {
                     if receive == gem_receive::ReceiveState::Idle {
                         receive = arm_receive(&gem_window);
                     }
-                    let (next, accepted, refused) = poll_receive(&gem_window, receive);
+                    let (next, accepted, refused, payload_len) =
+                        poll_receive(&gem_window, receive, &mut admitted);
                     receive = next;
                     rx_accepted = rx_accepted.saturating_add(accepted);
                     rx_refused = rx_refused.saturating_add(refused);
+                    // `STORY-P1-09-17`: the admitted payload is offered to the
+                    // verb table. `offer` decides and transmits nothing — the
+                    // only producer of bytes is the bounded slot below, which
+                    // is what keeps "no path transmits in response to a frame
+                    // outside the answer slot" a shape rather than a promise.
+                    if payload_len > 0 {
+                        commands.offer(&admitted[..payload_len]);
+                    }
                 } else if receive == gem_receive::ReceiveState::Listening {
                     gem_receive::disable_receive(&gem_window);
                     receive = gem_receive::ReceiveState::Idle;
                 }
+                // `STORY-P1-09-17`: the bounded answer slot. At most one line
+                // leaves the board per beat — the containment for
+                // amplification from an unauthenticated, broadcast-capable
+                // peer (`SEC-20`), and the reason the rate is part of the
+                // design rather than a tuning.
+                //
+                // It rides the same staging region and the same frame builder
+                // as the transcript line above it: no second grant, and
+                // `LE-67`'s containment story is exactly as wide as it was.
+                // The beacon still transmits once per beat, so the cadence a
+                // capture window is sized against does not move
+                // (`hand-2026-08-06/03B` §3a).
+                if beaconing {
+                    if let Some((speed, full_duplex)) = speed_config {
+                        let mut status = [0u8; STATUS_TEXT_CAPACITY];
+                        let status_len = boot_verdict(&mut status);
+                        let mut answer = [0u8; crate::tos64_cmd::ANSWER_CAPACITY];
+                        if let Some(len) = commands.take(&status[..status_len], &mut answer) {
+                            let ring_dma = stage_text_line(&answer[..len]);
+                            if let Err(refused) =
+                                gem::transmit_once(&gem_window, ring_dma, speed, full_duplex)
+                            {
+                                stopped = Some(refused);
+                                beaconing = false;
+                            }
+                        }
+                    }
+                }
+                let (cmd_text, cmd_len) =
+                    command_line(commands.last(), commands.answered(), commands.refused());
+                crate::canvas::draw_line(
+                    &mut console,
+                    crate::canvas::CMD_Y,
+                    &cmd_text[..cmd_len.saturating_sub(1)],
+                    crate::canvas::TEXT,
+                );
                 let (rx_text, rx_len) = receive_line(receive, rx_accepted, rx_refused);
                 crate::canvas::draw_line(
                     &mut console,

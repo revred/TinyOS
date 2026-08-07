@@ -1,10 +1,8 @@
 # TEST-P1-09-17-A — The Verb Table Refuses Everything It Does Not Name
 
-Status: **Specified — the suite is fully specified here and deliberately not yet
-written as code: its subject (the `TOS64-CMD/1` classifier and verb table) may not
-exist until the owner's S4 sentence lifts the sprint rule for the interaction chain
-([`10A`](../../session/hand-2026-08-07/10A-the-first-conversation-from-counted-frames-to-an-answered-command.md) §3 S4), and a committed test that cannot compile gates nothing. The building
-session writes these clauses red first, verbatim, before the classifier exists.**
+Status: **In progress — the sentence was spoken 2026-08-07 ([`14A`](../../session/hand-2026-08-07/14A-the-sentence-and-the-door.md) §1) and clauses 1–5 were written Red first and are Green the same day, in
+`os/src/hal-arm64/src/tos64_cmd.rs` and `work/tools/ti64dink.tests/`. Clause 6 — the
+board, the cable, and a person typing — awaits the bench.**
 Story: [`STORY-P1-09-17`](../stories/STORY-P1-09-17.md)
 Tier: Host unit tests (classifier totality, table denial, refusal taxonomy, rate
 bound, host/board vocabulary parity) **plus** a Tier 1 board run witnessed on the wire
@@ -13,7 +11,7 @@ Performance domains: `D01`, `D20`
 Security controls: `SEC-18`, `SEC-19`, `SEC-20`
 Containment classes: `C1`, `C2`
 Boundary tests: `BND-03`, `BND-06`, `BND-07`, `BND-17`
-Protection Domain contracts: `PD-07`, `PD-10`, `PD-12`, `PD-14`
+Protection Domain contracts: `PD-02`, `PD-07`, `PD-10`, `PD-12`, `PD-14`
 Code admission gates: `RCG-01`, `RCG-13`, `RCG-14`
 Assurance state: `specified`
 
@@ -79,9 +77,28 @@ capture; and the capture parses to its own verdict. `M1` and `M2` in one sitting
 
 ## Test type
 
-Host unit tests written red first by the building session, in the crate the classifier
-lands in (the `gem_receive` neighbourhood), plus the Tier 1 board run. Until S4 is
-spoken, this document is the suite's normative form.
+Host unit tests written Red first, plus the Tier 1 board run. This document stays the
+suite's normative form: a divergence between it and the tests as written is a defect
+in the session, not a liberty.
+
+## Implementation location
+
+- `os/src/hal-arm64/src/tos64_cmd.rs` — the envelope constants and fixed offsets, the
+  classifier, the verb table and `resolve`, the refusal vocabulary, the answer
+  renderer, and the bounded `CommandChannel`. `#![forbid(unsafe_code)]`, pure over its
+  arguments, no device in any signature — which is how clause 2's authority claim is
+  enforced by the compiler rather than by review.
+- `os/src/hal-arm64/src/ethernet.rs` — the aarch64 glue: the fixed-width copy out of
+  the receive region before the descriptor is handed back, the once-per-beat answer
+  slot riding the existing text-frame staging region, and the `TOS64-CMD/1` canvas row.
+- `os/src/hal-arm64/src/gem_receive.rs` — `check_grants`, the `LE-67` re-read: an
+  aliased transmit/receive pair is a named refusal (`TOS64-RX/1 … reason=alias`)
+  rather than a comment.
+- `work/tools/ti64dink/Console.cs` and `Live.cs` — the operator's end: the frame
+  builder, the answer parser, and the console loop over injected seams.
+- `work/tools/ti64dink.tests/ConsoleTests.cs`, `ConsoleParityTests.cs` — the scripted
+  session with no board, and the two-directions vocabulary guard that reads the Rust
+  source (verified to fail: changing `Verb::Status`'s id in Rust turns it red).
 
 ## Reports
 

@@ -105,6 +105,29 @@ internal static class Program
                 Send.Emit(args[i + 1]);
                 return 0;
             }
+            // `--console` is handled here for the same reason `--send` is: it
+            // transmits, it shares no state with the decoders, and combining
+            // it with `--live` would make the operator guess what a run did.
+            if (args[i] == "--console")
+            {
+                var consoleDevice = ArgAfter(args, "--dev") ?? PickEthernet();
+                if (consoleDevice is null)
+                {
+                    Console.Error.WriteLine("ti64dink: no capture device found; try --list");
+                    return 2;
+                }
+                var seconds = ConsoleMode.DefaultTimeoutSeconds;
+                if (ArgAfter(args, "--timeout") is { } spec && int.TryParse(spec, out var t) && t > 0)
+                {
+                    seconds = t;
+                }
+                Console.WriteLine($"ti64dink: console on {consoleDevice}");
+                using var link = new Live.PcapLink(consoleDevice);
+                var unanswered = ConsoleMode.Run(Console.In, Console.Out, link, seconds);
+                // Non-zero when the board said nothing, so a scripted bench run
+                // gates on the exchange rather than on a human reading the log.
+                return unanswered == 0 ? 0 : 1;
+            }
             if (args[i] != "--send") continue;
             if (i + 1 >= args.Length)
             {
@@ -645,6 +668,16 @@ internal static class Program
         return devices.Count > 0 ? devices[0].Name : null;
     }
 
+    /// The value after a flag, or null when the flag is absent or last.
+    private static string? ArgAfter(string[] args, string flag)
+    {
+        for (var i = 0; i < args.Length - 1; i++)
+        {
+            if (args[i] == flag) return args[i + 1];
+        }
+        return null;
+    }
+
     private static void Usage()
     {
         Console.WriteLine("Ti64Dink — decode TinyOS spoor frames (FEAT-P1-10 / FEAT-P2-10)");
@@ -673,6 +706,14 @@ internal static class Program
         Console.WriteLine("      ping | unicast     the board must ACCEPT  (accepted +1)");
         Console.WriteLine("      ethertype | prefix the board must REFUSE  (refused +1)");
         Console.WriteLine("      notforus           the hardware filter must drop it (NEITHER moves)");
+        Console.WriteLine();
+        Console.WriteLine("  ti64dink --console [--dev X] [--timeout 4]    TYPE at the board");
+        Console.WriteLine("                                                (STORY-P1-09-17, the first");
+        Console.WriteLine("                                                interactive terminal this OS has)");
+        Console.WriteLine("      PING     the board answers with the sequence it heard");
+        Console.WriteLine("      STATUS   the board replays its boot verdict line");
+        Console.WriteLine("      anything else is SENT, so the board's deny-by-default is what you see");
+        Console.WriteLine("      exits non-zero if any exchange went unanswered");
         Console.WriteLine();
         Console.WriteLine("Capture on Windows (elevated, until Npcap is installed):");
         Console.WriteLine("  pktmon filter remove");

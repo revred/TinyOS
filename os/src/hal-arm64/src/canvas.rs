@@ -181,6 +181,15 @@ pub const RX_Y: u32 = 372;
 pub const TRANSCRIPT_Y: u32 = 400;
 /// Vertical step between transcript lines.
 pub const TRANSCRIPT_STEP_Y: u32 = 12;
+/// The live `TOS64-CMD/1` row (`STORY-P1-09-17`) — the command channel's
+/// state, repainted every beat.
+///
+/// Beneath the transcript rather than beside the inbound row it belongs with,
+/// because the transcript block below `RX_Y` is sized for full occupancy and
+/// squeezing a row in above it would move rows an operator and three filed
+/// captures already know by position. The compile-time claim below pins that
+/// it clears the transcript at [`crate::transcript::MAX_LINES`].
+pub const CMD_Y: u32 = 780;
 /// Scale of transcript text: 1× (8-pixel glyphs, 232 columns at the margin).
 pub const TRANSCRIPT_SCALE: u32 = 1;
 
@@ -352,6 +361,15 @@ mod tests {
                     + GLYPH_SIZE * TRANSCRIPT_SCALE
                     < board::SIMPLEFB_HEIGHT
             );
+            // `STORY-P1-09-17`'s command row clears the transcript block at
+            // full occupancy and still fits the canvas.
+            assert!(
+                TRANSCRIPT_Y
+                    + crate::transcript::MAX_LINES as u32 * TRANSCRIPT_STEP_Y
+                    + GLYPH_SIZE * TRANSCRIPT_SCALE
+                    <= CMD_Y
+            );
+            assert!(CMD_Y + GLYPH_SIZE * BODY_SCALE < board::SIMPLEFB_HEIGHT);
             // 120 body columns fit the canvas width at the margin.
             assert!(MARGIN_X + 120 * GLYPH_SIZE * BODY_SCALE <= board::SIMPLEFB_WIDTH + MARGIN_X);
         }

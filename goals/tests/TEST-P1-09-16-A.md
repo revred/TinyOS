@@ -1,6 +1,6 @@
 # TEST-P1-09-16-A — One Frame In, Counted and Nothing Else
 
-Status: **In progress — host clauses written Red first 2026-08-06; clause 8 awaits the board, the cable, and a host that transmits**
+Status: **In progress — host clauses written Red first 2026-08-06, clause 10 (the hand-back) added and Green 2026-08-07; clause 8 awaits the board and the cable**
 Story: [`STORY-P1-09-16`](../stories/STORY-P1-09-16.md)
 Tier: Host unit tests (register order, descriptor layout, admission taxonomy, fail-closed state machine) **plus** a Tier 1 board run witnessed on the canvas
 Assurance contract: [`goals/assurance/story-contracts.tsv`](../assurance/story-contracts.tsv)
@@ -8,7 +8,7 @@ Performance domains: `D01`, `D20`
 Security controls: `SEC-18`, `SEC-19`, `SEC-20`
 Containment classes: `C1`, `C2`
 Boundary tests: `BND-03`, `BND-06`, `BND-07`, `BND-17`
-Protection Domain contracts: `PD-07`, `PD-10`, `PD-12`, `PD-14`
+Protection Domain contracts: `PD-02`, `PD-07`, `PD-10`, `PD-12`, `PD-14`
 Code admission gates: `RCG-01`, `RCG-13`, `RCG-14`
 Assurance state: `specified`
 
@@ -137,6 +137,28 @@ increments `refused`.
 **Both arms are required.** An accepted count with no refused arm proves the
 board can hear; it does not prove the board can decline, and the declining is
 the part this Story is answerable for.
+
+### 10. The descriptor is handed back, and no error arm ever hands it back (`SEC-20`, `PD-07`)
+
+**Given** the beat decision as a pure function of the receive status and the
+descriptor state,
+**then** exactly the healthy arms return the descriptor to the MAC — a whole
+frame, and a descriptor whose contents cannot be a frame — and **neither error
+arm does, on that pass or any later one**; and the hand-back preserves the
+buffer address, keeps `WRAP`, and clears the ownership bit.
+
+The claim is exhaustive rather than sampled: every combination of the four
+status outcomes with all five descriptor states is enumerated, so "the error
+arm does not re-arm" is a count and not a reading. It is a *pure function*
+because the alternative is a branch inside the aarch64 glue, which is the one
+part of this path no host test can reach — and this is precisely the claim that
+must not live somewhere unreachable.
+
+Added 2026-08-07. `TOS64-RX/1 STATE=STOPPED REASON=NOBUFFER ACCEPTED=0
+REFUSED=0` (`hand-2026-08-07/07F` §7c) is the wire's own proof that a ring of
+one wrapped descriptor that is never handed back holds exactly one frame for
+the life of a boot. Clause 6's refusal is untouched by this clause and the
+enumeration above is what proves it.
 
 ### 9. What this test explicitly does **not** establish
 

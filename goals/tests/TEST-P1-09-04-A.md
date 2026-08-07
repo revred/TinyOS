@@ -8,7 +8,7 @@ Performance domains: `D01`
 Security controls: `SEC-19`, `SEC-20`
 Containment classes: `C1`, `C2`
 Boundary tests: `BND-03`, `BND-06`, `BND-07`, `BND-17`
-Protection Domain contracts: `PD-07`, `PD-10`, `PD-12`, `PD-14`
+Protection Domain contracts: `PD-02`, `PD-07`, `PD-10`, `PD-12`, `PD-14`
 Code admission gates: `RCG-01`, `RCG-13`, `RCG-14`
 Assurance state: `specified`
 

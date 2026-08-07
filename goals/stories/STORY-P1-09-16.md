@@ -1,6 +1,6 @@
 # STORY-P1-09-16 — GEM Receive: One Frame, Fail-Closed
 
-Status: **In progress — criteria 1, 2 and 3 host-Green 2026-08-06 (enable order pinned with `NCR.RE` strictly last, buffer-size bound derived-or-refused, one-descriptor wrapped ring, total descriptor classifier, admission taxonomy with every refusal distinct, both error arms terminal, promiscuous-absence tested); criterion 4 blocked on the board and on a host that transmits. Assurance state `specified`.**
+Status: **In progress — criteria 1, 2, 3 and 5 host-Green (5 added and Green 2026-08-07: the descriptor is handed back on the healthy path and on no error arm, decided by a pure `beat_plan` the host tests exhaust); criterion 4 blocked on the board. Assurance state `specified`.**
 Feature: [`FEAT-P1-09`](../features/FEAT-P1-09.md)
 Introduced in: [`session/hand-2026-08-06/03B-the-arms-are-built-the-board-booted-them-and-nobody-read-the-wire.md`](../../session/hand-2026-08-06/03B-the-arms-are-built-the-board-booted-them-and-nobody-read-the-wire.md)
 
@@ -130,6 +130,57 @@ the real discharge.
    `TooShort` cannot be put on a wire because the NIC pads to 60 octets, and
    the three descriptor refusals are reachable only by a lying device.
 
+5. **The descriptor is handed back, and only on the healthy path.** After a
+   frame is classified and counted, the single descriptor is returned to the
+   MAC — address preserved, `WRAP` kept, ownership cleared — **at most once per
+   park beat**. One frame classified, one descriptor re-armed, per beat; a
+   second frame arriving inside a beat has nowhere to land until the next
+   hand-back, which is the same bounded-poll discipline every other channel on
+   this board keeps.
+
+   Added 2026-08-07 as an amendment rather than a new Story, because the
+   Story's subject was always *"the board can be reached, fail-closed"* and an
+   ear that stays deaf after one frame fails that subject's own sentence.
+   `TOS64-RX/1 STATE=STOPPED REASON=NOBUFFER ACCEPTED=0 REFUSED=0`
+   ([`07F`](../../session/hand-2026-08-07/07F-the-relay-was-never-the-roadblock.md)
+   §7c) is the wire's own proof: a ring of one wrapped descriptor that is never
+   handed back is a doorbell, not an ear, and no conversation survives it.
+
+   **What this does not weaken, asserted rather than assumed.** Criterion 3's
+   refusal stands untouched: an overrun and a buffer-not-available are still
+   *terminal*, and a host test exhausts the four status arms against all five
+   descriptor states to prove that no error arm hands the descriptor back — on
+   that pass or any later one. The decision is a pure function
+   (`gem_receive::beat_plan`) rather than a branch inside the aarch64 glue,
+   precisely because the glue is the one part of this path no host test can
+   reach and "the error arm does not re-arm" is the claim that must not live
+   somewhere unreachable.
+
+   A second correction rides the same amendment: a descriptor refusal is now
+   counted under its own name instead of being relabelled `TooShort` by the
+   glue, which was a small lie about which refusal had occurred.
+
+## The absence argument, and the date it expired
+
+This Story's containment rested on a property with an expiry stated in its own
+text: *"nothing interprets the bytes … the moment step 2 makes a frame mean
+something, the argument above stops being sufficient and has to be made again —
+and it should be made again, not cited."*
+
+**That moment arrived on 2026-08-07.**
+[`STORY-P1-09-17`](STORY-P1-09-17.md) admits a verb, so a received frame now
+means something, and the argument above is superseded by that Story's charter
+reading — a fixed-width envelope classified over fixed offsets, one
+input-derived selection bounded by a deny-by-default table's own length, two
+answer-only rows justified against `PD-02`, every refusal spoken, and the answer
+rate beat-bounded against amplification. Recorded here, dated, so no future
+reader inherits an absence that no longer holds (`STORY-P1-09-17` criterion 5).
+
+The four-part containment of this Story — separate pinned region, hardware
+address filter, MAC-enforced size bound, total classifier — is *unchanged* and
+still load-bearing. It is the fifth part, "and nothing interprets the bytes",
+that expired.
+
 ## Named debt this Story leaves open
 
 - `LE-67` — updated, not closed. Two pinned regions and no IOMMU; `BND-07` and
@@ -152,6 +203,7 @@ the real discharge.
 | 1 — enable order pinned, `RE` last | **Green (host).** Register order asserted as an exact ordered list; a double that fires on any `NCFGR` write setting copy-all-frames. |
 | 2 — bounded before believed | **Green (host).** Size encoding refuses non-multiples and overflow; misaligned buffer addresses refused; the classifier is total with three distinct refusals. |
 | 3 — admission and fail-closed | **Green (host).** Four distinct admission refusals; overrun and buffer-not-available each disable receive terminally. |
+| 5 — the descriptor is handed back, healthy path only | **Green (host), 2026-08-07.** `beat_plan` is total over four status arms × five descriptor states; the two error arms hand nothing back on every one of them, and the hand-back preserves address and `WRAP` and returns ownership. |
 | 4 — board counts a host frame | **Blocked on hardware only.** The sender exists as of the same day (`LE-93` closed): `ti64dink --send <arm>` transmits five named arms covering both halves, and every arm's predicted verdict is asserted against `gem_receive::admit` by a host test, so the criterion's expectations are machine-checked before a board is powered. What remains is one power cycle and five commands. |
 
 ## Tests

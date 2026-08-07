@@ -1,6 +1,6 @@
 # STORY-P1-09-17 — The Admitted Verb: One Command Answered End to End, Deny-by-Default
 
-Status: **Specified — proposed under [`10A`](../../session/hand-2026-08-07/10A-the-first-conversation-from-counted-frames-to-an-answered-command.md) §3 S2, and blocked on exactly one sentence: the owner's scoped lift of the 2026-07-30 sprint rule for the interaction chain (S4). This document, its Test specification and its contract row are written so the building session starts with the charter read done and the suite specified; no implementation code, no committed test code and no board change exists or may exist until the sentence is spoken.**
+Status: **In progress — the sentence was spoken on 2026-08-07 ([`14A`](../../session/hand-2026-08-07/14A-the-sentence-and-the-door.md) §1, the owner's scoped lift of the sprint rule for the interaction chain) and the Story was built the same day ([`16A`](../../session/hand-2026-08-07/16A-the-first-conversation-built.md)). Criteria 1, 2 and 3 host-Green; criterion 5 done in writing. Criterion 4 is the board, and is the only thing between this Story and its first conversation. Assurance state `specified`.**
 Feature: [`FEAT-P1-09`](../features/FEAT-P1-09.md)
 Introduced in: [`session/hand-2026-08-07/10A-the-first-conversation-from-counted-frames-to-an-answered-command.md`](../../session/hand-2026-08-07/10A-the-first-conversation-from-counted-frames-to-an-answered-command.md) (proposal) and [`11A`](../../session/hand-2026-08-07/11A-sitting-a-executed.md) (this document)
 
@@ -121,6 +121,27 @@ board is powered**, each refusal distinct, and the two-directions parity discipl
 5. The `-16` absence argument is retired **in writing**: its Story text gains a dated
    note that the expiring argument expired here, superseded by this Story's charter
    reading — so no future reader inherits an absence that no longer holds.
+
+## Progress, 2026-08-07
+
+| Criterion | State |
+|---|---|
+| 1 — total classifier over fixed offsets, distinct refusals, mutation arm | **Green (host).** The envelope is 46 octets so that `14 + payload` is exactly the Ethernet minimum and no NIC's padding can reach the classifier; the field ranges are asserted to tile the payload with no gap and no overlap, which is the mutation arm — widening or adding a field moves a later offset and fails. Every 16-bit verb id is exercised; the argument field is filled across its range and may not move the verdict. |
+| 2 — deny-by-default, two answer-only rows | **Green (host).** `VERB_TABLE` holds `PING` and `STATUS`; `resolve` walks the table's own length; zero is not a verb, so an all-zero payload — the likeliest accident on a wire — is `UnknownVerb`. The module carries `#![forbid(unsafe_code)]` and no signature on the path takes a device, so a row **cannot** reach a register: clause 2's "a row that gains authority is a red test" is enforced by the compiler rather than by review. |
+| 3 — refusals spoken, rate beat-bounded | **Green (host).** Five distinct wire names; one line per beat; a flood of 10,000 commands is asserted to emit no more lines than there were beats. |
+| 4 — the board answers | **Blocked on hardware only.** The host half exists: `ti64dink --console` builds the frame, parses the answer, and runs a whole scripted session — answer, refusal, timeout — with no board and no Npcap. |
+| 5 — the `-16` absence argument retired in writing | **Done.** [`STORY-P1-09-16`](STORY-P1-09-16.md) gains a dated section recording that its expiring argument expired here. |
+
+**One defect the suite found before any board did.** The first draft counted
+over-rate drops in a saturating counter and spoke them when the answer slot next
+came free. Under a *sustained* flood the pending slot is refilled every beat, so
+the count is never spoken and the drops vanish — the exact "a refused command
+that vanishes is indistinguishable from a dead board" failure this Story
+forbids, reachable only under load and invisible to any single-command test. The
+fix gives an owed confession precedence over a new command: while a drop is
+unspoken the channel accepts nothing new, so the over-rate refusal always
+reaches its slot. Recorded because the failure was found by clause 4's flood arm
+and would not have been found by a bench.
 
 ## What landing this Story must also do (recorded so it is not discovered late)
 

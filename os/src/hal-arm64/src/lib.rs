@@ -47,5 +47,6 @@ pub mod stat_led;
 pub mod thermal;
 pub mod tick;
 pub mod timer;
+pub mod tos64_cmd;
 pub mod transcript;
 pub mod vectors;

@@ -13,13 +13,22 @@
 //! apart is what keeps the claim checkable instead of quietly widened.
 //!
 //! The containment argument is written down in `STORY-P1-09-16`, not here, and
-//! its load-bearing sentence is worth repeating at the code: **nothing in this
-//! module interprets the bytes.** [`admit`] compares a destination, an
+//! its load-bearing sentence is still worth repeating at the code: **nothing in
+//! this module interprets the bytes.** [`admit`] compares a destination, an
 //! EtherType and six payload bytes, and the caller increments a counter. No
 //! value taken from a frame selects a branch, an address, an offset or a size
-//! anywhere in the image, so `C1` gains an input path and gains no parser.
-//! That property *is* the containment on a path with no IOMMU (`LE-67`), and
-//! it expires the moment a received frame is allowed to mean something.
+//! anywhere in *this* module.
+//!
+//! **That is no longer the whole containment, and the date it stopped being so
+//! is 2026-08-07.** `STORY-P1-09-16` said its argument expires the moment a
+//! received frame is allowed to mean something, and `STORY-P1-09-17` is that
+//! moment: an admitted payload is now handed to [`crate::tos64_cmd`], whose
+//! fixed-width classifier and two-row deny-by-default table re-make the
+//! argument rather than citing it. The four parts this module owns — the
+//! separate pinned region, the hardware address filter, the MAC-enforced size
+//! bound and the total classifier — are unchanged and still load-bearing on a
+//! path with no IOMMU (`LE-67`); the fifth part, "and nothing means anything",
+//! moved next door and is argued there.
 //!
 //! Everything here is pure over the [`crate::pl011::Mmio`] seam and
 //! host-tested; the aarch64 glue (the second pinned region, cache maintenance
@@ -179,13 +188,49 @@ pub const fn rearm(buffer_dma_address: u64) -> Option<[u32; 4]> {
     receive_ring(buffer_dma_address)
 }
 
-/// Why receive could not be enabled. Both arms leave the device untouched.
+/// Why receive could not be enabled. Every arm leaves the device untouched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EnableError {
     /// The region's size cannot be expressed in the `RXBS` field.
     UnencodableBufferSize,
     /// The ring's DMA address is not four-byte aligned.
     MisalignedRing,
+    /// The transmit staging region and the receive region overlap.
+    AliasedGrants,
+}
+
+/// Whether two granted regions touch at any octet.
+///
+/// Stated as arithmetic and tested at the edges because "the two statics are
+/// obviously separate" is exactly the kind of claim that survives a refactor
+/// it stopped being true for, and the symptom on this path is a device write
+/// landing in the frame the board is about to transmit.
+pub const fn regions_disjoint(a: u64, a_len: usize, b: u64, b_len: usize) -> bool {
+    let a_end = a.saturating_add(a_len as u64);
+    let b_end = b.saturating_add(b_len as u64);
+    a_end <= b || b_end <= a
+}
+
+/// Refuses a pair of grants that alias — `LE-67` re-read for the answer path
+/// (`STORY-P1-09-17`: "the answer buffer must not alias `RECEIVE_MEMORY`,
+/// stated and tested").
+///
+/// The two directions have opposite writers: the CPU writes the transmit
+/// staging region and the device reads it; the device writes the receive
+/// region. Aliasing them would let a confused inbound write corrupt the frame
+/// the board is about to transmit, turning an inbound fault into an **outbound
+/// lie** — and every piece of evidence this project holds is an outbound
+/// frame. The answer this Story adds transmits from the *transmit* region, so
+/// the claim is one line of arithmetic and it is checked rather than asserted.
+pub const fn check_grants(
+    transmit: (u64, usize),
+    receive: (u64, usize),
+) -> Result<(), EnableError> {
+    if regions_disjoint(transmit.0, transmit.1, receive.0, receive.1) {
+        Ok(())
+    } else {
+        Err(EnableError::AliasedGrants)
+    }
 }
 
 /// Arms the receive path, in the one order that is safe.
@@ -389,6 +434,76 @@ pub fn admit(frame: &[u8], own_mac: [u8; 6]) -> Admission {
         return Admission::Refused(FrameRefusal::NotAnEnvelope);
     }
     Admission::Accepted
+}
+
+// --- the beat: what one bounded pass does (criterion 6, the re-arm) ----------
+
+/// What one park beat must do with the receive path, decided as a pure
+/// function so the two properties that matter are tests rather than readings:
+/// **no error arm ever hands the descriptor back**, and the healthy path
+/// always does.
+///
+/// The plan exists because the re-arm is the difference between an ear and a
+/// doorbell. A ring of one wrapped descriptor that is never handed back holds
+/// exactly one frame for the lifetime of the boot — the MAC has nowhere to put
+/// the second one, so an echo that works once is indistinguishable from a
+/// fluke (`hand-2026-08-07/10A` §3 S1). It is decided here rather than in the
+/// aarch64 glue because the glue is the one part of this path no host test can
+/// reach, and "the error arm does not re-arm" is precisely the claim that must
+/// not live somewhere unreachable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BeatPlan {
+    /// Nothing arrived. The descriptor is left exactly as the MAC has it.
+    Quiet,
+    /// Terminal. Receive is disabled and the descriptor is **never** handed
+    /// back — on this pass or any later one.
+    Stop(ReceiveError),
+    /// The descriptor claims something that cannot be a frame. Count one
+    /// refusal by its own name and hand the descriptor back: a device that
+    /// wrote nonsense is the premise this Feature contracts, not an error.
+    Malformed(DescriptorRefusal),
+    /// A whole frame of `length` bytes is in the buffer. Admit it, count the
+    /// verdict, hand the descriptor back.
+    Classify {
+        /// Bytes the MAC wrote, already bounded against [`RECEIVE_BUFFER_BYTES`]
+        /// by [`classify_descriptor`] — never the device's own number believed.
+        length: usize,
+    },
+}
+
+impl BeatPlan {
+    /// Whether this beat returns the descriptor to the MAC.
+    ///
+    /// A single predicate rather than a rule spread across the glue's match
+    /// arms, so `TEST-P1-09-16-A` clause 10 can state the whole discipline
+    /// exhaustively over the plan's four arms.
+    pub const fn hands_descriptor_back(self) -> bool {
+        match self {
+            BeatPlan::Malformed(_) | BeatPlan::Classify { .. } => true,
+            BeatPlan::Quiet | BeatPlan::Stop(_) => false,
+        }
+    }
+}
+
+/// Decides one bounded receive pass — total over both inputs.
+///
+/// The status outranks the descriptor deliberately: an overrun or a
+/// buffer-not-available says the MAC's own accounting broke, and a descriptor
+/// that looks like a whole frame under either of them is exactly the frame
+/// least worth believing. Both stay terminal, which is the refusal
+/// `STORY-P1-09-16` criterion 3 committed to and the re-arm does not weaken.
+pub const fn beat_plan(
+    status: Result<bool, ReceiveError>,
+    descriptor: DescriptorState,
+) -> BeatPlan {
+    match status {
+        Err(error) => BeatPlan::Stop(error),
+        Ok(_) => match descriptor {
+            DescriptorState::MacOwns => BeatPlan::Quiet,
+            DescriptorState::Refused(refusal) => BeatPlan::Malformed(refusal),
+            DescriptorState::Frame { length } => BeatPlan::Classify { length },
+        },
+    }
 }
 
 // --- the park loop's view (criterion 3, the reported half) -------------------
@@ -897,6 +1012,196 @@ mod tests {
         let accepted = ARMS.lines().filter(|l| l.contains(" Accepted ")).count();
         assert!(accepted >= 1, "no arm exercises the accepting half");
         assert!(checked - accepted >= 1, "no arm exercises the declining half");
+    }
+
+    // TEST-P1-09-17-A clause 5: the answer path does not alias the region the
+    // device writes (`LE-67`, re-read rather than inherited).
+
+    #[test]
+    fn two_grants_that_touch_at_all_are_not_disjoint_and_the_edges_are_the_cases() {
+        // Adjacent, in both orders: the commonest real layout, and it is fine.
+        assert!(regions_disjoint(0x1000, 0x100, 0x1100, 0x100));
+        assert!(regions_disjoint(0x1100, 0x100, 0x1000, 0x100));
+        // One octet of overlap, in both orders. This is the case a hand-read
+        // of two `static mut`s would miss and a device would find.
+        assert!(!regions_disjoint(0x1000, 0x101, 0x1100, 0x100));
+        assert!(!regions_disjoint(0x1100, 0x100, 0x1000, 0x101));
+        // Containment, identity, and the degenerate empty grant.
+        assert!(!regions_disjoint(0x1000, 0x1000, 0x1400, 0x10));
+        assert!(!regions_disjoint(0x1000, 0x10, 0x1000, 0x10));
+        assert!(regions_disjoint(0x1000, 0, 0x1000, 0x10), "an empty grant reaches nothing");
+    }
+
+    #[test]
+    fn the_two_pinned_grants_this_feature_holds_are_asserted_disjoint_not_assumed() {
+        // The transmit staging region and the receive region have opposite
+        // writers, and an inbound write that landed in the outbound frame
+        // would turn a device fault into an outbound lie — every piece of
+        // evidence this project holds is an outbound frame. So the arming
+        // path refuses rather than trusting the linker's placement.
+        let receive = 0x8000u64;
+        let transmit_below =
+            (receive - crate::gem::SPOOR_FRAME_CAPACITY as u64, crate::gem::SPOOR_FRAME_CAPACITY);
+        assert!(regions_disjoint(
+            transmit_below.0,
+            transmit_below.1,
+            receive,
+            RECEIVE_BUFFER_BYTES
+        ));
+        assert!(!regions_disjoint(receive + 8, 64, receive, RECEIVE_BUFFER_BYTES));
+    }
+
+    #[test]
+    fn an_aliased_pair_of_grants_is_a_named_refusal_the_arming_path_can_report() {
+        let receive = (0x0008_3000u64, RECEIVE_BUFFER_BYTES);
+        assert_eq!(check_grants((0x0008_0000, 0x1000), receive), Ok(()));
+        assert_eq!(
+            check_grants((receive.0 + 16, 64), receive),
+            Err(EnableError::AliasedGrants),
+            "an aliased grant is a refusal the canvas can name, not a comment"
+        );
+    }
+
+    // TEST-P1-09-16-A clause 10: the beat plan — the ear stays armed, and no
+    // error arm ever re-arms anything.
+
+    /// Every descriptor state, for the exhaustive arms below.
+    fn every_descriptor_state() -> [DescriptorState; 5] {
+        [
+            DescriptorState::MacOwns,
+            DescriptorState::Frame { length: 60 },
+            DescriptorState::Refused(DescriptorRefusal::NotWholeFrame),
+            DescriptorState::Refused(DescriptorRefusal::ZeroLength),
+            DescriptorState::Refused(DescriptorRefusal::OverLength),
+        ]
+    }
+
+    #[test]
+    fn a_quiet_beat_leaves_the_descriptor_exactly_where_the_mac_has_it() {
+        for signalled in [false, true] {
+            let plan = beat_plan(Ok(signalled), DescriptorState::MacOwns);
+            assert_eq!(plan, BeatPlan::Quiet, "nothing arrived, so nothing is handed back");
+            assert!(!plan.hands_descriptor_back());
+        }
+    }
+
+    #[test]
+    fn a_whole_frame_is_classified_and_the_descriptor_is_handed_back() {
+        let plan = beat_plan(Ok(true), DescriptorState::Frame { length: 60 });
+        assert_eq!(
+            plan,
+            BeatPlan::Classify { length: 60 },
+            "the length the classifier bounded, carried through unchanged"
+        );
+        assert!(
+            plan.hands_descriptor_back(),
+            "an ear that hears once and never re-arms is a doorbell (hand-2026-08-07/10A S1)"
+        );
+    }
+
+    #[test]
+    fn a_malformed_descriptor_is_counted_by_its_own_name_and_the_ear_stays_open() {
+        for refusal in [
+            DescriptorRefusal::NotWholeFrame,
+            DescriptorRefusal::ZeroLength,
+            DescriptorRefusal::OverLength,
+        ] {
+            let plan = beat_plan(Ok(true), DescriptorState::Refused(refusal));
+            assert_eq!(
+                plan,
+                BeatPlan::Malformed(refusal),
+                "the descriptor refusal keeps its own name; it is not relabelled TooShort"
+            );
+            assert!(
+                plan.hands_descriptor_back(),
+                "a device that wrote nonsense once is the premise, not an error condition"
+            );
+        }
+    }
+
+    #[test]
+    fn no_error_arm_re_arms_anything_on_that_pass_or_any_later_one() {
+        // The exhaustive statement of TEST-P1-09-16-A clause 6 against the
+        // re-arm added by clause 10: whatever the descriptor happens to say,
+        // a terminal status is terminal and hands nothing back.
+        for error in [ReceiveError::Overrun, ReceiveError::BufferUnavailable] {
+            for descriptor in every_descriptor_state() {
+                let plan = beat_plan(Err(error), descriptor);
+                assert_eq!(
+                    plan,
+                    BeatPlan::Stop(error),
+                    "a terminal error outranks every descriptor state, including a whole frame"
+                );
+                assert!(
+                    !plan.hands_descriptor_back(),
+                    "the re-arm is for the healthy path only — deaf is the safe state"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_beat_plan_is_total_and_exactly_the_healthy_arms_hand_the_descriptor_back() {
+        let mut handed_back = 0;
+        let mut kept = 0;
+        for status in
+            [Ok(false), Ok(true), Err(ReceiveError::Overrun), Err(ReceiveError::BufferUnavailable)]
+        {
+            for descriptor in every_descriptor_state() {
+                let plan = beat_plan(status, descriptor);
+                // Totality: every input has an answer, and the answer's
+                // hand-back decision is a property of the plan alone.
+                match plan {
+                    BeatPlan::Quiet | BeatPlan::Stop(_) => {
+                        assert!(!plan.hands_descriptor_back());
+                        kept += 1;
+                    }
+                    BeatPlan::Classify { .. } | BeatPlan::Malformed(_) => {
+                        assert!(plan.hands_descriptor_back());
+                        handed_back += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(handed_back + kept, 4 * 5, "every combination classified");
+        assert!(handed_back > 0 && kept > 0, "both halves are reachable");
+    }
+
+    #[test]
+    fn the_hand_back_preserves_the_address_and_the_wrap_bit_and_returns_ownership() {
+        let address = 0x0000_0010_0008_3000u64;
+        let armed = receive_ring(address).expect("aligned");
+        let handed_back = rearm(address).expect("aligned");
+        assert_eq!(handed_back, armed, "re-arming is rebuilding the same ring");
+        assert_eq!(
+            handed_back[0] & rx_descriptor::ADDRESS_MASK,
+            armed[0] & rx_descriptor::ADDRESS_MASK,
+            "the address is preserved — a hand-back that moved the buffer is a new grant"
+        );
+        assert_eq!(
+            handed_back[0] & rx_descriptor::WRAP,
+            rx_descriptor::WRAP,
+            "WRAP is kept: without it the MAC walks to a second address nobody granted"
+        );
+        assert_eq!(
+            handed_back[0] & rx_descriptor::OWNED_BY_SOFTWARE,
+            0,
+            "ownership goes back to the MAC — that is what makes the ear an ear"
+        );
+        assert_eq!(handed_back[1], 0, "the status word is cleared with the hand-back");
+    }
+
+    #[test]
+    fn a_beat_hands_back_at_most_one_descriptor_and_the_next_beat_is_quiet() {
+        // One frame classified, one descriptor re-armed, per beat. The second
+        // frame does not exist until the MAC has somewhere to put it, so the
+        // beat immediately after a hand-back reads the descriptor the MAC
+        // owns again — a bound rather than a hope.
+        let first = beat_plan(Ok(true), DescriptorState::Frame { length: 60 });
+        assert!(first.hands_descriptor_back());
+        let next =
+            beat_plan(Ok(false), classify_descriptor(rearm(0x0008_3000).expect("aligned")[0], 0));
+        assert_eq!(next, BeatPlan::Quiet);
     }
 
     #[test]

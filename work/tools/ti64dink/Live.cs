@@ -268,6 +268,71 @@ internal static class Live
         return payloads;
     }
 
+    /// One pcap handle held open for both directions — the console's transport
+    /// (`STORY-P1-09-17`).
+    ///
+    /// Every other mode in this tool opens a handle, does one thing and closes
+    /// it. A console cannot: between opening a handle to send and opening
+    /// another to listen, the board's answer would already have gone past. One
+    /// handle, opened before the first prompt and closed at `quit`, is what
+    /// makes an exchange an exchange rather than a race.
+    internal sealed class PcapLink : IConsoleLink, IDisposable
+    {
+        private IntPtr _handle;
+
+        internal PcapLink(string device)
+        {
+            var errbuf = new byte[ErrbufSize];
+            // 50 ms read timeout: short enough that `NextPayload` honours a
+            // deadline the caller stated, long enough not to spin.
+            _handle = pcap_open_live(device, 65536, 1, 50, errbuf);
+            if (_handle == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("pcap_open_live: " + Str(errbuf));
+            }
+        }
+
+        public void Send(byte[] frame)
+        {
+            if (pcap_sendpacket(_handle, frame, frame.Length) != 0)
+            {
+                var message = Marshal.PtrToStringAnsi(pcap_geterr(_handle)) ?? "(no message)";
+                // Thrown rather than returned: a frame that did not leave the
+                // adapter followed by a silent board would print as a timeout,
+                // and the operator would go looking at the board.
+                throw new InvalidOperationException("pcap_sendpacket: " + message);
+            }
+        }
+
+        public byte[]? NextPayload(TimeSpan timeout)
+        {
+            var deadline = DateTime.UtcNow + timeout;
+            while (DateTime.UtcNow < deadline)
+            {
+                IntPtr headerPtr = IntPtr.Zero, dataPtr = IntPtr.Zero;
+                var rc = pcap_next_ex(_handle, ref headerPtr, ref dataPtr);
+                if (rc == 0) continue;
+                if (rc < 0) return null;
+                if (headerPtr == IntPtr.Zero || dataPtr == IntPtr.Zero) continue;
+                var header = Marshal.PtrToStructure<PcapPktHdr>(headerPtr);
+                var caplen = (int)header.CapLen;
+                if (caplen < 14) continue;
+                var frame = new byte[caplen];
+                Marshal.Copy(dataPtr, frame, 0, caplen);
+                if ((ushort)((frame[12] << 8) | frame[13]) != Tos64EtherType) continue;
+                return frame[14..];
+            }
+            return null;
+        }
+
+        public void Dispose()
+        {
+            if (_handle == IntPtr.Zero) return;
+            pcap_close(_handle);
+            _handle = IntPtr.Zero;
+        }
+    }
+
     private static string Str(byte[] errbuf)
     {
         var end = Array.IndexOf(errbuf, (byte)0);
