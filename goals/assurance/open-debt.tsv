@@ -38,3 +38,4 @@ STORY-P1-09-03	D20	design	The TCP IP data path domain has no stack behind it; a 
 STORY-P1-07-10	D02	unbuilt	Interrupt entry and exit is unbuilt as a measured path; this Story fixes the scope of interrupt masking around the measurement region and instruments no entry cost	2026-08-04
 STORY-P1-09-16	D20	design	The TCP IP data path domain has no stack behind it; one counted inbound frame is its second fragment beside the beacon and none of the 25 guardrails can close before the stack exists	2026-08-06
 STORY-P1-13-01	D22	design	Display update is a design-readiness domain with no display subsystem behind it; this Story justifies one write target under C4 discipline and instruments no display-update path, so none of the 25 guardrails can close on it	2026-08-07
+STORY-P1-09-17	D20	design	The TCP IP data path domain has no stack behind it; two answered verbs on counted raw frames are not a data path and none of the 25 guardrails can close before the stack exists	2026-08-07
