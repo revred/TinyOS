@@ -103,15 +103,19 @@ decision is now that one campaign.
 
 Session D's work is live and uncommitted in this tree: `06D`, register rows
 `LE-113`–`LE-116`, `governance.rs` (LE-113 part one), assurance-module edits,
-netboot doc comment. Per `CONCURRENT_SESSIONS.md` rules 1/3, none of it is
-staged here. **Consequence:** this session's register close (`LE-103`),
-dashboard counts (57 open / 63 Reports) and regenerated `feasibility.html`
-cannot be committed coherently until session D's rows land — the spine gates
-tie the Report count and the register state together. The code, the Report,
-the captures and this handover are committed; the register/dashboard/
-feasibility trio waits for one coordinated commit after session D lands.
-Whoever makes that commit: the counts in the working tree are already green
-(`check-assurance-spine` clean at 116/57).
+Epic edits (`EPIC-P2`/`EPIC-P9`), netboot doc comment. Per
+`CONCURRENT_SESSIONS.md` rules 1/3, none of it is staged here.
+**Consequence:** this session's register close (`LE-103`), the Report
+(`REPORT-2026-08-07-01`), the owner-ordered `FEAT-P1-13` +
+`STORY-P1-13-01` + their contract and open-debt rows + the `EPIC-P1`
+mention, and the regenerated dashboard/feasibility cannot be committed
+coherently until session D's rows land — the spine gates tie the Report
+count, the Feature count and the register state together, and the dashboard's
+`116 loose ends` figure counts rows only session D holds. The code, the
+captures, the transcription and this handover are committed; the rest is one
+coordinated commit after session D lands. Whoever makes it: the working tree
+is already green end to end (`check-assurance-spine` at 33 Features /
+101 Stories / 116 loose ends (57 open); `check-feasibility` agreeing).
 
 ## 7a. Added later the same session: the blank monitor diagnosed from the wire
 
