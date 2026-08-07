@@ -1590,14 +1590,27 @@ mod tests {
         let baseline = parse_baseline(&text).expect("the committed baseline must parse");
         assert_eq!(
             baseline.rows.len(),
-            8,
-            "seven measured metrics plus the reference — the eighth row is the batched \
-             round-trip twin STORY-P1-07-06 added for LE-24"
+            11,
+            "ten measured metrics plus the reference: the batched round-trip twin \
+             STORY-P1-07-06 added for LE-24, and the three `_spoored` arms b4a7010 \
+             committed, whose absence from this file is what held the gate red from \
+             fb3f36c until the LE-23 re-record"
         );
         assert!(baseline.rows.iter().all(|row| row.profile == "release"));
         assert!(baseline.rows.iter().all(|row| row.tier == "T0"));
         let keys: BTreeSet<String> = baseline.rows.iter().map(BaselineRow::key).collect();
         assert!(keys.contains("D04/context_switch_yield_roundtrip_2switches"));
         assert!(keys.contains(REFERENCE_METRIC));
+        // Named, not just counted. A count alone would let a `_spoored` arm be
+        // dropped from the fixture and a different metric added, and this test
+        // would still pass — which is the shape of the hole that let three
+        // measured-but-unbaselined metrics reach CI in the first place.
+        for spoored in [
+            "D04/context_switch_yield_roundtrip_2switches_spoored",
+            "D05/dispatch_run_once_cooperative_round_spoored",
+            "D07/pool_u64x64_alloc_free_round_trip_per_op_of_8_spoored",
+        ] {
+            assert!(keys.contains(spoored), "`{spoored}` must carry a committed baseline");
+        }
     }
 }
