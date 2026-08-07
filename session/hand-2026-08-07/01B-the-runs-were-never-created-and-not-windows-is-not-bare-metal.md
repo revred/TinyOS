@@ -179,11 +179,64 @@ import and this workspace builds with `-D warnings`.
    `kernel`'s bin is built, which is design surface the 2026-07-30 sprint rule
    has not lifted.
 3. **Whether `cargo test --workspace` links the `no_main` `[[bin]]`s on Linux
-   is still unknown.** The first run aborted at the four lib-test link failures
-   and never reached them. If cargo builds those bins during `cargo test`, a
-   `#![no_main]`/`#![no_std]` binary with no `_start` cannot link for a hosted
-   target and `host-tests` will go red again for a *new* reason. **That is the
-   next red to expect, and it is not `LE-64`'s family.**
+   was unknown when this was written.** Run `31162749587` answered it: they
+   link, or are not built. The suite got past the linker entirely. What it hit
+   instead is §2b.
+
+## 2b. The suite then ran, and the second instance of the same defect is worse
+
+Run [`31162749587`](https://github.com/revred/TinyOS/actions/runs/31162749587)
+is the first in this project's history in which a host test executed on a
+runner. It executed five, and then:
+
+```text
+running 86 tests
+test address_space::tests::a_section_whose_file_range_exceeds_image_bytes_is_rejected ... ok
+... four more ok ...
+error: test failed, to rerun pass `-p exec --lib`
+Caused by:
+  process didn't exit successfully: .../exec-c5b094f59518deef
+  (signal: 11, SIGSEGV: invalid memory reference)
+```
+
+`exec::address_space::unmap_page` and `link_shared_directory` each call
+`hal_x86_64::paging::invalidate_page` under `#[cfg(not(target_os =
+"windows"))]`, and **`invlpg` is a ring-0 instruction**. On Linux that gate is
+satisfied, so a *safe*, *public* function that ordinary unit tests call
+executed a privileged instruction in a userspace process and took the whole
+test binary down with `#GP`.
+
+Same root cause as §2, one layer along, and materially worse: §2 failed loudly
+at the linker naming the symbol. This one is a segfault with no test name
+attached, and the five tests that had already printed `ok` make it read like a
+flaky harness rather than a defect in the code under test.
+
+Both sites now read `#[cfg(target_os = "none")]`, guarded by
+`exec::address_space::tests::every_ring0_helper_call_is_gated_to_the_bare_metal_target`.
+**That guard failed on its own needle list on its first run** — the four string
+literals it searches for *are* lines containing `write_cr3(` — so it stops at
+`#[cfg(test)]` and asserts that it stopped, because a marker that moved would
+restore the self-match silently. Third time in this repository. It was then
+verified the required way: mutating the real file back to the old gate makes it
+name line 396 and nothing else.
+
+### What is not fixed, and why this row closes on a symptom rather than a class
+
+The `not(target_os = "windows")` spelling still stands throughout `hal-x86_64`
+(`gdt`, `paging`, `pci`, `fault`, `interrupts`, `qemu_exit`, `serial`) and in
+`kernel::context::switch_address_space` — every one meaning *bare metal*, none
+saying it. They **cannot simply be converted**, and the obstacle is structural:
+`kernel` and `exec` ship `no_main` fixture `[[bin]]`s referencing those items
+*ungated*, and the Linux governance job compiles those bins for the host with
+`clippy --workspace --all-targets`. Tightening the gate reddens a green job.
+The change that makes the conversion safe is a change to how those bins are
+built — design surface the 2026-07-30 sprint rule has not lifted — and it is
+the right follow-up.
+
+Until then the guarantee is **empirical rather than structural**: the host
+suite now runs on Linux, so the next instance announces itself as a crash
+rather than as nothing at all. That is a real improvement over the state
+`LE-100` closed in, and it is not the same thing as the class being closed.
 
 ## 3. Which red was whose, on run 31161538569
 
@@ -222,10 +275,13 @@ design surface.
 
 ## 5. For the next session
 
-1. **Read run 31161538569's successor first.** The `_start` fix is committed
-   on the evidence of a local mutation and the local suite; whether it clears
-   the Linux linker is a fact only the runner holds, and §2's residue #3 names
-   the specific way it can still fail.
+1. **Read the newest run first, and expect `host-tests` to still be red.**
+   Two rounds of this defect have been fixed on two runs; each fix let the
+   suite get further and reveal the next instance. `exec` crashed at test six
+   of eighty-six, so **eighty of `exec`'s tests and every test in every crate
+   after it have still never executed on Linux.** The honest expectation is
+   another round, not a green tick. §2b names where the remaining instances
+   live.
 2. **`origin/main` and `HEAD` are not the same thing.** This session's entire
    §1 existed because a handover asserted a push it had not made. `git
    ls-remote origin main` is one command and it is the only one that answers.

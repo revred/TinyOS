@@ -385,7 +385,14 @@ impl<'a, const FRAMES: usize> AddressSpace<'a, FRAMES> {
         // immediately. If it is inactive, this is harmless and the CR3 load
         // required to resume that task flushes all non-global entries. TinyOS
         // is single-core; SMP will require an inter-processor shootdown here.
-        #[cfg(not(target_os = "windows"))]
+        //
+        // `LE-102`: `target_os = "none"`, NOT `not(target_os = "windows")`.
+        // `invlpg` is a ring-0 instruction. On a Linux host the old gate is
+        // satisfied, so this line was compiled into the `exec` host test
+        // binary and `unmap_page` is safe and called by ordinary unit tests —
+        // the suite died with `SIGSEGV` after five tests on the first Linux
+        // run that got as far as executing anything.
+        #[cfg(target_os = "none")]
         paging::invalidate_page(virt);
         Ok(())
     }
@@ -440,7 +447,8 @@ impl<'a, const FRAMES: usize> AddressSpace<'a, FRAMES> {
                 if !mapped.writable {
                     paging::protect_4k(kernel_pml4, mapped.phys, writable, false)
                         .map_err(AddressSpaceError::from)?;
-                    #[cfg(not(target_os = "windows"))]
+                    // `LE-102`, same reason as `unmap_page`'s: ring-0 only.
+                    #[cfg(target_os = "none")]
                     paging::invalidate_page(mapped.phys);
                 }
             }
@@ -555,6 +563,58 @@ mod tests {
     use crate::pe::Permissions;
 
     const IMAGE_BASE: u64 = 0x1_4000_0000;
+
+    /// `LE-102`. Every ring-0 helper reached from this module must be gated on
+    /// `target_os = "none"` and never on `not(target_os = "windows")`.
+    ///
+    /// The two are the same condition read from this project's Windows bench
+    /// and are not the same condition on a Linux runner, where the old gate is
+    /// SATISFIED. `invalidate_page` is `invlpg`; `write_cr3`/`read_cr3` are
+    /// `mov` to and from `CR3`. Executing any of them in a userspace test
+    /// process is a `#GP` the process sees as `SIGSEGV` — which is exactly how
+    /// the `exec` suite died on the first CI run that linked far enough to run
+    /// a test, after five tests had already passed. `unmap_page` is safe, is
+    /// public, and is called by ordinary unit tests; nothing about the crash
+    /// was reachable from here.
+    ///
+    /// TWO exclusions, and both were earned rather than anticipated. Comment
+    /// lines are skipped because the explanations of this very gate name
+    /// `invalidate_page` in prose. And the scan STOPS at `#[cfg(test)]`,
+    /// because the first version of this test failed on its own needle list —
+    /// the four string literals below are lines containing `write_cr3(` and
+    /// the rest, so a whole-file scan reported them as ungated ring-0 calls.
+    /// That is `metric_labels.rs`'s self-match for the third time in this
+    /// repository, and stopping at the test boundary is also the honest rule:
+    /// this module's shipped code is what can reach a ring-0 instruction.
+    #[test]
+    fn every_ring0_helper_call_is_gated_to_the_bare_metal_target() {
+        const RING0: [&str; 4] =
+            ["invalidate_page(", "write_cr3(", "read_cr3(", "enable_nx_and_wp("];
+        const GATE: &str = "#[cfg(target_os = \"none\")]";
+        let source = include_str!("address_space.rs");
+        let shipped = source.split("\n#[cfg(test)]\n").next().unwrap_or(source);
+        let lines: Vec<&str> = shipped.lines().map(str::trim).collect();
+        assert!(
+            lines.len() < source.lines().count(),
+            "the scan must stop at the test module; if this file's `#[cfg(test)]` marker \
+             moves or is reindented, the scan silently covers its own needle list again"
+        );
+        let mut offenders = Vec::new();
+        for (index, line) in lines.iter().enumerate() {
+            if line.starts_with("//") || !RING0.iter().any(|needle| line.contains(needle)) {
+                continue;
+            }
+            let gated = index.checked_sub(1).is_some_and(|i| lines[i] == GATE);
+            if !gated {
+                offenders.push(format!("line {}: {line}", index + 1));
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "LE-102: these ring-0 instructions are reachable from a hosted test binary, \
+             where they raise #GP and the process dies with SIGSEGV: {offenders:?}"
+        );
+    }
 
     fn section(virtual_address: u32, size: u32, permissions: Permissions) -> SectionDescriptor {
         SectionDescriptor {
