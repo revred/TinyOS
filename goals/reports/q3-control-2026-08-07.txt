@@ -1,0 +1,2 @@
+TOS64-QUAL/1 residency window_ticks=540000 cntpct_ticks=540003 cntvct_ticks=540002 pmccntr_delta=24000104
+TOS64-QUAL/1 smc_control psci_version=0x00010001 idle_windows=16 idle_unaccounted_max=0 control_unaccounted=15 event_fired=true seen=true

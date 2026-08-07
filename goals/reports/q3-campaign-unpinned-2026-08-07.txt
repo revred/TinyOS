@@ -1,0 +1,3 @@
+TOS64-QUAL/1 campaign windows=6000 window_ticks=540000 pmu_per_1000_ticks=44444
+TOS64-QUAL/1 campaign_unaccounted min=0 p50=0 p99=202499 p99_9=202500 max=202500
+TOS64-QUAL/1 campaign_offset disagreement_max=1

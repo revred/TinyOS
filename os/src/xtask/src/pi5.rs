@@ -588,8 +588,40 @@ pub fn contains_complete_verdict_line(bytes: &[u8]) -> bool {
 /// This line is the cheap half, it costs no rebuild — `kernel8.img` and its
 /// digest are untouched, `config.txt` is staged separately — and an unrecognised
 /// key is ignored by firmware, so it cannot make a working display stop working.
+/// # `force_turbo=1` is a measurement-validity line, added 2026-08-07 (`LE-121`)
+///
+/// The first Q3 residency campaign ever run reported `unaccounted_max=202500`
+/// against a 540,000-tick window — read naively, 3.75 ms of a 10 ms window spent
+/// somewhere the kernel could not see, which would be a headline finding against
+/// `ADR 0005`. It was not one. `202500/540000` is exactly `0.375`, and
+/// `1 − 1500/2400` is exactly `0.375`: the Pi 5's idle core clock over its boost
+/// clock.
+///
+/// The mechanism is arithmetic rather than subtle. `PMCCNTR_EL0` counts **CPU
+/// cycles**; `CNTPCT_EL0` counts at a **fixed** system frequency. Every
+/// instrument here that relates the two — the residency campaign explicitly, and
+/// every `TOS64-MEAS/2` metric implicitly, since the envelope converts through
+/// `cycles_per_us=2400` — assumes the ratio between them is a constant. Under
+/// DVFS it is not, and the shortfall is indistinguishable from cycles genuinely
+/// spent at EL3.
+///
+/// **It cannot be measured around.** Within one window, a core running at 62.5%
+/// for the whole window and a core running at 100% for 62.5% of it produce
+/// identical counter totals. Window arithmetic cannot separate them even in
+/// principle, so the confound is *removed* rather than corrected: with the clock
+/// pinned, the ratio is constant by construction and the instrument's own
+/// arithmetic becomes true.
+///
+/// **What this costs, stated rather than hidden.** A record measured at a pinned
+/// clock is a record about a pinned clock, and it must say so — it does not
+/// license a claim about a board running an ordinary DVFS governor. It also
+/// raises idle power and die temperature; the board reported ~63–65 °C
+/// unpinned, and `LE-75`'s thermal channel is the one to watch if that becomes
+/// a limit. This is deliberately global rather than per-fixture, because the
+/// cycle-to-time conversion it protects is used by every measured fixture, not
+/// only by the campaign that exposed it.
 pub const CONFIG_TXT: &str =
-    "os_check=0\nkernel=kernel8.img\npciex4_reset=0\nhdmi_force_hotplug=1\n";
+    "os_check=0\nkernel=kernel8.img\npciex4_reset=0\nhdmi_force_hotplug=1\nforce_turbo=1\n";
 
 /// The SD-card placement instructions, printed after every build so nothing
 /// about the image is folklore held by whoever did it last (`TEST-P1-07-05-A`
@@ -605,6 +637,7 @@ pub fn placement_instructions(image_bytes: usize, image_sha256: &str) -> String 
          \x20                 kernel=kernel8.img\n\
          \x20                 pciex4_reset=0\n\
          \x20                 hdmi_force_hotplug=1\n\
+         \x20                 force_turbo=1\n\
          \x20   (without os_check=0 the Pi 5 firmware relocates the image to 0x200000 and\n\
          \x20    execution starts mid-image, as total silence — divergence record §3, the\n\
          \x20    one constant no test can check because config.txt lives on the card;\n\
@@ -613,7 +646,11 @@ pub fn placement_instructions(image_bytes: usize, image_sha256: &str) -> String 
          \x20    without hdmi_force_hotplug=1 a monitor absent or asleep at power-on leaves\n\
          \x20    the firmware with no framebuffer and TinyOS painting 4 MB into RAM nobody\n\
          \x20    allocated — LE-98, and the display must be on HDMI0, the port nearest the\n\
-         \x20    USB-C connector, and live BEFORE power is applied)\n\
+         \x20    USB-C connector, and live BEFORE power is applied;\n\
+         \x20    without force_turbo=1 the core drops to its 1500 MHz idle clock and every\n\
+         \x20    cycle-versus-physical-tick instrument books the shortfall as time the\n\
+         \x20    kernel could not see - LE-121, which is how the first Q3 campaign came\n\
+         \x20    within one ratio check of filing DVFS as secure-world residency)\n\
          serial: the dedicated 3-pin debug connector (NOT the GPIO header), 115200 8N1;\n\
          \x20       loopback-test the adapter first (TEST-P1-07-01-A clause 1)\n\
          then: reinsert the card and power-cycle the board\n"
@@ -1328,7 +1365,7 @@ TOS64-MEAS/2 END metrics=8\n\
         // that boots differently than the build intended.
         assert_eq!(
             CONFIG_TXT,
-            "os_check=0\nkernel=kernel8.img\npciex4_reset=0\nhdmi_force_hotplug=1\n"
+            "os_check=0\nkernel=kernel8.img\npciex4_reset=0\nhdmi_force_hotplug=1\nforce_turbo=1\n"
         );
     }
 
