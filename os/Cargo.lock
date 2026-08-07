@@ -12,6 +12,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "fdt-walk"
+version = "0.1.0"
+
+[[package]]
 name = "hal"
 version = "0.1.0"
 
