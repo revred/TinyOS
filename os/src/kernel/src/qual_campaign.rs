@@ -213,19 +213,35 @@ pub fn control_seen(idle: &CampaignSummary, control_unaccounted: u64) -> bool {
 ///
 /// Propagates the sink's own error, as every envelope writer does.
 pub fn write_campaign_line<W: fmt::Write>(sink: &mut W, summary: &CampaignSummary) -> fmt::Result {
+    // THREE lines, not one, and the split is a transport constraint rather
+    // than a stylistic choice (`LE-120`). A `TOS64` text frame carries 178
+    // payload octets and `gem::text_frame` truncates silently past that, so
+    // the single line this used to write was cut mid-field on the first real
+    // campaign — losing `unaccounted_max` and `offset_disagreement_max`, the
+    // two fields the record is actually quoted from. Each line below fits the
+    // frame at `u64::MAX` in every field and is self-describing on its own, so
+    // a capture that catches one and misses another loses a whole statement
+    // rather than half of one.
     writeln!(
         sink,
-        "TOS64-QUAL/1 campaign windows={} window_ticks={} pmu_per_1000_ticks={} \
-         unaccounted_min={} unaccounted_p50={} unaccounted_p99={} unaccounted_p99_9={} \
-         unaccounted_max={} offset_disagreement_max={}",
-        summary.windows,
-        summary.window_ticks,
-        summary.pmu_per_1000_ticks,
+        "TOS64-QUAL/1 campaign windows={} window_ticks={} pmu_per_1000_ticks={}",
+        summary.windows, summary.window_ticks, summary.pmu_per_1000_ticks,
+    )?;
+    writeln!(
+        sink,
+        "TOS64-QUAL/1 campaign_unaccounted min={} p50={} p99={} p99_9={} max={}",
         summary.unaccounted_min,
         summary.unaccounted_p50,
         summary.unaccounted_p99,
         summary.unaccounted_p99_9,
         summary.unaccounted_max,
+    )?;
+    // Its own line, and it earns one: the moved-`CNTVOFF_EL2` channel is a
+    // different hiding place from the paused-PMU channel, so a reader who sees
+    // only this line still knows exactly what it measured.
+    writeln!(
+        sink,
+        "TOS64-QUAL/1 campaign_offset disagreement_max={}",
         summary.offset_disagreement_max,
     )
 }
@@ -409,6 +425,49 @@ mod tests {
         assert!(control_seen(&idle_summary, idle_summary.unaccounted_max + 1));
     }
 
+    /// The payload a `TOS64` text frame can carry: `hal_arm64::gem`'s
+    /// `TEXT_FRAME_CAPACITY` (192) less the 14-byte Ethernet header. Restated
+    /// here rather than imported because `kernel` does not depend on the
+    /// AArch64 HAL; the number is pinned in both places and a divergence is a
+    /// build this test fails.
+    const WIRE_PAYLOAD_BYTES: usize = 192 - 14;
+
+    #[test]
+    fn no_campaign_line_can_exceed_the_frame_that_carries_it() {
+        // Found on silicon 2026-08-07 (`LE-120`): the first real Q3 campaign
+        // emitted a line of EXACTLY 178 bytes and `gem::text_frame` truncated
+        // it silently, so `unaccounted_max` and `offset_disagreement_max` --
+        // the worst case, and the moved-offset channel carried separately
+        // *because it is a different hiding place* -- were cut off mid-field.
+        // The surviving text still parses as key=value pairs, which is what
+        // made it dangerous: a result missing precisely the two fields that
+        // would make it evidence, and nothing marking the loss.
+        //
+        // Worst case, not the observed case: every field at u64::MAX, which is
+        // the widest line this writer can ever produce.
+        let widest = CampaignSummary {
+            windows: u32::MAX,
+            window_ticks: u64::MAX,
+            pmu_per_1000_ticks: u64::MAX,
+            unaccounted_min: u64::MAX,
+            unaccounted_p50: u64::MAX,
+            unaccounted_p99: u64::MAX,
+            unaccounted_p99_9: u64::MAX,
+            unaccounted_max: u64::MAX,
+            offset_disagreement_max: u64::MAX,
+        };
+        let mut sink = String::new();
+        write_campaign_line(&mut sink, &widest).expect("write");
+        for line in sink.lines() {
+            assert!(
+                line.len() <= WIRE_PAYLOAD_BYTES,
+                "a {} byte line cannot survive a {WIRE_PAYLOAD_BYTES} byte frame, and the \
+                 transport truncates rather than refusing: {line}",
+                line.len()
+            );
+        }
+    }
+
     #[test]
     fn the_campaign_line_is_exact_bytes() {
         let summary = CampaignSummary {
@@ -424,11 +483,14 @@ mod tests {
         };
         let mut sink = String::new();
         write_campaign_line(&mut sink, &summary).expect("writes");
+        // Three lines since 2026-08-07 (`LE-120`), each one self-describing so
+        // a capture that catches one and misses another loses a whole
+        // statement rather than half of one.
         assert_eq!(
             sink,
-            "TOS64-QUAL/1 campaign windows=6000 window_ticks=540000 pmu_per_1000_ticks=44444 \
-             unaccounted_min=0 unaccounted_p50=0 unaccounted_p99=1 unaccounted_p99_9=3 \
-             unaccounted_max=9 offset_disagreement_max=2\n"
+            "TOS64-QUAL/1 campaign windows=6000 window_ticks=540000 pmu_per_1000_ticks=44444\n\
+             TOS64-QUAL/1 campaign_unaccounted min=0 p50=0 p99=1 p99_9=3 max=9\n\
+             TOS64-QUAL/1 campaign_offset disagreement_max=2\n"
         );
     }
 
