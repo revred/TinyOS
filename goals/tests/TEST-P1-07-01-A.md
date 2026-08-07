@@ -1,6 +1,6 @@
 # TEST-P1-07-01-A — The Board Says Which Exception Level It Woke Up At
 
-Status: **Partially Verified (Host), 2026-07-28** — clause 5 Green, clause 2 Green for the build, clause 3 Green for the decode and the ordering; clauses 1 and 4 are untouched and need hardware. **Specification unchanged since it was written before implementation** — see "What was and was not run", below.
+Status: **Verified (Host + Tier 1 wire evidence), 2026-08-07** — clauses 2, 3, 4 and 5 Green, clauses 3 and 4 on the **substituted Ethernet channel** per the dated amendment at the end of this document; clause 1 is retired with the channel it tested; clause 6 Green for the reporting with its hardware half not claimed. **The specification below is unchanged since it was written before implementation** — the amendment is appended, never edited in, per this document's own 2026-07-28 precedent.
 Story: [`STORY-P1-07-01`](../stories/STORY-P1-07-01.md)
 Tier: Host unit tests (PL011 register encoding, flag polling, `CurrentEL` decoding, linker/target-spec shape) **plus** a Tier 1 hardware run on a Raspberry Pi 5, captured over the debug UART, per [Target Hardware & Test Matrix](../../README.md#target-hardware--test-matrix)
 Assurance contract: [`goals/assurance/story-contracts.tsv`](../assurance/story-contracts.tsv)
@@ -147,8 +147,42 @@ the report supplies `\n` only, and
 it. Recorded because the failure mode — a capture that is subtly not what the
 source says — is the one this Feature's evidence rests on.
 
+## Amendment, 2026-08-07 — the channel is the Ethernet wire, and the PL011 is retired from this test's evidence path
+
+Per the precedent `TEST-P1-07-03-A` set (clauses re-read against their spirit,
+each with its reason recorded, the original specification untouched above), and
+executed on the owner's instruction to decide (`hand-2026-08-07/09A`). The
+facts that force the substitution, all of record:
+
+- The PL011 has produced **nothing, ever** — five consecutive zero-byte
+  captures across every image, and the owner ruled the clause-1 loopback test
+  infeasible on this bench (`LE-47`). Serial was demoted as an instrument on
+  2026-08-03 (`hand-2026-08-03/08A`).
+- The owner's standing direction since 2026-08-03 is that diagnostics ride
+  **TOS64 envelopes over Ethernet** once the link trains. It trained on
+  2026-08-04, and since 2026-08-07 a passive capture parses to its own verdict
+  (`xtask parse-meas` exit 0).
+- `STORY-P1-07-01`'s own status text named this exact fork — "a working
+  adapter or an amendment substituting the channel with its reason" — and the
+  adapter has not appeared in ten days of sessions.
+
+| Clause | Re-read | Evidence |
+|---|---|---|
+| 1 — adapter proven before the board is blamed | **Retired with the channel.** Its purpose — never blame the board for a dead instrument — is carried on the wire path by instruments that demonstrably return both answers: the netboot serve log confirms each transfer digest before a byte executes, `ti64dink --until` exits 0 on sighting and 1 on timeout (both observed live), and `parse-meas` refuses a capture without a verdict (`LE-110`). | serve log discipline (`LE-87`), `wire-qual-2026-08-07-verdict.txt` |
+| 3 — `CurrentEL` read, not assumed | **Green, with the ordering clause re-read as *captured at entry, reported when a channel exists*.** A channel that trains seconds after boot cannot carry entry-time bytes, and the retired channel never carried any; what the ordering existed to buy — knowing the firmware's entry level even when everything after it goes wrong — is bought by the raw register being saved at entry and quoted beside its decode, so a wrong decode is diagnosable from the capture alone. The conditional drop executed on silicon: `now_at=EL1`. Corroborated independently by `REPORT-2026-08-07-01`'s Q2 determination (TF-A BL31 hands off at NS-EL2). | `TOS64-QUAL/1 boot_entry current_el=EL2 raw=0x0000000000000008 now_at=EL1 firmware_cntvoff=0x0000000000000000` — verbatim, both boots, two owner power cycles |
+| 4 — a known byte sequence reaches the host | **Green on the substituted channel, and stronger than written:** not merely a known sequence in order, but a machine-parsed envelope whose framing host tests pin, whose transfer digest was confirmed before execution, and which since boot 2 carries its own verdict. | `wire-qual-2026-08-07.txt` (boot 1), `wire-qual-2026-08-07-verdict.txt` (boot 2: `TOS64-RESULT/1 fixture=measure ok=true`, `parse-meas` exit 0) |
+
+**What this amendment does not do.** It does not weaken clause 6 (still Green
+for reporting only; no handoff line rides the wire and none is claimed), does
+not close `SEC-01`/`BND-01` (stated debt, unchanged), does not revive any
+timing claim (the qualification figures live in `REPORT-2026-08-07-01`, which
+carries its own refusals), and does not assert the PL011 works — it asserts the
+evidence this Story needed no longer waits on it.
+
 ## Reports
 
-To be filed when the Story goes Green. **Nothing here closes a `PERF-*`
-guardrail and `LE-09` remains open**: a byte on a serial line is not a
-measurement, and no byte has reached one yet.
+[`REPORT-2026-08-07-01`](../reports/REPORT-2026-08-07-01.md) — names this
+test's clause 3 in its own header ("the entry exception level, read on the
+board rather than assumed") and carries both captures. `LE-09` closed earlier
+on `STORY-P1-07-06`'s Report (`REPORT-2026-08-04-01`), not on this Story, and
+no `PERF-*` guardrail closes here.
