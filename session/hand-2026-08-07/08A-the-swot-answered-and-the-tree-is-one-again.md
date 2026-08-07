@@ -1,6 +1,15 @@
-# 08G — The SWOT answered: the tree is one again, the review the marathon owed is paid, and the record's expiry has a tripwire
+# 08A — The SWOT answered: the tree is one again, the review the marathon owed is paid, and the record's expiry has a tripwire
 
-Session letter **G**, opened by the owner with session F's SWOT and the
+**Filed as `08G`, renamed `08A` the same day by the session that wrote it**,
+when the owner corrected the naming convention: the letter marks concurrency at
+a number and resets to `A` — a solo next session is `NN+1 A`, never the date's
+next unused letter. The old rule (letter-per-session-per-date, amended in on
+2026-07-29) is what made this day's letters climb to `G`; `session/README.md`
+now carries the corrected rule, and this paragraph exists so a reader of the
+commit history (`ae55ab7`, `4f8b38b` say `08G`) is not left hunting for a file
+that no longer exists.
+
+The next-to-last session of 2026-08-07, opened by the owner with session F's SWOT and the
 instruction to address it — then widened mid-session to *address all
 opportunities and mitigate risks proactively*. Sessions D and F had both ended;
 their entangled uncommitted work was the tree this session inherited.
@@ -163,7 +172,7 @@ rows would pre-judge exactly the reading that is owed.
 ## 9. Housekeeping
 
 - The session index (`index.html`) had stopped at `05E` and its `<title>` still
-  said 6 August: `02D`, `03D`, `06D`, `07F` and this document are now indexed
+  said 6 August: `02D`, `03D`, `06D`, `07F` and this document are now indexed,
   and the title corrected — the front-door-drift class (`LE-107`'s family) in
   the session folder itself.
 - Gates at close: spine green at 33 Features / 101 Stories / **117 loose ends
