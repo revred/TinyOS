@@ -66,8 +66,11 @@ While this document's first commit was on the wire, a `workflow_dispatch`
 appeared: **the owner dispatched `record-timing-baseline`** (run
 `31181879077`) — the LE-116 path, and the decision `LE-23` recorded as
 pending through five sessions, taken by the one person whose call it was. The
-job succeeded in 60 s; the owner placed the artifact's content into the
-working tree; this session completed the designed review-then-commit half:
+job succeeded in 60 s; the owner then committed the recorded file themselves
+(`f0bd69f`, their authorship — the decision and the commit belong together),
+landing mid-turn as this session was preparing the same commit from the
+artifact. Corrected here for exactness: the session's half was the **review**,
+run against the artifact before the owner's commit was noticed:
 
 - artifact byte-compared against the placed file (identical);
 - all 11 rows one date, one runner session — the whole-file replacement
