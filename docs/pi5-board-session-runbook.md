@@ -54,6 +54,83 @@ netboot with transfer digests, `ti64dink` captures (with arrival timestamps
 since `LE-115`), and `xtask parse-meas` verdicts. Serial steps remain below as
 the historical procedure and for a bench that someday has a working adapter.
 
+## 0c. Commissioning the switched supply — one time, before it drives anything (`LE-95`)
+
+The tenth stage of the board evidence loop is a LAN-controlled mains plug, and
+`tos64-power` has driven four dialects since 2026-08-06 with nothing to drive.
+The bench device is a **Shelly Plus Plug UK** (Type G), which speaks the Gen2
+JSON-RPC surface: `--dialect shelly-gen2`. No code was needed — the dialect's
+command, readback and the `was_on` trap were already written for it.
+
+**Commission it over its own access point, not through the app**, if you can:
+the plug boots into a `ShellyPlusPlugUK-XXXXXX` WiFi AP whose web UI at
+`http://192.168.33.1` joins it to your network with no account anywhere. The
+phone app works too, but it invites a cloud login that `LE-95` rules out at any
+price. Either way, finish with the four settings below.
+
+**The four settings, and why each one is not optional.** Everything after the
+first is a way for a correctly-written fail-safe to be silently defeated by the
+device underneath it, so each is written as the RPC that sets it and the RPC
+that proves it:
+
+1. **A fixed address.** DHCP reservation on the router, or a static IP on the
+   plug. `board-run --plug=` names a URL; a plug that moves is a bench that
+   switches whatever now holds that address. Prove it with
+   `http://<ip>/rpc/Shelly.GetDeviceInfo` and check the `id` is the plug you
+   mean.
+2. **Power-on state must be `on`.**
+   `http://<ip>/rpc/Switch.SetConfig?id=0&config={"initial_state":"on"}`.
+   This is the important one. `tos64-power`'s first rule is that it never
+   leaves the board off, and it keeps that rule across every path it controls —
+   but it cannot keep it across a *plug* reboot. A firmware update, a brownout
+   or a WiFi-driven restart with `initial_state` at `off` or `restore_last`
+   leaves the board dark with no hand on the bench, which is the exact stall
+   the whole tool exists to remove. Prove it with
+   `Switch.GetConfig?id=0` and read `initial_state` back.
+3. **No auto-off timer.**
+   `Switch.SetConfig?id=0&config={"auto_off":false,"auto_on":false}`.
+   An auto-off timer is a countdown to a power cut that no gate in this repo
+   can see. `ADR 0005`'s Q3 residency campaign is sixty seconds of accumulated
+   window time and future soaks are longer; a plug that helpfully switches off
+   after an interval turns a campaign into an unexplained short capture.
+4. **Cloud disabled, not merely unused.**
+   `http://<ip>/rpc/Cloud.SetConfig?config={"enable":false}`. `LE-95` requires
+   local control with no vendor account, and a bench that cannot reboot the
+   board while somebody else's service is down is a new instrument failure —
+   this bench has had five. Bluetooth may stay on for recovery; nothing in the
+   loop uses it.
+
+**Do not enable the plug's "restrict login" (HTTP auth).** `tos64-power` sends
+plain unauthenticated requests and has no credential path, so enabling it turns
+every call into an unreachable plug — which the tool correctly reports as
+`UNKNOWN` rather than as off, but the bench stops working. If the plug must
+live on a segment where auth is required, that is a code change to
+`PlugClient`, not a setting.
+
+**Then verify against the real device, in this order.** The exit codes are
+distinct on purpose:
+
+```
+tos64-power --plug http://<ip> --dialect shelly-gen2 status   # expect ON, exit 0
+tos64-power --plug http://<ip> --dialect shelly-gen2 off      # then status: OFF
+tos64-power --plug http://<ip> --dialect shelly-gen2 on       # then status: ON
+tos64-power --plug http://<ip> --dialect shelly-gen2 cycle --off-ms 5000 --on-wait 20
+```
+
+`0` done and confirmed · `1` refused by a guard · `2` usage · `3` **UNKNOWN —
+asked, not confirmed** · `4` **THE BOARD MAY BE OFF**. A `3` or a `4` is a
+finding, not a retry: `4` in particular means a hand is owed to the bench and
+the next session must know it.
+
+**The hazard the tool does not guard, because it cannot see it.** This plug cuts
+mains to the Pi's PSU — a hard cut, with no clean shutdown. `TransferGuard`
+refuses a cycle while a TFTP transfer is in flight, but it knows nothing about
+the SD card: **never cycle while the card's Pi OS role is booted**, because a
+write in flight to the filesystem is a corrupt card and this bench owns one Pi.
+The TOS64 role netboots and holds no mounted writable filesystem, so cycling it
+is safe by construction; the ground-truth role of §6 is not. Shut the Pi OS role
+down over ssh first, and only then cycle.
+
 ## 1. Loopback-test the adapter first (`TEST-P1-07-01-A` clause 1)
 
 **Why this exists.** Between the keyboard and the Pi's silicon there are five
