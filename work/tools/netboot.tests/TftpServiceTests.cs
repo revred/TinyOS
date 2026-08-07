@@ -41,7 +41,14 @@ public sealed class TftpPathResolutionTests
     [InlineData("../../../secrets.txt")]
     [InlineData("/../secrets.txt")]
     [InlineData("subdir/../../secrets.txt")]
+    // The drive-letter arms are the LE-114 finding: on Windows `C:\…` is
+    // rooted and fell outside the root; on Linux it was one odd directory
+    // name and resolved INSIDE the root. The guard now refuses the colon
+    // itself, so the answer is the same on every host the bench might run.
     [InlineData("C:\\Windows\\System32\\config\\SAM")]
+    [InlineData("C:/Windows/System32/config/SAM")]
+    // NTFS alternate-data-stream spelling: same colon rule, same refusal.
+    [InlineData("kernel8.img:hidden")]
     public void An_escape_is_still_refused(string requested)
     {
         Assert.Null(TftpPaths.Resolve(Root, requested));

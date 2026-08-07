@@ -28,6 +28,16 @@ internal static class TftpPaths
     {
         if (string.IsNullOrEmpty(requested)) return null;
 
+        // A colon spells a drive root (`C:\…`) or an NTFS alternate data
+        // stream (`name:stream`) on Windows, and nothing legitimate in this
+        // protocol on any host. Refused HERE, before host path semantics see
+        // it, so the guard's answer does not depend on which OS the bench
+        // runs: LE-114's first runner execution found the `C:\…SAM` arm
+        // refused on Windows (rooted, so outside the root) and RESOLVED
+        // INSIDE THE ROOT on Linux, where a drive prefix is just an odd
+        // directory name. One rule, every host, fail closed.
+        if (requested.Contains(':')) return null;
+
         var relative = requested.Replace('/', Path.DirectorySeparatorChar)
                                 .Replace('\\', Path.DirectorySeparatorChar)
                                 .TrimStart(Path.DirectorySeparatorChar);
