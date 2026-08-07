@@ -1,0 +1,9 @@
+[package]
+name = "fdt-walk"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Pure, allocation-free, bounds- and depth-capped extraction of exactly one fact (the simple-framebuffer reg) from a flattened device tree treated as hostile bytes end to end. Linked into no image by decision: its consumers are a future C4 domain and the host as an off-board disposable inspector (STORY-P1-13-01)."
+
+[dependencies]

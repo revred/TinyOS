@@ -7,6 +7,7 @@ members = [
     "src/hal-x86_64",
     "src/hal-arm64",
     "src/pi5-image",
+    "src/fdt-walk",
     "src/exec",
     "src/motion",
     "src/shell",
