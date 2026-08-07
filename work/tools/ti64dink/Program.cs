@@ -1118,7 +1118,9 @@ internal static class Program
         var qual = new List<string>();
         foreach (var line in text)
         {
-            if (line.StartsWith("TOS64-QUAL/1", StringComparison.Ordinal) && !qual.Contains(line))
+            if ((line.StartsWith("TOS64-QUAL/1", StringComparison.Ordinal)
+                    || line.StartsWith("TOS64-DISPLAY/1", StringComparison.Ordinal))
+                && !qual.Contains(line))
             {
                 qual.Add(line);
             }

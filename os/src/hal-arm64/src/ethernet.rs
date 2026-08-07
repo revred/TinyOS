@@ -300,6 +300,32 @@ pub enum ParkState {
     Stopped(TxError),
 }
 
+/// Builds the one-per-boot `TOS64-DISPLAY/1` line: the firmware's native-size
+/// answer (the canvas gate, `LE-98`) and the mailbox framebuffer grant, as
+/// this boot saw them. Recorded into the transcript so the *wire* carries the
+/// display diagnosis — until 2026-08-07 it reached only the canvas, which is
+/// dark exactly when the answer matters, and the UART, which this bench has
+/// never captured a byte from (`LE-47`). Pure; pinned by the tests.
+pub fn display_line(
+    native: Option<(u32, u32)>,
+    fb_granted: bool,
+) -> ([u8; LINK_LINE_CAPACITY], usize) {
+    let mut line = LineBuilder::new();
+    line.push("TOS64-DISPLAY/1 native=");
+    match native {
+        Some((width, height)) => {
+            line.push_dec(width);
+            line.push("x");
+            line.push_dec(height);
+        }
+        None => line.push("none"),
+    }
+    line.push(" fb=");
+    line.push(if fb_granted { "granted" } else { "refused" });
+    line.push("\n");
+    (line.bytes, line.at)
+}
+
 /// Builds one `TOS64-BEAT/1` heartbeat line (`STORY-P1-09-05`, extended by
 /// `STORY-P1-09-14`): emitted every park period so a passive listener can
 /// find a powered board without any operator timing, and so a wrong UART
@@ -1062,6 +1088,26 @@ mod tests {
         assert_eq!(park_state(false, None, false, true), ParkState::WatchDead);
         assert_eq!(park_state(false, None, true, false), ParkState::WatchAlive);
         assert_eq!(park_state(false, None, false, false), ParkState::Unwatched);
+    }
+
+    // `LE-98` / the owner's standing direction (diagnosis moves onto the
+    // cable): the display outcome must be statable on the wire, because the
+    // two channels that carried it — the canvas and the UART — are dark or
+    // unproven exactly when the answer matters.
+    #[test]
+    fn the_display_line_reports_what_the_firmware_said_at_boot() {
+        let (bytes, len) = display_line(Some((1920, 1080)), false);
+        assert_eq!(
+            core::str::from_utf8(&bytes[..len]).unwrap(),
+            "TOS64-DISPLAY/1 native=1920x1080 fb=refused\n"
+        );
+        // `native=none` is the arm the blank-monitor diagnosis turns on: the
+        // firmware could not name a display, so the canvas gate never opened.
+        let (bytes, len) = display_line(None, true);
+        assert_eq!(
+            core::str::from_utf8(&bytes[..len]).unwrap(),
+            "TOS64-DISPLAY/1 native=none fb=granted\n"
+        );
     }
 
     #[test]
@@ -1832,6 +1878,14 @@ mod glue {
         let mut watch = watch_from(&discovery);
         let mut heartbeating = true;
         let fb_granted = splash.framebuffer.is_some();
+        // The display diagnosis onto the wire (`LE-98`): one transcript line,
+        // recorded before the park loop starts cycling readers, so a passive
+        // capture can say whether the firmware ever saw a display this boot.
+        #[cfg(feature = "fixture-measure")]
+        {
+            let (line, len) = display_line(splash.native, fb_granted);
+            crate::transcript::record(&line[..len]);
+        }
         let mut animation = splash.framebuffer.map(|info| {
             (crate::hdmi::Framebuffer { info }, crate::hdmi::Bounce::new(info.width, info.height))
         });

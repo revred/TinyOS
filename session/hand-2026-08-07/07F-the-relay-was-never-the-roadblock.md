@@ -113,6 +113,32 @@ feasibility trio waits for one coordinated commit after session D lands.
 Whoever makes that commit: the counts in the working tree are already green
 (`check-assurance-spine` clean at 116/57).
 
+## 7a. Added later the same session: the blank monitor diagnosed from the wire
+
+The owner wanted the monitor alive. Instead of guessing, the display outcome
+was put on the wire — `TOS64-DISPLAY/1` (`ethernet::display_line`, TDD, one
+transcript line per boot) — and a third hand power-cycle answered:
+
+```text
+TOS64-DISPLAY/1 native=1920x1080 fb=refused
+TOS64-RESULT/1 fixture=measure ok=true
+```
+
+**The firmware sees the display perfectly** (native size answered = panel up,
+EDID read, monitor awake on HDMI0), the canvas gate is open, TinyOS is
+painting — and the screen is blank. That is `LE-98`'s documented unfinished
+half by its own words: *a display existing is not the same as a framebuffer
+existing at `SIMPLEFB_BASE`* — a constant captured from a Pi OS **SD** boot.
+The record's pattern agrees: every canvas ever photographed (2026-08-04
+verdicts 5–9) was an SD boot; every netboot (`LE-98`'s raising run included)
+has been dark. Working hypothesis, now with wire evidence behind it: **the
+firmware's scanout allocation differs between SD boot and netboot**, and the
+DT parse that would resolve it is the fix `02D`/`06D` explicitly deferred.
+Do not start it as a side effect; the diagnosis line is in the tree and the
+next LE-98 session starts from evidence instead of a dark screen. To *see*
+the OS state today, SD-boot the same image (`sdprep`/`cardswap`) — that path
+painted every canvas this project has photographed.
+
 ## 8. Standing instructions, one extension
 
 All previous instructions hold. The extension this session earned: **a blocker
