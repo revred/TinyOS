@@ -24,7 +24,14 @@
 // misconfigured client gets an error rather than silence.
 //
 // Usage:
-//   tos64-netboot --mac 88:a2:9e:11:4e:cc --root <dir> [--server <ip>] [--log-only]
+//   tos64-netboot --mac 88:a2:9e:11:4e:cc --root <dir> [--server <ip>] [--offer <ip>]
+//                 [--log-only]
+//
+//   --offer      the address handed to the board in the DHCP OFFER, when it must
+//                differ from --server. Accepted by the parser since this tool was
+//                written and omitted from this comment until 2026-08-07, which is
+//                the shape LE-80 is about: the documentation and the code came
+//                apart and only the code was right.
 //
 //   --log-only   answer DHCP but serve no files, so a first run records what
 //                the bootloader actually asks for without anything having to be

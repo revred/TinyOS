@@ -1,6 +1,6 @@
 # EPIC-P2 — The Operator Command Environment: DOS, POSIX and Real-Time, One Authorisation Path
 
-Status: **Specified — no Feature document written and no Story started. Blocked on a storage decision (`LE-48`) that this Epic proposes an answer to but does not take.**
+Status: **Specified — no Feature document written and no Story started. The storage decision this Epic was recorded as blocked on (`LE-48`) closed on 2026-07-29 (`hand-2026-07-29/16G`), taken by the vertical slice that landed the `shell` crate and the `G-SEC-5`-labelled RAM volume. This header is corrected to the fact rather than to a direction: whether that RAM-backed answer is the one this Epic *wants*, or one it can live with until a persistent backing exists, is an open question for whoever owns it and is not decided here (`LE-112`).**
 Roadmap phase: **Phase 2 — Shell & UX**, per [`README.md`](../../README.md) and [`backlog.md`](backlog.md).
 Introduced in: [`session/hand-2026-07-28/44A-dos-parity-standing.md`](../../session/hand-2026-07-28/44A-dos-parity-standing.md), which registered `LE-48` and asked where DOS parity stood.
 Depends on: [`EPIC-P0`](EPIC-P0.md) per `backlog.md`. **Also gates** `EPIC-P3`, `EPIC-H1` and `EPIC-H5`, all of which name `EPIC-P2` as a dependency — this Epic is on the critical path to connectivity, the game-proving path and the browser lab.

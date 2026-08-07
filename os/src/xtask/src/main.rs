@@ -966,7 +966,7 @@ fn main() -> ExitCode {
             let ceiling = args
                 .find_map(|a| a.strip_prefix("--ceiling=").map(str::to_string))
                 .and_then(|s| s.parse::<usize>().ok())
-                .unwrap_or(20_000);
+                .unwrap_or(governance::DEFAULT_CEILING);
             match os_root().and_then(|root| governance::check_all_crate_sizes(&root, ceiling)) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(message) => {

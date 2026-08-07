@@ -67,7 +67,7 @@ generator, so this page cannot go stale the way prose does.</p>
 <div class="verdict"><p class="lede">TinyOS is a real, booting, CI-gated operating system with a genuinely strong multitasking core and evidence from real silicon. It is <em>not</em> close to being a proven product: of its six founding goals one is substantially met, one is partly met, and four have not started — and the single decision that would let any timing claim be made at all has not been taken.</p><p class="bar"><code>SeedMVP</code> sets the bar as falsifiability, not features: the MVP is <em>&ldquo;the smallest configuration that can <strong>falsify</strong> every in-scope goal&rdquo;</em>. Against that bar the machinery is in place and the evidence is not. Under ADR 0005 a worst-case bound may be quoted only from a platform holding a secure-world qualification record; zero platforms hold one, the Pi 5 included. And the project has already corrected itself once here &mdash; it <strong>declares and enforces a budget; it does not claim a bound</strong>, because an observed maximum over n=1000 is a different quantity from a bound.</p></div>
 <h2>Where we stand, in four numbers</h2>
 <div class="grid">
-  <div class="stat"><div class="n">0&nbsp;/&nbsp;100</div><div class="l">Stories assurance-verified</div><div class="why">Locked at zero by ADR 0005, not lagging. No engineering moves it.</div></div>
+  <div class="stat"><div class="n">0&nbsp;/&nbsp;101</div><div class="l">Stories assurance-verified</div><div class="why">Locked at zero by ADR 0005, not lagging. No engineering moves it.</div></div>
   <div class="stat"><div class="n">0&nbsp;/&nbsp;5</div><div class="l">Platforms qualified</div><div class="why">The decision that unlocks everything above. Owner's to take.</div></div>
   <div class="stat"><div class="n">25&nbsp;/&nbsp;220</div><div class="l">Release gates with evidence, of those that CAN be closed</div><div class="why">Against the raw denominator this reads far better and means less.</div></div>
   <div class="stat"><div class="n">69</div><div class="l">Gates measurable today</div><div class="why">No board, no decision, no missing mechanism. Ordinary work.</div></div>
@@ -131,7 +131,7 @@ because half the denominator cannot be closed by construction.</p>
 <tr><td><strong>EPIC-P6B</strong><br><span class="dim">TinyTile heterogeneous compute</span></td><td>That device kernels can be admitted as code under the same charter as CPU code. Planned only — Features enumerated, no Story exists.</td><td><span class="badge spec">Specified</span></td></tr>
 <tr><td><strong>EPIC-P9</strong><br><span class="dim">Memory confidentiality against a dump</span></td><td>That a physical memory dump yields nothing. Every Feature but one is gated on hardware this project does not yet have.</td><td><span class="badge spec">Specified</span></td></tr>
 </tbody></table>
-<p class="note">4 of 12 roadmap Epics are decomposed into Stories at all. Of the 85 <code>EPIC-P0</code>/<code>EPIC-P1</code> Stories, 72 are Verified or Functionally Verified — <em>functionally</em>, which is a different and weaker word than assurance-verified.</p>
+<p class="note">4 of 12 roadmap Epics are decomposed into Stories at all. Of the 86 <code>EPIC-P0</code>/<code>EPIC-P1</code> Stories, 72 are Verified or Functionally Verified — <em>functionally</em>, which is a different and weaker word than assurance-verified.</p>
 <h2>What TinyOS is for, and what each use must publish first</h2>
 <p class="note">These are the project's own landing zones and their own claim gates, verbatim from <code>goals/context/landing-zones.tsv</code>. <strong>Not one claim gate is satisfied today.</strong></p>
 <table>
@@ -162,7 +162,7 @@ because half the denominator cannot be closed by construction.</p>
   <li><strong>Build the absent mechanisms.</strong><span>70 gates describe machinery nobody has written — load, queueing, isolation under competing load, exhaustion containment, soak. You cannot flood a budget that does not exist.</span></li>
 </ol>
 <h2>Open defects</h2>
-<p class="note"><strong>56 open</strong> of 112 recorded, in <code>goals/assurance/loose-ends.tsv</code>. This register is deliberately adversarial: rows are written against the project, several against the session that wrote them. A rising count here is not decay — it is the instrument working.</p>
+<p class="note"><strong>57 open</strong> of 116 recorded, in <code>goals/assurance/loose-ends.tsv</code>. This register is deliberately adversarial: rows are written against the project, several against the session that wrote them. A rising count here is not decay — it is the instrument working.</p>
 <h2>How to refresh this page</h2>
 <pre><code>cd os
 cargo run -p xtask -- emit-feasibility &gt; ../goals/feasibility.html

@@ -955,6 +955,14 @@ mod tests {
     /// The positive half: the committed page satisfies the gate it ships with.
     /// Without this, a check that rejected *everything* would pass the test
     /// above and redden the build for the whole repository.
+    ///
+    /// The facts are **derived from the live tree**, never written here as
+    /// literals: a hard-coded population is stale the moment any session adds
+    /// an `EPIC-P0`/`EPIC-P1` Story, and this test's first version proved it —
+    /// it pinned 85 and went red when a concurrent session's Story made the
+    /// regenerated page (correctly) say 86. A count of how much work exists is
+    /// a floor, never a total (`CONCURRENT_SESSIONS.md`), and a test literal is
+    /// the same defect as the five hand-synced spine counts of 2026-07-28.
     #[test]
     fn the_committed_page_states_the_current_story_population() {
         let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -964,7 +972,8 @@ mod tests {
             .to_path_buf();
         let page = std::fs::read_to_string(repo_root.join("goals").join("index.html"))
             .expect("goals/index.html must be readable");
-        let facts = DashboardFacts { p0p1_stories: 85, p0p1_settled: 72, ..facts() };
+        let facts = crate::assurance::dashboard_facts(&repo_root)
+            .expect("the live spine must yield dashboard facts");
         let expected_population = format!(
             "Of the {} <code>EPIC-P0</code>/<code>EPIC-P1</code> Stories",
             facts.p0p1_stories
@@ -973,6 +982,8 @@ mod tests {
             page.contains(&expected_population),
             "the committed page must carry `{expected_population}`"
         );
+        check_spine_sentence(&page, &facts)
+            .expect("the committed page must pass the gate it ships with");
     }
 
     #[test]

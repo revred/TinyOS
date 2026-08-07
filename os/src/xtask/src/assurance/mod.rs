@@ -368,6 +368,8 @@ struct GuardrailEvidenceIndex {
 struct LooseEndIndex {
     ids: BTreeSet<String>,
     open_count: usize,
+    /// Ids whose `state` is `open` (`LE-112`).
+    open_ids: BTreeSet<String>,
     /// Every `raised_in`/`closed_in` as `(id, field name, raw value)`, for
     /// [`validate_loose_end_citations`] to resolve against `session/` (`LE-51`).
     citations: Vec<(String, &'static str, String)>,
@@ -547,6 +549,15 @@ fn walk_spine(
     let loose_ends = validate_loose_ends(&loose_end_contents)?;
     validate_loose_end_references(repo_root, &loose_ends.ids)?;
     validate_loose_end_citations(repo_root, &loose_ends.citations)?;
+
+    // `LE-107` and `LE-112`, one pass over each Epic because they are two
+    // questions about the same document and — for `EPIC-P2` — the same line:
+    // does it enumerate the Features it owns, and is a loose end it declares
+    // itself blocked on still open? Ordered here rather than beside the other
+    // Feature checks because the second half needs the register's open set,
+    // which is what `walk_spine`'s ordering note is about.
+    let epic_dir = repo_root.join("goals").join("epics");
+    validate_epics_enumerate_their_features(&epic_dir, &contracts.features, &loose_ends.open_ids)?;
 
     // The no-heap gate runs before the evidence register reads it, so a
     // `PERF-Dnn-G11` row can never outlive the property it records.

@@ -1,6 +1,6 @@
 # EPIC-P9 — Memory Confidentiality and Integrity Against a Dump
 
-Status: **Specified — no Story started. Every Feature except `FEAT-P9-01` is gated on a hardware precondition this project does not yet meet (`LE-09`).**
+Status: **Specified — no Story started. This Epic was recorded as gated on a hardware precondition the project did not meet (`LE-09`), and that row closed on 2026-08-05 (`hand-2026-08-05/02A`) when `REPORT-2026-08-04-01` established the hardware tier on `rpi5-bcm2712`. Corrected to the fact rather than to a direction: `ADR 0005` is explicit that the tier existing is **not** a bound and zero platforms hold a qualification record, so whether these Features are still gated — and on what, now that it is no longer `LE-09` — is an open question for whoever owns this Epic and is not decided here (`LE-112`).**
 Roadmap phase: cross-cutting. Deliberately **not** numbered into the `README.md` phase sequence — see [Why this Epic is out of the phase sequence](#why-this-epic-is-out-of-the-phase-sequence).
 Introduced in: [`session/hand-2026-07-28/07-memory-confidentiality-proposal.md`](../../session/hand-2026-07-28/07-memory-confidentiality-proposal.md), reviewed and corrected in [`08-memory-confidentiality-review.md`](../../session/hand-2026-07-28/08-memory-confidentiality-review.md)
 Depends on: [`EPIC-P1`](EPIC-P1.md) for `TeardownGeneration` and the W^X/sealing substrate (`FEAT-P1-03`, complete) — and on hardware that does not exist in this project's test estate.

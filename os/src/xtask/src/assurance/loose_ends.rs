@@ -31,6 +31,9 @@ pub(super) fn validate_loose_ends(contents: &str) -> Result<LooseEndIndex, Strin
 
     let mut ids = BTreeSet::new();
     let mut open_count = 0;
+    // `LE-112`: which rows are still open, so a document claiming to be
+    // *blocked on* one can be held to it.
+    let mut open_ids = BTreeSet::new();
     let mut citations: Vec<(String, &'static str, String)> = Vec::new();
     for (zero_based_index, raw_line) in lines.enumerate() {
         let line_number = zero_based_index + 2;
@@ -96,6 +99,7 @@ pub(super) fn validate_loose_ends(contents: &str) -> Result<LooseEndIndex, Strin
         }
         if state == "open" {
             open_count += 1;
+            open_ids.insert(id.to_string());
         }
 
         // `LE-51`: collected here, resolved against `session/` by the caller —
@@ -109,7 +113,7 @@ pub(super) fn validate_loose_ends(contents: &str) -> Result<LooseEndIndex, Strin
     if ids.is_empty() {
         return Err("loose-ends register has no entries".to_string());
     }
-    Ok(LooseEndIndex { ids, open_count, citations })
+    Ok(LooseEndIndex { ids, open_count, open_ids, citations })
 }
 
 /// Fails if any `LE-*` token in the live documents has no row in the register.
