@@ -612,6 +612,9 @@ fn walk_spine(
     let reach = performance_catalogue::release_gate_reach(repo_root, &in_play_domains)?;
     let assurance_verified =
         contracts.details_by_story.values().filter(|contract| contract.state == "verified").count();
+    // `LE-84`. The decomposition the dashboard publishes is the SAME call
+    // `xtask assurance-status` makes, so the two can never disagree.
+    let release_decomposition = release_status::decompose(repo_root)?;
 
     // `STORY-P0-01-09`: the Overall-progress numerics. The Epic population is
     // derived from disk — Epic documents plus the backlog phase table — and
@@ -646,6 +649,15 @@ fn walk_spine(
         evidenced_gates: evidence.count,
         in_play_gates: reach.in_play,
         reachable_gates: reach.reachable,
+        // `LE-84`: derived from the same decomposition `xtask assurance-status`
+        // prints, never recomputed here. Handover `09A` computed this ledger by
+        // hand and its first printing did not reconcile — it produced 164 where
+        // the answer is 220, because two buckets are nested rather than
+        // adjacent. One derivation, two consumers.
+        closable_gates: release_decomposition.implemented.open,
+        measurable_today: release_decomposition.implemented.measurable_today,
+        platforms: platforms.count(),
+        qualified_platforms: platforms.qualified_count(),
         features: feature_contracts.features.len(),
         tests: test_files.len(),
         reports: report_files.len(),

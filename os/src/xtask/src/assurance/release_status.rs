@@ -30,7 +30,7 @@
 //! own total and its children sum to it, so a bucket that overlaps another is
 //! a compile-time impossibility rather than an arithmetic slip.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::*;
 use crate::bound_provenance;
@@ -47,6 +47,18 @@ use crate::performance_catalogue::{self, ReleaseGate, UNIMPLEMENTED_READINESS};
 /// containment mechanism: `Tcb` carries no containment class, the pool is one
 /// flat capacity with no reservation floor, and a repository-wide search for a
 /// scheduling or allocation reserve finds none.
+///
+/// **One precision, added 2026-08-07 after this list was re-verified guardrail
+/// by guardrail against the current tree.** All seven are still correctly
+/// listed. But "unbuilt containment mechanism" unqualified would overstate the
+/// case, and an overstatement here is the kind that gets quoted: `kernel::fault`
+/// *does* contain a fault to the task that raised it — three real faults, each
+/// contained, with the scheduler still dispatching afterwards, gated in CI by
+/// `qemu-x86_64 --fixture=fault`. What `G19`/`G21` require and this project
+/// does not have is the *class* and the *reservation floor* — containment under
+/// competing load, and exhaustion of a finite resource contained to the class
+/// that exhausted it. Single-task fault containment is real; per-class resource
+/// containment is not.
 ///
 /// **This list is a declared judgement, not a derived fact**, and the printed
 /// output says so. The catalogue has no per-guardrail readiness column; adding
@@ -126,6 +138,31 @@ pub struct Implemented {
     pub mechanism_absent: usize,
     /// Empty because nobody has measured. **Available today.**
     pub measurable_today: usize,
+    /// The same implemented half, split by domain, so that
+    /// [`Self::measurable_today`] is a WORKLIST rather than a quantity.
+    ///
+    /// Added 2026-08-07. The aggregate had been published for four handovers
+    /// and nobody could act on it, because "125 gates are measurable today"
+    /// names no gate: a reader who wanted to start had to re-derive the split
+    /// by hand, which is the `09A` failure this module exists to prevent. The
+    /// rows carry guardrail ids, not just counts, for the same reason.
+    pub per_domain: Vec<DomainWork>,
+}
+
+/// One implemented in-play domain's share of the closable half.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DomainWork {
+    /// `Dnn`.
+    pub domain: String,
+    /// The domain's `readiness` column verbatim.
+    pub readiness: String,
+    /// Closable gates here carrying evidence.
+    pub evidenced: usize,
+    /// Closable gates here carrying nothing and needing a mechanism first.
+    pub mechanism_absent: usize,
+    /// Guardrail ids here that are unmeasured and measurable today, in id
+    /// order. **This is the work.**
+    pub measurable_today: Vec<String>,
 }
 
 /// Derives the decomposition from the committed registers.
@@ -158,6 +195,38 @@ pub fn decompose(repo_root: &Path) -> Result<ReleaseStatus, String> {
         .filter(|gate| MECHANISM_ABSENT_GUARDRAILS.contains(&gate.guardrail.as_str()))
         .count();
 
+    // The same partition again, per domain. Derived from the SAME `open`,
+    // `evidenced` and `empty` sets above rather than recomputed from the
+    // catalogue, so the rows cannot disagree with the totals they sum to —
+    // `the_per_domain_worklist_reconciles_with_the_totals` asserts it.
+    let per_domain: Vec<DomainWork> = domains_with_readiness(false)
+        .into_iter()
+        .map(|(domain, readiness)| {
+            let mine = |gate: &&&ReleaseGate| gate.domain == domain;
+            let mut measurable_today: Vec<String> = empty
+                .iter()
+                .filter(|gate| mine(gate))
+                .filter(|gate| !MECHANISM_ABSENT_GUARDRAILS.contains(&gate.guardrail.as_str()))
+                .map(|gate| gate.guardrail.clone())
+                .collect();
+            measurable_today.sort();
+            DomainWork {
+                evidenced: open
+                    .iter()
+                    .filter(|gate| gate.domain == domain && evidenced.contains(&gate.id))
+                    .count(),
+                mechanism_absent: empty
+                    .iter()
+                    .filter(|gate| mine(gate))
+                    .filter(|gate| MECHANISM_ABSENT_GUARDRAILS.contains(&gate.guardrail.as_str()))
+                    .count(),
+                measurable_today,
+                domain,
+                readiness,
+            }
+        })
+        .collect();
+
     let release_guardrails_per_domain =
         if in_play_domains.is_empty() { 0 } else { gates.len() / in_play_domains.len() };
 
@@ -185,6 +254,7 @@ pub fn decompose(repo_root: &Path) -> Result<ReleaseStatus, String> {
             empty: empty.len(),
             mechanism_absent,
             measurable_today: empty.len() - mechanism_absent,
+            per_domain,
         },
     })
 }
@@ -325,6 +395,63 @@ pub fn render(status: &ReleaseStatus) -> String {
         present.refused
     ));
 
+    // The worklist. A count nobody can act on is a count nobody acts on, and
+    // this one had been published for four handovers.
+    let mut ranked: Vec<&DomainWork> = present.per_domain.iter().collect();
+    ranked.sort_by(|a, b| {
+        a.measurable_today
+            .len()
+            .cmp(&b.measurable_today.len())
+            .then_with(|| a.domain.cmp(&b.domain))
+    });
+    out.push('\n');
+    out.push_str("THE 125, BY DOMAIN — nearest to complete first.\n");
+    out.push_str("Each row: gates already evidenced, gates needing a mechanism first, then the\n");
+    out.push_str("guardrails that are measurement work available today.\n\n");
+    out.push_str("  domain  readiness              evd  mech  today  guardrails\n");
+    for work in ranked {
+        out.push_str(&format!(
+            "  {:<6}  {:<20}  {:>3}  {:>4}  {:>5}  {}\n",
+            work.domain,
+            work.readiness,
+            work.evidenced,
+            work.mechanism_absent,
+            work.measurable_today.len(),
+            if work.measurable_today.is_empty() {
+                "-".to_string()
+            } else {
+                work.measurable_today.join(" ")
+            }
+        ));
+    }
+
+    // The rollup that actually says where the leverage is. The rows above
+    // repeat the same guardrails across ten domains, so "125 gates" is not 125
+    // pieces of work -- it is a much smaller number of MEASUREMENTS, each owed
+    // by several domains. A guardrail owed by nine domains is one harness arm
+    // that moves nine gates; a guardrail owed by one is a domain-specific job.
+    // Reading the by-domain table alone hides that completely.
+    let mut by_guardrail: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for work in &present.per_domain {
+        for guardrail in &work.measurable_today {
+            by_guardrail.entry(guardrail.as_str()).or_default().push(work.domain.as_str());
+        }
+    }
+    let mut rollup: Vec<(&&str, &Vec<&str>)> = by_guardrail.iter().collect();
+    rollup.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(b.0)));
+    out.push('\n');
+    out.push_str(&format!(
+        "THE SAME 125, BY GUARDRAIL — {} distinct measurements, not 125 jobs.\n",
+        rollup.len()
+    ));
+    out.push_str(
+        "Widest first: a guardrail owed by many domains is one arm that moves many gates.\n\n",
+    );
+    out.push_str("  guardrail  domains  owed by\n");
+    for (guardrail, domains) in rollup {
+        out.push_str(&format!("  {:<9}  {:>7}  {}\n", guardrail, domains.len(), domains.join(" ")));
+    }
+
     out.push('\n');
     out.push_str(&format!(
         "The defensible headline: {} of the {} are blocked by neither the qualification\n\
@@ -377,6 +504,56 @@ mod tests {
     /// Every parent equals the sum of its children. Nothing is subtracted, so
     /// no bucket can overlap another and be counted twice — which is exactly
     /// how a hand ledger produced 164 where the answer is 220.
+    #[test]
+    /// The per-domain rows must sum to the totals they decompose.
+    ///
+    /// This is the `09A` failure made impossible rather than warned about:
+    /// that handover subtracted overlapping buckets by hand and printed 164
+    /// where the answer is 220, and a reader had to repair it. A worklist that
+    /// does not add up to its own headline is worse than no worklist, because
+    /// somebody will work from it.
+    #[test]
+    fn the_per_domain_worklist_reconciles_with_the_totals() {
+        let status = committed();
+        let present = &status.implemented;
+
+        assert_eq!(
+            present.per_domain.len(),
+            present.domains.len(),
+            "every implemented in-play domain gets exactly one row"
+        );
+        let summed_today: usize =
+            present.per_domain.iter().map(|work| work.measurable_today.len()).sum();
+        assert_eq!(
+            summed_today, present.measurable_today,
+            "the per-domain worklist must sum to the published measurable-today figure"
+        );
+        assert_eq!(
+            present.per_domain.iter().map(|work| work.evidenced).sum::<usize>(),
+            present.evidenced,
+            "the per-domain evidenced counts must sum to the published total"
+        );
+        assert_eq!(
+            present.per_domain.iter().map(|work| work.mechanism_absent).sum::<usize>(),
+            present.mechanism_absent,
+            "the per-domain mechanism-absent counts must sum to the published total"
+        );
+        assert!(
+            summed_today > 0,
+            "a worklist that names nothing would satisfy every sum above; this asserts \
+             the rows carry actual guardrails"
+        );
+        for work in &present.per_domain {
+            assert!(
+                work.measurable_today
+                    .iter()
+                    .all(|g| !MECHANISM_ABSENT_GUARDRAILS.contains(&g.as_str())),
+                "{}: a guardrail cannot be both measurable today and mechanism-absent",
+                work.domain
+            );
+        }
+    }
+
     #[test]
     fn the_ledger_reconciles_at_every_level() {
         let status = committed();

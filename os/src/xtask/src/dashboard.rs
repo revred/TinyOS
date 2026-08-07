@@ -80,6 +80,31 @@ pub struct DashboardFacts {
     pub in_play_gates: usize,
     /// Of those, the ones reachable with no board.
     pub reachable_gates: usize,
+    /// Of those, the ones that can actually be closed: in a domain whose
+    /// subsystem exists, and not barred by `G04`.
+    ///
+    /// `LE-84`'s finding, published rather than left in a subcommand. The raw
+    /// `evidenced/in_play` ratio invites *"5% done, 435 to go"*, which is
+    /// wrong in both directions at once — it overstates the work remaining,
+    /// because half the denominator cannot be closed by construction, and it
+    /// understates the indictment, because against the denominator that CAN be
+    /// closed the figure is far worse.
+    pub closable_gates: usize,
+    /// Of the closable gates carrying nothing, the ones blocked by neither an
+    /// absent mechanism nor anything else: measurement work available today,
+    /// on a laptop, with no decision pending.
+    pub measurable_today: usize,
+    /// Platforms in the qualification register.
+    pub platforms: usize,
+    /// Of those, platforms holding a secure-world qualification record.
+    ///
+    /// Published beside [`Self::assurance_verified`] because it is the reason
+    /// that number is what it is: every in-play domain carries one `G04`
+    /// bound-class gate, `ADR 0005` bars `G04` while this count is zero, and
+    /// every Story selects at least one domain. Assurance `verified` is
+    /// therefore unreachable for every Story in the project until this moves —
+    /// a locked door, not a backlog, and the dashboard said nothing about it.
+    pub qualified_platforms: usize,
     /// Features with a containment contract.
     pub features: usize,
     /// Test documents.
@@ -132,12 +157,24 @@ pub fn emit_stat_row(facts: &DashboardFacts) -> String {
             "Stories assurance-verified",
         ),
         (
+            format!("{}&nbsp;/&nbsp;{}", facts.qualified_platforms, facts.platforms),
+            "Platforms qualified — ADR 0005 bars every G04 until one is",
+        ),
+        (
             format!("{}&nbsp;/&nbsp;{}", facts.evidenced_gates, facts.in_play_gates),
             "Release gates with dated evidence",
         ),
         (
             format!("{}&nbsp;/&nbsp;{}", facts.reachable_gates, facts.in_play_gates),
             "Release gates reachable with no board",
+        ),
+        (
+            format!("{}&nbsp;/&nbsp;{}", facts.evidenced_gates, facts.closable_gates),
+            "Release gates with evidence, against the denominator that can be closed",
+        ),
+        (
+            format!("{}", facts.measurable_today),
+            "Gates unmeasured and measurable today — no board, no decision",
         ),
     ] {
         block.push_str(&format!(
@@ -608,6 +645,10 @@ mod tests {
             evidenced_gates: 11,
             in_play_gates: 391,
             reachable_gates: 345,
+            closable_gates: 220,
+            measurable_today: 125,
+            platforms: 5,
+            qualified_platforms: 0,
             features: 23,
             tests: 46,
             reports: 47,
@@ -773,6 +814,61 @@ mod tests {
             .expect_err("a relocated block must be refused");
         assert!(error.contains("Assurance release status"), "names where it wrongly sits: {error}");
         assert!(error.contains("Overall progress"), "names where it belongs: {error}");
+    }
+
+    /// `LE-84`'s other half. The decomposition existed only inside
+    /// `xtask assurance-status`, which nobody runs; the dashboard published
+    /// the raw `evidenced/in_play` ratio alone, and four consecutive handovers
+    /// quoted it without saying that half its denominator cannot be closed by
+    /// construction. A reader who sees only that ratio concludes the wrong
+    /// thing in both directions, so the closable denominator ships beside it.
+    ///
+    /// The fixture's `closable_gates` is deliberately different from its
+    /// `in_play_gates`: a test that let them be equal would pass against a
+    /// dashboard that had quietly published the same ratio twice, which is the
+    /// exact regression this asserts against.
+    #[test]
+    fn the_stat_row_publishes_the_closable_denominator_beside_the_raw_one() {
+        let facts = facts();
+        assert_ne!(
+            facts.closable_gates, facts.in_play_gates,
+            "the fixture must distinguish the two denominators or this test proves nothing"
+        );
+        let row = emit_stat_row(&facts);
+
+        let raw = format!("{}&nbsp;/&nbsp;{}", facts.evidenced_gates, facts.in_play_gates);
+        let closable = format!("{}&nbsp;/&nbsp;{}", facts.evidenced_gates, facts.closable_gates);
+        assert!(row.contains(&raw), "the in-play ratio must still be published: {row}");
+        assert!(row.contains(&closable), "the closable ratio must be published too: {row}");
+        assert!(
+            row.contains("denominator that can be closed"),
+            "the closable tile must say what makes it different: {row}"
+        );
+    }
+
+    /// The two numbers that explain the other tiles rather than restating them:
+    /// what is available today, and why `assurance_verified` cannot move.
+    #[test]
+    fn the_stat_row_publishes_what_is_actionable_and_what_is_locked() {
+        let facts = facts();
+        let row = emit_stat_row(&facts);
+
+        assert!(
+            row.contains("<div class=\"n\">125</div>"),
+            "the measurable-today count must be published as its own figure: {row}"
+        );
+        assert!(
+            row.contains("no board, no decision"),
+            "the measurable-today tile must say what is NOT blocking it: {row}"
+        );
+
+        let qualified = format!("{}&nbsp;/&nbsp;{}", facts.qualified_platforms, facts.platforms);
+        assert!(row.contains(&qualified), "the qualification count must be published: {row}");
+        assert!(
+            row.contains("ADR 0005"),
+            "the qualification tile must name the decision that bars G04, because that is \
+             the reason `Stories assurance-verified` reads zero and cannot move: {row}"
+        );
     }
 
     #[test]
