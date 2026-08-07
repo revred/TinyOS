@@ -376,7 +376,7 @@ These are the rules the project will not compromise on, even under schedule pres
 
 Phase-0 implementation is in progress. Functional tests cover the current skeleton, but the assurance dashboard deliberately records performance/security baseline debt until raw timing, frugality, isolation, signing, adversarial, and HIL evidence exists.
 
-New here? If you're a coding agent, start with [`agent.md`](agent.md). If you're a human, start with [`SeedMVP.md`](SeedMVP.md) for the founding intent, then the latest dated handover under [`session/`](session/) — currently [`session/hand-2026-08-06/index.html`](session/hand-2026-08-06/index.html) — for a snapshot of what's decided, what's open, and what to work on next. For traceable, testable work items, see [`goals/`](goals/).
+New here? If you're a coding agent, start with [`agent.md`](agent.md). If you're a human, start with [`SeedMVP.md`](SeedMVP.md) for the founding intent, then the latest dated handover under [`session/`](session/) — currently [`session/hand-2026-08-07/index.html`](session/hand-2026-08-07/index.html) — for a snapshot of what's decided, what's open, and what to work on next. For traceable, testable work items, see [`goals/`](goals/).
 
 ## License
 

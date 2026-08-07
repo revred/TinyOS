@@ -33,7 +33,27 @@
 //! (`STORY-P0-04-01`) is what reads it, when the caller's `kernel_main`
 //! chooses to.
 
-use core::arch::global_asm;
+// `LE-102`. Both blocks below are gated on `target_os = "none"` — the
+// bare-metal condition itself — rather than on the module's own
+// `not(target_os = "windows")`, and the difference is not cosmetic: this file
+// defines `_start`, and a **Linux** host satisfies not-Windows exactly as the
+// `x86_64-tinyos` target does. When `LE-100` put `cargo test --workspace` on
+// the Linux runner, this `_start` was compiled into the `hal-x86_64` rlib and
+// collided with `Scrt1.o`'s `_start` in every `std` test harness linking it;
+// `hal-x86_64`, `kernel`, `exec` and `hal-arm64` all died at the linker and
+// not one host test in the workspace ran.
+//
+// The gate is HERE and not on `pub mod boot` in `lib.rs`, deliberately: the
+// module must keep existing for an ELF-native host, because `kernel`'s own
+// `[[bin]]` writes `use hal_x86_64::boot as _;` ungated and the Linux
+// governance job's `clippy --workspace --all-targets` compiles that bin. Empty
+// on a host, present on the target, is the only shape that satisfies both —
+// and nothing is lost, because assembling this block on a host never proved
+// anything the real `check-guest-images` build does not.
+//
+// `core::arch::global_asm!` is spelled in full rather than imported: a `use`
+// at the top of a module whose only consumers are cfg'd out is an unused
+// import, and this workspace builds with `-D warnings`.
 
 // QEMU's built-in `-kernel` direct-boot loader (hw/i386/multiboot.c) only
 // understands the Multiboot **1** header (32-bit ELF only) and Linux bzImage
@@ -44,7 +64,8 @@ use core::arch::global_asm;
 // the CPU in 32-bit protected mode with paging disabled at that address,
 // with EBX pointing at a `hvm_start_info` struct this walking skeleton
 // doesn't need to read yet.
-global_asm!(
+#[cfg(target_os = "none")]
+core::arch::global_asm!(
     r#"
     .section .note.pvh, "a"
     .align 4
@@ -58,7 +79,8 @@ global_asm!(
     "#
 );
 
-global_asm!(
+#[cfg(target_os = "none")]
+core::arch::global_asm!(
     r#"
     .code32
     .section .boot, "ax"

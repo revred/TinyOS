@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TinyOS Handovers — 6 August 2026</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #5a5a5a;
+    --border: #d8d8d8;
+    --code-bg: #f2f2f2;
+    --accent: #0b5fff;
+    --tag-bg: #eef2ff;
+    --card-bg: #fafafa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --fg: #e8e8e8;
+      --muted: #a0a0a0;
+      --border: #333740;
+      --code-bg: #1e2126;
+      --accent: #6fa8ff;
+      --tag-bg: #1c2333;
+      --card-bg: #191c21;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.6;
+  }
+  h1 { font-size: 1.7rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.25rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+  .status {
+    display: inline-block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--tag-bg);
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    margin-bottom: 1.5rem;
+  }
+  code {
+    background: var(--code-bg);
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  a { color: var(--accent); }
+  .muted { color: var(--muted); }
+  .entries { list-style: none; padding-left: 0; }
+  .entry {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 0.9rem;
+  }
+  .entry .num {
+    display: inline-block;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin-right: 0.4rem;
+  }
+  .entry a { font-weight: 600; font-size: 1.02rem; text-decoration: none; }
+  .entry a:hover { text-decoration: underline; }
+  .entry p { margin: 0.4rem 0 0; color: var(--muted); font-size: 0.92rem; }
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+
+<h1>TinyOS &mdash; Handovers for 7 August 2026</h1>
+<p class="muted">This page indexes every handover produced on this date, in order. Per the <a href="../README.md">session naming convention</a>, all handovers from a single calendar date live in this one folder. Previous date: <a href="../hand-2026-08-06/index.html">6 August 2026</a>.</p>
+<span class="status">The outage ended and the runner still says nothing</span>
+
+<h2>Handovers</h2>
+<ol class="entries">
+  <li class="entry">
+    <span class="num">01A</span><a href="01A-cover-note-for-the-next-session.md">Cover note for the next session</a>
+    <p><strong>Short by design, and it exists mainly because the one thing <code>14D</code> told the next session to watch for cannot happen.</strong> Where the project is: everything through <code>dff7b1d</code> is committed and pushed, the tree is clean, and the <code>12D</code>&ndash;<code>14D</code> arc closed <code>LE-91</code>, <code>LE-100</code> and <code>LE-101</code> with mechanisms rather than corrections. <strong>The task is a live diagnosis, not a build:</strong> <code>14D</code> &sect;8 asked the next session to watch the first <code>host-tests</code> run, and there is nothing to watch &mdash; the last workflow run created was for <code>420e875</code> at 2026-08-06T01:13:00Z, and five commits since have produced none, while <strong>Actions now reports <code>operational</code></strong>, both workflows are <code>active</code>, permissions are <code>enabled</code>/<code>all</code>, and the push events are registered against the right actor. <code>10C</code>&nbsp;&sect;3 diagnosed this as the platform outage and was right at the time; <strong>the outage is over and the symptom is not</strong>, so that diagnosis has expired and must not be re-applied. The consequence is stated rather than softened: five commits&#39; worth of gates have never executed on a runner, <em>including <code>host-tests</code> itself</em>, so <code>LE-100</code> &mdash; closed on the grounds that a gate must run where it counts &mdash; currently has a mechanism that has never run where it counts, and the CI-side work of <code>12D</code> and <code>14D</code> is <strong>asserted, not demonstrated</strong>. <strong>The methodological finding, and the part worth reading:</strong> <code>10C</code> ruled out &ldquo;run exists but hidden&rdquo; with <code>actions/runs?head_sha=&hellip;</code> &rarr; <code>total_count: 0</code> &mdash; and that query returns <code>0</code> for <code>420e875</code> too, a commit whose run demonstrably exists. The probe returns zero regardless, so it ruled out nothing; the conclusion survives but the evidence for it did not. <code>LE-80</code>&#39;s family a third time in four sessions: a tool that answers confidently and means nothing, with the working replacement (list the runs, match the SHA client-side) given as a command. The note names the one candidate <code>10C</code> could not reach &mdash; account-level Actions billing, which suppresses run creation with no message anywhere &mdash; and one cheap decisive test: push a trivial commit and see whether a run appears. <strong>Four traps, current</strong>, led by the one that has now fired on two consecutive sessions: a gate that would not have caught the defect it was written for has not been checked against its own instance &mdash; <code>LE-91</code>&#39;s rule passed the defect it was filed for until rule 6 existed, and <code>check-ci-gates</code> stayed green when <code>cargo test --workspace</code> was narrowed to <code>-p kernel</code> because it had matched the step&#39;s display <code>name:</code>. Both were caught by mutating the <em>real file</em> and reading <em>which</em> error came back.</p>
+  </li>
+  <li class="entry">
+    <span class="num">01B</span><a href="01B-the-runs-were-never-created-and-not-windows-is-not-bare-metal.md">The runs were never created, and <code>not(windows)</code> is not <code>bare metal</code></a>
+    <p><strong>Executes <code>01A</code>, and the premise <code>01A</code> opened with was itself the answer to half of it.</strong> <code>origin/main</code> was at <code>e273931</code>, not at <code>dff7b1d</code> &mdash; <strong><code>dff7b1d</code> was committed on this bench and never pushed</strong>, so the missing run for it was the absence of a push, not the absence of a runner. The cheap decisive test <code>01A</code> named was run and answered in the first direction: pushing <code>e273931..dff7b1d</code> created run <code>31161538569</code> within seconds, so <strong>run creation is not broken</strong> &mdash; the four pushes of 2026-08-06 evening fell inside the outage window and <strong>GitHub does not backfill runs it dropped</strong>. Filed and closed as <code>LE-102</code>, with the residual stated rather than softened: the gates now execute on the <em>cumulative</em> tree and never on the individual trees of <code>b4a7010</code>, <code>cb9b27b</code>, <code>4f5f2a4</code> or <code>e273931</code>, so a bisect across those four has no runner evidence behind any step. The account-level candidate is ruled out <strong>on structure rather than on a probe</strong> &mdash; the repository is public and every job is on <code>ubuntu-latest</code>, and standard runners on public repositories are unmetered. <strong>The instrument correction is sharper than <code>01A</code>&#39;s:</strong> <code>actions/runs?head_sha=</code> does not return zero regardless &mdash; it works, but <em>only with a full 40-character SHA</em>. <code>10C</code> abbreviated it, so its probe was answering correctly about a commit identifier the API accepts and can never match. <strong>Then <code>host-tests</code> went red on its first Linux run, and not for the predicted reason:</strong> <code>rust-lld: duplicate symbol: _start</code> in four crates, so <em>not one host test in the workspace ran</em> &mdash; the suite died at the linker. <code>hal_x86_64::boot</code> is gated <code>not(target_os = "windows")</code> and defines <code>_start</code>, and <strong>a Linux host satisfies that gate exactly as the bare-metal target does</strong>; it was harmless for the life of the project only because CI ran <code>clippy</code>, which does not link, and became reachable the moment <code>LE-100</code> added <code>cargo test --workspace</code>. <code>LE-100</code>&#39;s own sentence landing on <code>LE-100</code>. The fix is deliberately narrower than the obvious one &mdash; gating the modules reddens the green Linux governance job, so the <code>global_asm!</code> blocks themselves move to <code>target_os = "none"</code> &mdash; and the guard skips comment lines because <code>boot.rs</code>&#39;s own explanation of the gate contains the needle, was <strong>verified by mutating the real file</strong>, and refuses the wrong <code>#[cfg]</code> as well as a missing one.</p>
+  </li>
+</ol>
+
+<footer>
+Written 2026-08-07. Previous date: <a href="../hand-2026-08-06/index.html">6 August 2026</a>. The deep operational context (SSH runbook, card roles, capture procedure) lives in <a href="../hand-2026-08-03/09A-window-poisoned-inbound-path-indicted.md">hand-2026-08-03/09A</a>.
+</footer>
+
+</body>
+</html>
