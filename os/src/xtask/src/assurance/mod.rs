@@ -55,7 +55,9 @@ use registers::*;
 use security_spine::*;
 use status::*;
 
-pub use release_status::{decompose as release_status, render as render_release_status};
+pub use release_status::{
+    decompose as release_status, render as render_release_status, Implemented, ReleaseStatus,
+};
 pub use status::{artifact_statuses, ArtifactStatus};
 const CONTAINMENT_HEADER: &str =
     "id\tname\tpurpose\tdefault_authority\tinput_rule\tfailure_rule\trequired_evidence";

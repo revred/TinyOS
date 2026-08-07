@@ -87,13 +87,20 @@ const GOVERNANCE_JOB: &str = "governance-gates";
 /// should be equally deliberate, and is now equally visible.
 ///
 /// `check-ci-gates` is in its own list on purpose — see rule 4.
-pub const CI_ENFORCED: [&str; 6] = [
+pub const CI_ENFORCED: [&str; 7] = [
     "check-assurance-spine",
     "check-performance-catalogue",
     "check-crate-sizes",
     "check-metric-labels",
     "check-boot-images",
     "check-ci-gates",
+    // The feasibility report is the page an outside reader is most likely to
+    // be shown, so a stale one misinforms further than a stale register does.
+    // Listed here rather than trusted to a habit: `LE-106` records a gate this
+    // project already owned, wired into nothing, which a session then
+    // re-derived by hand — a mechanism nobody is required to run is a mechanism
+    // that does not run.
+    "check-feasibility",
 ];
 
 /// What the gate found, for the operator line.

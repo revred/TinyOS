@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TinyOS — feasibility report</title>
+<style>
+  :root { color-scheme: light dark; --bg:#fff; --fg:#1a1a1a; --muted:#5a5a5a; --border:#d8d8d8;
+    --code:#f2f2f2; --accent:#0b5fff; --card:#fafafa; --ok:#0a7d3f; --wip:#a35b00; --spec:#5a5a5a;
+    --warn:#b3261e; --warnbg:#fdf1f0; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14161a; --fg:#e8e8e8; --muted:#a0a0a0;
+    --border:#333740; --code:#1e2126; --accent:#6fa8ff; --card:#191c21; --ok:#4ec97f;
+    --wip:#e0a34e; --spec:#a0a0a0; --warn:#ff8a80; --warnbg:#241a1a; } }
+  * { box-sizing:border-box; }
+  body { max-width:1000px; margin:0 auto; padding:2.5rem 1.5rem 5rem; background:var(--bg);
+    color:var(--fg); line-height:1.6;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+  h1 { font-size:1.9rem; margin-bottom:.25rem; }
+  h2 { font-size:1.2rem; margin-top:2.8rem; border-bottom:1px solid var(--border);
+    padding-bottom:.35rem; }
+  .sub { color:var(--muted); font-size:.92rem; }
+  .verdict { background:var(--warnbg); border:1px solid var(--border);
+    border-left:4px solid var(--warn); border-radius:8px; padding:1rem 1.2rem; margin:1.5rem 0; }
+  .verdict .lede { font-size:1.05rem; font-weight:600; margin:0 0 .6rem; }
+  .verdict .bar { margin:0; color:var(--muted); font-size:.92rem; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:.9rem;
+    margin:1.2rem 0; }
+  .stat { background:var(--card); border:1px solid var(--border); border-radius:8px;
+    padding:.9rem 1rem; }
+  .stat .n { font-size:1.7rem; font-weight:700; }
+  .stat .l { font-size:.86rem; font-weight:600; margin-top:.15rem; }
+  .stat .why { font-size:.8rem; color:var(--muted); margin-top:.4rem; }
+  .note { color:var(--muted); font-size:.9rem; }
+  table { width:100%; border-collapse:collapse; margin:1rem 0; font-size:.9rem; display:block;
+    overflow-x:auto; }
+  th,td { border-bottom:1px solid var(--border); padding:.55rem .6rem; text-align:left;
+    vertical-align:top; }
+  th { font-size:.78rem; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  td.n, th.n { text-align:right; font-variant-numeric:tabular-nums; font-weight:600; }
+  tr.hi td { background:var(--card); }
+  .dim { color:var(--muted); font-size:.85rem; }
+  .gate { color:var(--muted); font-size:.85rem; }
+  .badge { font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em;
+    padding:.12rem .45rem; border-radius:999px; border:1px solid currentColor; white-space:nowrap; }
+  .badge.ok { color:var(--ok); } .badge.wip { color:var(--wip); } .badge.spec { color:var(--spec); }
+  ul.proof, ul.unproven, ol.next { padding-left:1.1rem; }
+  ul.proof li, ul.unproven li, ol.next li { margin-bottom:.7rem; }
+  ul.proof li span, ul.unproven li span, ol.next li span { display:block; color:var(--muted);
+    font-size:.88rem; margin-top:.15rem; }
+  ul.proof { list-style:none; padding-left:0; }
+  ul.proof li { border-left:3px solid var(--ok); padding-left:.8rem; }
+  ul.unproven { list-style:none; padding-left:0; }
+  ul.unproven li { border-left:3px solid var(--warn); padding-left:.8rem; }
+  pre { background:var(--code); padding:.8rem 1rem; border-radius:6px; overflow-x:auto;
+    font-size:.85rem; }
+  code { background:var(--code); padding:.1rem .35rem; border-radius:4px; font-size:.9em; }
+  pre code { background:none; padding:0; }
+  footer { margin-top:3rem; padding-top:1.5rem; border-top:1px solid var(--border);
+    font-size:.85rem; color:var(--muted); }
+</style>
+</head>
+<body>
+<h1>TinyOS — feasibility report</h1>
+<p class="sub">Generated from the assurance spine. Every figure below is derived on the run that
+wrote this file; <code>check-feasibility</code> refuses a committed copy that disagrees with the
+generator, so this page cannot go stale the way prose does.</p>
+<div class="verdict"><p class="lede">TinyOS is a real, booting, CI-gated operating system with a genuinely strong multitasking core and evidence from real silicon. It is <em>not</em> close to being a proven product: of its six founding goals one is substantially met, one is partly met, and four have not started — and the single decision that would let any timing claim be made at all has not been taken.</p><p class="bar"><code>SeedMVP</code> sets the bar as falsifiability, not features: the MVP is <em>&ldquo;the smallest configuration that can <strong>falsify</strong> every in-scope goal&rdquo;</em>. Against that bar the machinery is in place and the evidence is not. Under ADR 0005 a worst-case bound may be quoted only from a platform holding a secure-world qualification record; zero platforms hold one, the Pi 5 included. And the project has already corrected itself once here &mdash; it <strong>declares and enforces a budget; it does not claim a bound</strong>, because an observed maximum over n=1000 is a different quantity from a bound.</p></div>
+<h2>Where we stand, in four numbers</h2>
+<div class="grid">
+  <div class="stat"><div class="n">0&nbsp;/&nbsp;100</div><div class="l">Stories assurance-verified</div><div class="why">Locked at zero by ADR 0005, not lagging. No engineering moves it.</div></div>
+  <div class="stat"><div class="n">0&nbsp;/&nbsp;5</div><div class="l">Platforms qualified</div><div class="why">The decision that unlocks everything above. Owner's to take.</div></div>
+  <div class="stat"><div class="n">25&nbsp;/&nbsp;220</div><div class="l">Release gates with evidence, of those that CAN be closed</div><div class="why">Against the raw denominator this reads far better and means less.</div></div>
+  <div class="stat"><div class="n">69</div><div class="l">Gates measurable today</div><div class="why">No board, no decision, no missing mechanism. Ordinary work.</div></div>
+</div>
+<p class="note"><strong>A gate carrying evidence is a gate somebody measured — never a gate that
+passed.</strong> 6 of the evidence rows are <code>refused</code>: measured, read against the
+target, and declined. This page counts evidence, and evidence is not a score.</p>
+<h2>The six founding goals, and the distance to each</h2>
+<p class="note">From <code>SeedMVP.md</code> &sect;3. These are what the roadmap and every Epic exist to serve, so they come before any internal arithmetic.</p>
+<table>
+<thead><tr><th>Goal</th><th>Distance</th><th>Where it actually stands</th></tr></thead>
+<tbody>
+<tr><td><strong>Coexist with Windows/Linux on one machine, or run as an edge-device OS</strong></td><td><span class="badge spec">not started</span></td><td>No host bridge exists. TinyOS boots standalone on x86_64 under QEMU and on a Raspberry Pi 5 over netboot; coexistence is Phase 4 and has no Epic document.</td></tr>
+<tr><td><strong>Look and behave like MS-DOS 4+</strong></td><td><span class="badge wip">partly</span></td><td>TINYCMD's DOS front-end runs a .TCB batch and byte-matches a committed golden transcript in CI. But EPIC-P2 records that most canonical verbs cannot be implemented yet — there is no filesystem.</td></tr>
+<tr><td><strong>A solid multitasking core</strong></td><td><span class="badge ok">strongest claim</span></td><td>Preemption, priority inheritance, WCET budgets with restart/degrade/trip arms, per-task address spaces with W^X, and fault containment — all gated in CI, several falsified by deliberate mutation before being believed.</td></tr>
+<tr><td><strong>Load onto any laptop, down to Jetson-class edge devices</strong></td><td><span class="badge wip">one board, one arch</span></td><td>Real silicon evidence exists for exactly one target, the Pi 5. Jetson Orin Nano is in the platform register as unqualified. No install path onto a laptop exists.</td></tr>
+<tr><td><strong>Host something like Ollama</strong></td><td><span class="badge spec">not started</span></td><td>Phase 6. No inference runtime, no model loading, no memory substrate for weights. The heterogeneous-compute Epic that would carry it is planned only.</td></tr>
+<tr><td><strong>Take orders from an LLM under strict, auditable control</strong></td><td><span class="badge spec">not started</span></td><td>Phase 5. The capability and code-admission registers that would govern it are specified and machine-checked, which is the groundwork — but no agent interface exists.</td></tr>
+</tbody></table>
+<h2>What is actually proven</h2>
+<p class="note">Claims below are backed by a runner or by silicon. Nothing here rests on a laptop alone.</p>
+<ul class="proof">
+  <li><strong>The kernel boots, schedules, faults and contains — under CI, every push</strong><span>23 QEMU fixtures run on the runner, including three real CPU exceptions each contained to its own task, a double fault landing on the IST stack, W^X proven adversarially in both directions, and a real PE64 loaded into its own address space.</span></li>
+  <li><strong>The host suite runs where it counts</strong><span>1,231 tests green on Linux CI. Until 2026-08-06 there was no `cargo test` step at all and every one of them gated a laptop (`LE-100`).</span></li>
+  <li><strong>Preemption and WCET enforcement are real, not asserted</strong><span>A task that never yields is preempted with its SSE state intact; WCET overrun restarts, degrades and trips to a safe state, each arm gated separately, each falsified by mutation before being believed.</span></li>
+  <li><strong>The kernel drives real silicon with interrupts live</strong><span>Raspberry Pi 5, netbooted with no SD card, one cooperative dispatch round per park beat, 0 spoor records lost and 0 refused (`FEAT-P1-11`, board-proven 2026-08-05).</span></li>
+  <li><strong>Hardware timing evidence exists and is on the wire</strong><span>A full TOS64-MEAS/2 envelope captured from the board on 2026-08-07: tier=T1, cycle_source=pmccntr_el0, 14 metrics at n=1000 with dropped=0, after ~14 hours of unbroken beaconing.</span></li>
+  <li><strong>The assurance spine is machine-checked, including itself</strong><span>Contracts, status headers, citations, metric domain labels and the CI workflow are all refused when they disagree with the tree — and `check-ci-gates` refuses a workflow that quietly stops asking for the tests.</span></li>
+</ul>
+<h2>What is not proven, stated plainly</h2>
+<ul class="unproven">
+  <li><strong>No worst-case bound is quotable, on any platform</strong><span>ADR 0005: a bound may be quoted only from a platform holding a secure-world qualification record. Zero platforms hold one, so every G04 gate is correctly barred.</span></li>
+  <li><strong>No real-time claim survives contact with load</strong><span>Isolation under competing load and exhaustion containment are unbuilt: `Tcb` carries no containment class and the pool is one flat capacity with no reservation floor.</span></li>
+  <li><strong>Nothing is proven under hostile input at scale</strong><span>No soak, no burst/backpressure harness, no offered-load generator. Single-task fault containment is real; per-class resource containment is not.</span></li>
+  <li><strong>The timing numbers that exist are Tier 0 or unqualified Tier 1</strong><span>QEMU/TCG cycle counts calibrate the harness, not the hardware. The board numbers carry `qualification=none` in the envelope itself.</span></li>
+  <li><strong>Most guardrails that have been read, missed</strong><span>Of the gates read against their targets so far, several miss by 17x to 39x and are filed as refusals rather than quietly left blank. That is the register working, and it is also the honest state of the numbers.</span></li>
+</ul>
+<h2>The release-gate ledger</h2>
+<p class="note">460 gates in play (20 in-play domains &times; 23 release guardrails). The raw
+<code>25&nbsp;/&nbsp;460</code> ratio overstates the work remaining and understates the indictment,
+because half the denominator cannot be closed by construction.</p>
+<table>
+<thead><tr><th>Bucket</th><th class="n">Gates</th><th>Who can move it</th></tr></thead>
+<tbody>
+<tr><td>Domains whose subsystem does not exist</td><td class="n">230</td><td>Nobody yet — includes all 46 hardware-only gates</td></tr>
+<tr><td><code>G04</code> bound gates, barred by ADR 0005</td><td class="n">10</td><td><strong>The owner</strong>, by qualifying one platform</td></tr>
+<tr><td>Needing a board</td><td class="n">0</td><td>Nobody — derived, and it is zero. The board was never the constraint</td></tr>
+<tr><td>Carrying evidence</td><td class="n">25</td><td>Done (6 of them a reasoned refusal)</td></tr>
+<tr><td>Mechanism not built</td><td class="n">70</td><td>Engineering — load, queueing, isolation, soak</td></tr>
+<tr><td>No metric-emitting fixture exists</td><td class="n">56</td><td>Engineering — build the instrument first</td></tr>
+<tr class="hi"><td>Instrumented, unmeasured, available today</td><td class="n">69</td><td><strong>Anyone, now</strong> — and it is 14 distinct measurements, not 69 jobs</td></tr>
+</tbody>
+</table>
+<h2>The roadmap, against its own Epics</h2>
+<table>
+<thead><tr><th>Phase</th><th>What it claims to prove</th><th>State</th></tr></thead>
+<tbody>
+<tr><td><strong>EPIC-P0</strong><br><span class="dim">Kernel skeleton</span></td><td>That a kernel can be built, booted, scheduled and halted under CI on every push — the pipeline before the product. All 27 Stories Verified at Tier 0; its assurance debt is explicitly EPIC-P1's charge.</td><td><span class="badge spec">Functionally complete</span></td></tr>
+<tr><td><strong>EPIC-P1</strong><br><span class="dim">Determinism proof</span></td><td>That scheduling, faults, isolation and deadlines behave predictably enough to quote. Exit needs the timing-regression gate to have <em>demonstrably failed at least once</em> on a deliberately-introduced regression.</td><td><span class="badge wip">In progress</span></td></tr>
+<tr><td><strong>EPIC-P2</strong><br><span class="dim">Operator command environment</span></td><td>That the system is drivable by a human. Blocked on a storage decision: at least 15 of the 22 specified verbs cannot be implemented because there is nothing to implement them against — no filesystem crate exists.</td><td><span class="badge spec">Specified</span></td></tr>
+<tr><td><strong>EPIC-P6B</strong><br><span class="dim">TinyTile heterogeneous compute</span></td><td>That device kernels can be admitted as code under the same charter as CPU code. Planned only — Features enumerated, no Story exists.</td><td><span class="badge spec">Specified</span></td></tr>
+<tr><td><strong>EPIC-P9</strong><br><span class="dim">Memory confidentiality against a dump</span></td><td>That a physical memory dump yields nothing. Every Feature but one is gated on hardware this project does not yet have.</td><td><span class="badge spec">Specified</span></td></tr>
+</tbody></table>
+<p class="note">4 of 12 roadmap Epics are decomposed into Stories at all. Of the 85 <code>EPIC-P0</code>/<code>EPIC-P1</code> Stories, 72 are Verified or Functionally Verified — <em>functionally</em>, which is a different and weaker word than assurance-verified.</p>
+<h2>What TinyOS is for, and what each use must publish first</h2>
+<p class="note">These are the project's own landing zones and their own claim gates, verbatim from <code>goals/context/landing-zones.tsv</code>. <strong>Not one claim gate is satisfied today.</strong></p>
+<table>
+<thead><tr><th>Zone</th><th>Horizon</th><th>Must publish before any claim</th></tr></thead>
+<tbody>
+<tr><td><strong>LZ-01</strong><br><span class="dim">Bare-metal reflex and physical control</span></td><td><span class="badge wip">next</span></td><td class="gate">Publish interrupt dispatch WCET jitter loaded-isolation safe-state coherent-feedback-epoch and atomic-group-commit and same-hardware comparison evidence before any bare-metal-equivalent claim</td></tr>
+<tr><td><strong>LZ-02</strong><br><span class="dim">Quality-adjusted AI velocity</span></td><td><span class="badge spec">later</span></td><td class="gate">Fix model quantization prompt sampler quality rubric power thermal and safety profile before claiming ten-times time-to-quality or token-rate advantage</td></tr>
+<tr><td><strong>LZ-03</strong><br><span class="dim">Native application and UX platform</span></td><td><span class="badge spec">later</span></td><td class="gate">Each framework earns support through ABI conformance cold-start footprint denial native-interop code-generation and compromised-frontend tests</td></tr>
+<tr><td><strong>LZ-04</strong><br><span class="dim">Interactive graphics and multiplayer proving ground</span></td><td><span class="badge spec">later</span></td><td class="gate">Frame pacing input-to-photon audio and multiplayer latency must survive malicious assets servers packet floods and renderer or game faults</td></tr>
+<tr><td><strong>LZ-05</strong><br><span class="dim">Browser and TinySpot remote UX</span></td><td><span class="badge spec">research</span></td><td class="gate">No browser support claim until renderer site network GPU storage secret download extension and generated-code boundaries survive escape campaigns</td></tr>
+<tr><td><strong>LZ-06</strong><br><span class="dim">Windows and Linux coexistence</span></td><td><span class="badge spec">later</span></td><td class="gate">Interop must pass hostile-host guest-escape path-confusion stale-grant network-namespace teardown and cross-OS performance tests</td></tr>
+<tr><td><strong>LZ-07</strong><br><span class="dim">Fleet and data-centre teamwork</span></td><td><span class="badge spec">later</span></td><td class="gate">Scale and failover claims require tenant-isolation partition worm coordinated-AI power efficiency and quality-adjusted throughput evidence</td></tr>
+<tr><td><strong>LZ-08</strong><br><span class="dim">Browser-hosted TinyOS laboratory</span></td><td><span class="badge spec">research</span></td><td class="gate">The lab may claim semantic and conformance fidelity only and never hard-RT DMA interrupt verified-boot or bare-metal security equivalence</td></tr>
+<tr><td><strong>LZ-09</strong><br><span class="dim">Minimal composable product profiles</span></td><td><span class="badge ok">now</span></td><td class="gate">Every profile publishes link-map boot registration capability listener queue task IRQ DMA MMIO parser and memory-footprint absence evidence</td></tr>
+</tbody></table>
+<h2>The two claims that are blocked outright</h2>
+<p class="note">Of the 25 performance guardrails, 23 are release gates and <strong><code>G24</code> and <code>G25</code> are <em>claim</em> gates</strong> &mdash; the project's own rule against marketing ahead of evidence.</p>
+<ul class="unproven">
+<li><strong><code>G24</code> &mdash; &ldquo;better than Linux&rdquo;</strong><span>Requires the same source-level workload on identical hardware, clocks, compiler options, power state and safety checks, with raw data published. Not run.</span></li>
+<li><strong><code>G25</code> &mdash; &ldquo;10&times; better than most RTOSes&rdquo;</strong><span>May be stated only for a named metric after a same-hardware comparison against at least three current RTOS baselines, with confidence intervals. The project's own words: if the ratio is below 10&times;, <em>TinyOS can still ship if its absolute release gates pass, but that marketing claim is blocked</em>. Not run.</span></li>
+</ul>
+<h2>What would move this forward, in order</h2>
+<ol class="next">
+  <li><strong>Qualify one platform under ADR 0005.</strong><span>Unlocks 10 <code>G04</code> gates and makes assurance <code>verified</code> reachable for the first time. Q1 is largely held, Q2 is a laptop afternoon of vendor research, Q4 is already written; Q3 needs a corrected instrument (<code>LE-103</code>) and a campaign. <strong>This is the owner's decision and nothing else competes with it.</strong></span></li>
+  <li><strong>Read the numbers already taken.</strong><span>Some gates counted as unmeasured were measured, committed and never read against their target (<code>LE-104</code>). 6 rows are now refusals filed exactly that way. No code, no board — someone reading a committed number against a committed target.</span></li>
+  <li><strong>Measure the 69.</strong><span>14 distinct measurements across 6 instrumented domains, several owed by every one of them, so one harness arm moves many gates. Ordinary work with no dependency.</span></li>
+  <li><strong>Build the missing instruments.</strong><span>56 gates sit in domains with no metric-emitting fixture at all (<code>LE-109</code>). These are fixture-building jobs, not measurement jobs, and calling them measurable overstated the position by that much.</span></li>
+  <li><strong>Build the absent mechanisms.</strong><span>70 gates describe machinery nobody has written — load, queueing, isolation under competing load, exhaustion containment, soak. You cannot flood a budget that does not exist.</span></li>
+</ol>
+<h2>Open defects</h2>
+<p class="note"><strong>55 open</strong> of 111 recorded, in <code>goals/assurance/loose-ends.tsv</code>. This register is deliberately adversarial: rows are written against the project, several against the session that wrote them. A rising count here is not decay — it is the instrument working.</p>
+<h2>How to refresh this page</h2>
+<pre><code>cd os
+cargo run -p xtask -- emit-feasibility &gt; ../goals/feasibility.html
+cargo run -p xtask -- check-feasibility</code></pre>
+<p class="note">The check runs in <code>check-assurance-spine</code>, so a stale copy fails the build rather than misinforming a reader. Test count on the runner: 1231 host tests.</p>
+<footer>
+Generated by <code>cargo run -p xtask -- emit-feasibility</code> from the committed assurance
+spine. No figure on this page was typed by hand. Judgements — the verdict, the proven and
+unproven lists — live as reviewed constants in <code>os/src/xtask/src/feasibility.rs</code>, so
+changing a claim is a source diff.
+</footer>
+</body>
+</html>

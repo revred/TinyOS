@@ -63,6 +63,16 @@ jobs:
       - name: Every gate this repository claims to enforce is wired into CI
         run: cargo run -p xtask -- check-ci-gates
 
+      # The feasibility report is generated whole from the spine, never
+      # maintained by hand, because `LE-108` is what hand-maintained status
+      # prose does: one number on the dashboard drifted by 33 Stories while
+      # sitting two lines below numbers that were gated. This step refuses a
+      # committed report that disagrees with the spine that just ran — and it
+      # matters more than the register checks around it, because that page is
+      # the one an outside reader is most likely to be handed.
+      - name: The feasibility report still agrees with the spine
+        run: cargo run -p xtask -- check-feasibility
+
       - name: missing_docs check
         run: cargo doc --workspace --no-deps
         env:

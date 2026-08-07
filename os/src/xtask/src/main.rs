@@ -16,6 +16,7 @@ mod ci_gates;
 mod citations;
 mod dashboard;
 mod external_isolation;
+mod feasibility;
 mod gate;
 mod governance;
 mod guest_images;
@@ -504,6 +505,14 @@ const SUBCOMMANDS: &[Subcommand] = &[
         summary: "Print goals/index.html's generated blocks (overall progress + stat tiles) from live spine data",
     },
     Subcommand {
+        name: "emit-feasibility",
+        summary: "Print goals/feasibility.html — where the project stands against its own goals",
+    },
+    Subcommand {
+        name: "check-feasibility",
+        summary: "Refuse a committed feasibility report that disagrees with the live spine",
+    },
+    Subcommand {
         name: "check-spine-files",
         summary: "Fast: header, field count and id uniqueness on every hand-edited spine TSV",
     },
@@ -990,6 +999,58 @@ fn main() -> ExitCode {
         // `LE-30`. Prints the block; it deliberately does *not* write the file.
         // A command that rewrites the page a reader meets first should be one
         // someone chose to apply, and the diff is the review.
+        // `LE-108`'s lesson generalised: the report is emitted whole rather
+        // than maintained, and `check-feasibility` refuses a stale copy. A
+        // status page nobody can trust is worse than none.
+        subcommand @ ("emit-feasibility" | "check-feasibility") => {
+            let result = os_root().and_then(|root| {
+                let repo_root = root
+                    .parent()
+                    .ok_or_else(|| {
+                        format!("could not resolve repository root from {}", root.display())
+                    })?
+                    .to_path_buf();
+                let facts = assurance::dashboard_facts(&repo_root)?;
+                let status = assurance::release_status(&repo_root)?;
+                let statuses = assurance::artifact_statuses(&repo_root)?;
+                let page = feasibility::render(&repo_root, &facts, &status, &statuses)?;
+                Ok((repo_root, page))
+            });
+            match result {
+                Ok((repo_root, page)) => {
+                    if subcommand == "emit-feasibility" {
+                        print!("{page}");
+                        return ExitCode::SUCCESS;
+                    }
+                    let path = repo_root.join("goals").join("feasibility.html");
+                    match std::fs::read_to_string(&path) {
+                        Ok(committed) if committed.replace("\r\n", "\n") == page => {
+                            println!(
+                                "feasibility-check: goals/feasibility.html agrees with the live \
+                                 spine"
+                            );
+                            ExitCode::SUCCESS
+                        }
+                        Ok(_) => {
+                            eprintln!(
+                                "xtask: goals/feasibility.html is STALE — it disagrees with the \
+                                 spine that just ran. Regenerate it:\n  cargo run -p xtask -- \
+                                 emit-feasibility > ../goals/feasibility.html"
+                            );
+                            ExitCode::FAILURE
+                        }
+                        Err(error) => {
+                            eprintln!("xtask: could not read {}: {error}", path.display());
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
+                Err(message) => {
+                    eprintln!("xtask: could not build the feasibility report: {message}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         "emit-dashboard" => {
             let result = os_root().and_then(|root| {
                 let repo_root = root.parent().ok_or_else(|| {
