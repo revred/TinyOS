@@ -499,12 +499,6 @@ mod tests {
         decompose(&repo_root()).expect("the committed registers decompose")
     }
 
-    /// The property `09A`'s hand-written ledger did not have.
-    ///
-    /// Every parent equals the sum of its children. Nothing is subtracted, so
-    /// no bucket can overlap another and be counted twice — which is exactly
-    /// how a hand ledger produced 164 where the answer is 220.
-    #[test]
     /// The per-domain rows must sum to the totals they decompose.
     ///
     /// This is the `09A` failure made impossible rather than warned about:
@@ -554,6 +548,11 @@ mod tests {
         }
     }
 
+    /// The property `09A`'s hand-written ledger did not have.
+    ///
+    /// Every parent equals the sum of its children. Nothing is subtracted, so
+    /// no bucket can overlap another and be counted twice — which is exactly
+    /// how a hand ledger produced 164 where the answer is 220.
     #[test]
     fn the_ledger_reconciles_at_every_level() {
         let status = committed();

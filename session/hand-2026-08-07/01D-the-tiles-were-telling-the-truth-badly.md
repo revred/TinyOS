@@ -222,11 +222,39 @@ missing `FEAT-P1-11` row, `LE-98`'s device-tree half, the board checklist — is
 still untouched and `FEAT-P1-11` is now carried through four handovers. The
 do-not-start list was honoured and no design surface was added.
 
+## Postscript: this session reddened the governance job, and the trap was its own
+
+Run `31167021880` failed on `Format, lint, size, assurance, missing_docs`:
+
+```text
+error: duplicated attribute
+  --> src/xtask/src/assurance/release_status.rs:515:5
+```
+
+A doc comment was inserted between an existing `#[test]` and its function,
+orphaning the attribute onto the next one. `cargo test --workspace` compiles
+that happily — it is a **warning** — and CI's `clippy -D warnings` makes it an
+**error**. Every gate this session ran was green.
+
+That is `01C`'s own clippy trap firing on the session that wrote it, and the
+useful half is the fix. The workspace clippy form is unusable here; the
+**per-package** form is not:
+
+```sh
+cargo clippy -p xtask --all-targets -- -D warnings   # two seconds, and it catches this
+```
+
+Confirmed the required way — by re-introducing the defect into the real file
+and watching it fail. `01C`'s trap entry now carries it, because *"clippy is
+not a local gate here"* was true and, stated alone, was the reason nobody ran
+the form that works. **`cargo test` does not save you from a lint.**
+
 ---
 
 **Written 2026-08-07.** Loose ends: `LE-103` and `LE-104` raised, `LE-94`
 partly actioned and still open. Gates: `cargo fmt --all --check`, `cargo test --workspace`,
-`check-assurance-spine`, `check-ci-gates`, `check-metric-labels`. No board
-crate touched, so `check-boot-images`/`check-guest-images` do not apply — and
-that is a judgement, not an omission: the change is confined to `xtask` and
-`goals/`.
+`cargo clippy -p xtask --all-targets -- -D warnings` (added after it caught
+what the others missed), `check-assurance-spine`, `check-ci-gates`,
+`check-metric-labels`. No board crate touched, so
+`check-boot-images`/`check-guest-images` do not apply — and that is a
+judgement, not an omission: the change is confined to `xtask` and `goals/`.

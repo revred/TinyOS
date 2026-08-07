@@ -97,11 +97,20 @@ to put to the owner rather than a change to make.
   Mutate the **real file** and read **which** error came back — a fixture
   contains only what its author already thought of.
 - **`cargo clippy --workspace --all-targets` is NOT a local gate on this
-  bench.** It is red on the pristine tree with seven `E0432`/`E0433`s, for
-  exactly the cfg reason above. A session that reaches for it to check its work
-  will misread the result **in both directions**: red on code it did not break,
-  and silent about the two defects `01B` found. `check-guest-images` and
-  `check-boot-images` are the local gates, as `CLAUDE.md` says.
+  bench — but a per-package one is, and you want it.** The workspace form is
+  red on the pristine tree with seven `E0432`/`E0433`s, for exactly the cfg
+  reason above, so a session that reaches for it misreads the result **in both
+  directions**: red on code it did not break, and silent about the two defects
+  `01B` found. `check-guest-images` and `check-boot-images` are the local gates
+  for board code, as `CLAUDE.md` says. **For a host-only crate, run
+  `cargo clippy -p <crate> --all-targets -- -D warnings`** — it has none of the
+  workspace's cfg problems and it is the only local thing that sees what CI's
+  `-D warnings` sees. `01D` learned this the expensive way: an `xtask` change
+  that passed `cargo test --workspace` reddened the governance job on a
+  `duplicated attribute` that is a *warning* locally and an *error* under
+  `-D warnings`. `cargo clippy -p xtask --all-targets -- -D warnings` catches
+  it in two seconds, confirmed by re-introducing the defect and watching it
+  fail. **`cargo test` will not save you from a lint.**
 - **`check-boot-images` and `check-guest-images` are siblings** and running one
   is not running the other (`LE-72`, `LE-92`). Touching `kernel`, `hal-arm64`,
   `pi5-image`, `exec` or `shell` means both.
