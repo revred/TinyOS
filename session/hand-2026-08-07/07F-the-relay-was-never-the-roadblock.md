@@ -139,6 +139,32 @@ next LE-98 session starts from evidence instead of a dark screen. To *see*
 the OS state today, SD-boot the same image (`sdprep`/`cardswap`) — that path
 painted every canvas this project has photographed.
 
+## 7b. Resolved later still: the splash lit, and the constant was never wrong
+
+The owner ordered the display fixed regardless of boot path. The elimination
+run that followed — netboot vs SD boot (both dark, both `native=1920x1080`),
+config without `hdmi_force_hotplug=1` (dark), the exact 2026-08-04 two-line
+config queued — ended unexpectedly: after the card's Pi OS role booted to a
+visible desktop and the board was cycled once more, **the TinyOS splash
+appeared on the monitor**, from a netboot of the current image with the
+pinned four-line config, `verdict ok=true` on the same boot's wire.
+
+So: `SIMPLEFB_BASE` is still correct, every config flag is exonerated, and
+the discriminating variable was **the monitor's state at the instant of
+power-on** — "awake with its OSD up" did not get scanout brought up;
+"actively driven moments earlier" did. The firmware's display bring-up at
+power-on is nondeterministic in a way `TOS64-DISPLAY/1` cannot yet see:
+`native=` answered 1920x1080 on dark boots and lit boots alike, so the size
+query and scanout setup are **separate firmware facts**, and the wire only
+carries the first. `LE-98` stays open with its hazard unchanged (the 4 MB
+write to an unverified constant), and the owner has ordered its durable fix:
+a C4-contained DT-parse Feature (option 1 of the row's three), sprint rule
+lifted for it — decision taken 2026-08-07, this session, recorded here.
+
+Bench procedure that lights the canvas, until then: power the board while
+the monitor is actively displaying a live source (not merely awake), and if
+it comes up dark, drive the monitor from another source and cycle again.
+
 ## 8. Standing instructions, one extension
 
 All previous instructions hold. The extension this session earned: **a blocker
