@@ -60,7 +60,32 @@ in order: `-05`'s two remaining outcome arms, `-02`'s induced fault, and the
 Q3 campaign specified in `08A` §5 — the last of which unlocks `FEAT-P1-06`'s
 bound half and with it the Epic's exit.
 
-## 4. Standing instruction earned
+## 4. Added later the same session: the owner pressed the button, and main's only red goes
+
+While this document's first commit was on the wire, a `workflow_dispatch`
+appeared: **the owner dispatched `record-timing-baseline`** (run
+`31181879077`) — the LE-116 path, and the decision `LE-23` recorded as
+pending through five sessions, taken by the one person whose call it was. The
+job succeeded in 60 s; the owner placed the artifact's content into the
+working tree; this session completed the designed review-then-commit half:
+
+- artifact byte-compared against the placed file (identical);
+- all 11 rows one date, one runner session — the whole-file replacement
+  `LE-116` says must be read as one, here the cleaner shape;
+- ratio arithmetic self-consistent on every row (`p50_ratio_ppm = p50/REF`);
+- the three `_spoored` arms that kept the gate red now carry rows.
+
+**`LE-23` and `LE-116` are closed** on this, with the residuals stated in
+their rows rather than softened: the systematic offset is *inverted in
+scope*, not fixed — a Windows-bench local run of `check-timing-regression`
+may now read red against the runner-recorded baseline for the mirror-image
+reason, `--update-baseline` on a laptop remains the standing hazard
+(`LE-28`), `dispatch_select`'s run-to-run instability is `LE-18`'s and
+untouched, and inter-runner variance across shared `ubuntu-latest` instances
+is still unmeasured. If the push carrying this lands green, it is the first
+fully green `main` since the host suite reached the runner.
+
+## 5. Standing instruction earned
 
 **Evidence keyed to a channel dies with the channel; evidence keyed to a fact
 survives it.** Three Stories stalled for ten days because their criteria named
