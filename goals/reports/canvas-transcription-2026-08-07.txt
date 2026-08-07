@@ -1,0 +1,39 @@
+# Canvas transcription, 2026-08-07 — owner photograph of the first lit canvas
+# since 2026-08-04, netbooted image sha256 0d73b375...8db2, same boot as the
+# machine-parsed wire capture in this session's records (beacon seq ~76 at the
+# photo, ~84 at the capture). Source: OWNER PHOTOGRAPH (Samsung monitor, HDMI0),
+# transcribed by the session; the TOS64-MEAS envelope block also visible in the
+# photo is NOT transcribed here because the same boot's envelope exists
+# machine-parsed (the authoritative copy) — only the canvas-resident rows that
+# never ride the wire are recorded. Digits cross-checked against the wire where
+# a twin exists; rows marked [photo-only] have no wire twin and carry photo
+# transcription risk.
+#
+# TWO FINDINGS, stated so a reader does not skim past them:
+# 1. TICK RMAX=10000 per-mille: one tick-interval ratio of ~10x. The measure
+#    fixture masks IRQs for its whole duration, so the interval pair that
+#    straddles the fixture is stretched by the masked region's length; the
+#    ratio gate is recording exactly the condition ADR 0015's irq_state column
+#    names. Not a defect on its own; it is the canvas showing the cost of the
+#    masked region for the first time.
+# 2. RX STATE=STOPPED REASON=NOBUFFER with ACCEPTED=0 REFUSED=0: the inbound
+#    arm stopped without ever admitting or refusing a frame. First observation
+#    of this state on any channel — the canvas was dark on every boot since
+#    the RX arm shipped. Owed a look by whoever owns STORY-P1-09-16.
+
+TINYOS
+
+TOS64-LINK/1 RP1=PRESENT ID=0X0109 PHY=0X600D84A2 LINK=DOWN BEACON=SKIPPED   [photo-only; boot-moment row — the link trained later, the same boot beaconed on the wire]
+TOS64-BEAT/1 SEQ=76 STATE=BEACONING FB=REFUSED                               [photo-only; live row, fb=refused agrees with the wire's TOS64-DISPLAY/1]
+TOS64-MMU/1 SCTLR=0000000030D01805 OFF=68514149 ON=182651                    [photo-only this boot; ~375x, inside the recorded 405-410x family]
+TOS64-CONF/1 CNTVCT=PASS SPAN=152 CNTFRQ=54000000 CPUS=54                    [photo-only this boot; agrees with every prior boot of record]
+TOS64-PMU/1 DELTA=24000191 RATE=2400MHZ SOURCE=PMCCNTR                       [photo-only this boot; the LE-15 decision holding on silicon again]
+TOS64-TICK/1 COUNT=7651 TVAL=540000 RMIN=999 RMAX=10000                      [photo-only; FINDING 1 above]
+TOS64-RX/1 STATE=STOPPED REASON=NOBUFFER ACCEPTED=0 REFUSED=0                [photo-only; FINDING 2 above]
+
+# Below these rows the photo shows the full cycling transcript: the
+# fixture-measure conformance line, the three TOS64-QUAL/1 lines (boot_entry
+# current_el=EL2 / counter_split / residency), the TOS64-MEAS/2 envelope of 14
+# metrics, and TOS64-RESULT/1 FIXTURE=MEASURE OK=TRUE — the same bytes the
+# wire capture of this boot carries, which is the two-channel agreement that
+# licenses trusting the canvas rows above.

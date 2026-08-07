@@ -1,0 +1,21 @@
+TOS64-MEAS/2 BEGIN tier=T1 arch=aarch64 platform=rpi5-bcm2712 qualification=none cycle_source=pmccntr_el0 overhead_cycles=43 cycles_per_us=2400
+TOS64-MEAS/2 METRIC domain=REF metric=fixed_integer_loop n=1000 dropped=0 warmup=100 min=2834 p50=2884 p99=2959 p99_9=2992 max=3005 unit=cycles
+TOS64-MEAS/2 METRIC domain=D07 metric=pool_u64x64_alloc_free_round_trip n=1000 dropped=0 warmup=100 min=375 p50=375 p99=375 p99_9=375 max=375 unit=cycles
+TOS64-MEAS/2 METRIC domain=D07 metric=pool_u64x4_alloc_denied_exhausted_per_op_of_64 n=1000 dropped=0 warmup=100 min=485 p50=487 p99=487 p99_9=487 max=487 unit=cycles
+TOS64-MEAS/2 METRIC domain=D04 metric=context_switch_yield_roundtrip_2switches n=1000 dropped=0 warmup=100 min=82 p50=82 p99=82 p99_9=82 max=82 unit=cycles
+TOS64-MEAS/2 METRIC domain=D05 metric=dispatch_select_highest_priority_ready n=1000 dropped=0 warmup=100 min=1495 p50=1495 p99=1495 p99_9=1495 max=1498 unit=cycles
+TOS64-MEAS/2 METRIC domain=D05 metric=dispatch_run_once_cooperative_round n=1000 dropped=0 warmup=100 min=1624 p50=1625 p99=1629 p99_9=1629 max=1629 unit=cycles
+TOS64-MEAS/2 METRIC domain=D02 metric=fault_brk_capture_escape_kernel_context n=1000 dropped=0 warmup=100 min=115 p50=115 p99=115 p99_9=115 max=115 unit=cycles
+TOS64-MEAS/2 METRIC domain=D07 metric=pool_u64x64_alloc_free_round_trip_per_op_of_8 n=1000 dropped=0 warmup=100 min=473 p50=473 p99=473 p99_9=473 max=473 unit=cycles
+TOS64-MEAS/2 METRIC domain=D11 metric=spoor_stamp_park_rung_per_op_of_8 n=1000 dropped=0 warmup=100 min=130 p50=137 p99=142 p99_9=143 max=143 unit=cycles
+TOS64-MEAS/2 METRIC domain=D11 metric=spoor_drain_full_ring_frame_of_181 n=1000 dropped=0 warmup=100 min=121796 p50=122071 p99=122117 p99_9=122237 max=122392 unit=cycles
+TOS64-MEAS/2 METRIC domain=D11 metric=spoor_announce_certificate_frame_of_3 n=1000 dropped=0 warmup=100 min=3069 p50=3074 p99=3093 p99_9=3093 max=3093 unit=cycles
+TOS64-MEAS/2 METRIC domain=D07 metric=pool_u64x64_alloc_free_round_trip_per_op_of_8_spoored n=1000 dropped=0 warmup=100 min=591 p50=591 p99=591 p99_9=591 max=591 unit=cycles
+TOS64-MEAS/2 METRIC domain=D04 metric=context_switch_yield_roundtrip_2switches_spoored n=1000 dropped=0 warmup=100 min=176 p50=187 p99=199 p99_9=210 max=213 unit=cycles
+TOS64-MEAS/2 METRIC domain=D05 metric=dispatch_run_once_cooperative_round_spoored n=1000 dropped=0 warmup=100 min=1738 p50=1742 p99=1746 p99_9=1760 max=1764 unit=cycles
+TOS64-MEAS/2 END metrics=14
+TOS64-DISPLAY/1 native=1920x1080 fb=refused
+TOS64-QUAL/1 boot_entry current_el=EL2 raw=0x0000000000000008 now_at=EL1 firmware_cntvoff=0x0000000000000000
+TOS64-QUAL/1 counter_split cntpct=74438456 cntvct=74438458 virtual_offset=18446744073709551614
+TOS64-QUAL/1 residency window_ticks=540000 cntpct_ticks=540003 cntvct_ticks=540002 pmccntr_delta=24000118
+TOS64-RESULT/1 fixture=measure ok=true

@@ -165,6 +165,25 @@ Bench procedure that lights the canvas, until then: power the board while
 the monitor is actively displaying a live source (not merely awake), and if
 it comes up dark, drive the monitor from another source and cycle again.
 
+## 7c. The lit canvas is evidence, and it carries two firsts
+
+The owner photographed the lit canvas and the photo holds rows the wire never
+carries. Transcribed with provenance discipline in
+[`canvas-transcription-2026-08-07.txt`](../../goals/reports/canvas-transcription-2026-08-07.txt),
+paired with the same boot's machine-parsed capture
+(`wire-lit-canvas-2026-08-07.txt`). Two findings for the next session:
+
+1. **`TOS64-TICK/1 … RMIN=999 RMAX=10000`** — the ratio gate caught the
+   fixture's interrupt-masked region as a ~10× stretched interval pair, on
+   glass. The first live look at what `ADR 0015`'s `irq_state` column is
+   about, from the board itself.
+2. **`TOS64-RX/1 STATE=STOPPED REASON=NOBUFFER ACCEPTED=0 REFUSED=0`** — the
+   inbound arm stopped without admitting or refusing a frame, first
+   observation on any channel. Owed a look by `STORY-P1-09-16`'s owner.
+
+The photo file itself belongs at `goals/reports/assets/canvas-2026-08-07.jpg`
+(owner to place it; the transcription names it as its source).
+
 ## 8. Standing instructions, one extension
 
 All previous instructions hold. The extension this session earned: **a blocker
