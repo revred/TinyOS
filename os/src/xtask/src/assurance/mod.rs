@@ -610,6 +610,13 @@ fn walk_spine(
         .flat_map(|contract| contract.performance_domains.iter().cloned())
         .collect();
     let reach = performance_catalogue::release_gate_reach(repo_root, &in_play_domains)?;
+    /// `LE-108`. Named rather than inlined because the prose sentence it feeds
+    /// speaks of the two determinism Epics specifically, and a substring test
+    /// against `"STORY-P"` alone would silently absorb `EPIC-P9`'s ten.
+    fn is_p0p1_story(id: &str) -> bool {
+        id.starts_with("STORY-P0-") || id.starts_with("STORY-P1-")
+    }
+
     let assurance_verified =
         contracts.details_by_story.values().filter(|contract| contract.state == "verified").count();
     // `LE-84`. The decomposition the dashboard publishes is the SAME call
@@ -656,6 +663,14 @@ fn walk_spine(
         // adjacent. One derivation, two consumers.
         closable_gates: release_decomposition.implemented.open,
         measurable_today: release_decomposition.implemented.measurable_today,
+        // `LE-108`: derived from the same `Status:` headers the badge check
+        // reads, so the prose sentence cannot drift from the documents again.
+        p0p1_stories: statuses.iter().filter(|status| is_p0p1_story(&status.id)).count(),
+        p0p1_settled: statuses
+            .iter()
+            .filter(|status| is_p0p1_story(&status.id))
+            .filter(|status| matches!(status.state.as_str(), "Verified" | "Functionally Verified"))
+            .count(),
         platforms: platforms.count(),
         qualified_platforms: platforms.qualified_count(),
         features: feature_contracts.features.len(),

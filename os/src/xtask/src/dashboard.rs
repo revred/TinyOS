@@ -94,6 +94,18 @@ pub struct DashboardFacts {
     /// absent mechanism nor anything else: measurement work available today,
     /// on a laptop, with no decision pending.
     pub measurable_today: usize,
+    /// Stories belonging to `EPIC-P0` or `EPIC-P1`.
+    ///
+    /// `LE-108`. The prose paragraph states this figure and the one below, and
+    /// until 2026-08-07 nothing checked either: the sentence read *"Of the 52
+    /// `EPIC-P0`/`EPIC-P1` Stories, 43 are Verified or Functionally
+    /// Verified"* while the tree held 85 and 72. Thirty-three Stories of drift
+    /// in a sentence sitting two lines below counts that ARE gated, which is
+    /// what makes it worth gating rather than merely correcting.
+    pub p0p1_stories: usize,
+    /// Of those, the ones whose own `Status:` header reads `Verified` or
+    /// `Functionally Verified`.
+    pub p0p1_settled: usize,
     /// Platforms in the qualification register.
     pub platforms: usize,
     /// Of those, platforms holding a secure-world qualification record.
@@ -534,6 +546,25 @@ fn check_spine_sentence(contents: &str, facts: &DashboardFacts) -> Result<(), St
              `{expected_loose}` (LE-30)"
         ));
     }
+    // `LE-108`, and the same rule one sentence along. This one drifted by 33
+    // Stories while sitting two lines below counts that were already gated,
+    // which is the argument for gating it rather than correcting it again.
+    let expected_population =
+        format!("Of the {} <code>EPIC-P0</code>/<code>EPIC-P1</code> Stories", facts.p0p1_stories);
+    if !contents.contains(&expected_population) {
+        return Err(format!(
+            "goals/index.html does not state the current EPIC-P0/EPIC-P1 Story population. \
+             Expected `{expected_population}` (LE-108)"
+        ));
+    }
+    let expected_settled =
+        format!("<strong>{} are Verified or Functionally Verified</strong>", facts.p0p1_settled);
+    if !contents.contains(&expected_settled) {
+        return Err(format!(
+            "goals/index.html does not state how many EPIC-P0/EPIC-P1 Stories are settled. \
+             Expected `{expected_settled}` (LE-108)"
+        ));
+    }
     Ok(())
 }
 
@@ -647,6 +678,8 @@ mod tests {
             reachable_gates: 345,
             closable_gates: 220,
             measurable_today: 125,
+            p0p1_stories: 85,
+            p0p1_settled: 72,
             platforms: 5,
             qualified_platforms: 0,
             features: 23,
@@ -868,6 +901,77 @@ mod tests {
             row.contains("ADR 0005"),
             "the qualification tile must name the decision that bars G04, because that is \
              the reason `Stories assurance-verified` reads zero and cannot move: {row}"
+        );
+    }
+
+    /// `LE-108`. The prose sentence carried `52` Stories and `43` settled
+    /// while the tree held `85` and `72`, and it sat two lines below the spine
+    /// and loose-end counts that `LE-30` already gates — so the drift was not
+    /// merely possible, it was invisible beside numbers that could not drift.
+    ///
+    /// The fixture below is the sentence as it was actually committed, stale
+    /// figures and all. A test written against a made-up string would pass
+    /// against a check that matched nothing.
+    #[test]
+    fn the_spine_sentence_refuses_a_stale_story_population() {
+        // The spine and loose-end counts here MATCH the fixture deliberately,
+        // so the only thing that can fail is the new check. With stale leading
+        // counts the earlier gate fires first and this test would pass while
+        // asserting nothing about the sentence it is named for.
+        const STALE: &str = "Re-synced <strong>23 Features / 59 Stories / 46 Tests / 47 Reports</strong>, \
+             plus <strong>46 loose ends (28 open)</strong>. Of the 52 <code>EPIC-P0</code>/\
+             <code>EPIC-P1</code> Stories, <strong>43 are Verified or Functionally Verified</strong>, \
+             <strong>2 are In progress</strong> and 7 are Specified.";
+        let facts = facts();
+        assert!(
+            check_spine_sentence(
+                &STALE.replace("Of the 52", "Of the 85").replace(
+                    "<strong>43 are Verified or Functionally Verified</strong>",
+                    "<strong>72 are Verified or Functionally Verified</strong>"
+                ),
+                &facts
+            )
+            .is_ok(),
+            "with both figures corrected the sentence must pass, or this test is measuring \
+             one of the earlier checks instead"
+        );
+
+        let error = check_spine_sentence(STALE, &facts)
+            .expect_err("a sentence naming 52 Stories must be refused when the tree holds 85");
+        assert!(error.contains("Of the 85"), "the error must name what it expected: {error}");
+        assert!(error.contains("LE-108"), "the error must cite its row: {error}");
+
+        // And the settled count is refused independently of the population, or
+        // a sentence that fixed one number and not the other would pass.
+        let population_fixed = STALE.replace("Of the 52", "Of the 85");
+        let error = check_spine_sentence(&population_fixed, &facts)
+            .expect_err("43 settled must still be refused when the tree holds 72");
+        assert!(
+            error.contains("<strong>72 are Verified or Functionally Verified</strong>"),
+            "the second check must name the settled count it expected: {error}"
+        );
+    }
+
+    /// The positive half: the committed page satisfies the gate it ships with.
+    /// Without this, a check that rejected *everything* would pass the test
+    /// above and redden the build for the whole repository.
+    #[test]
+    fn the_committed_page_states_the_current_story_population() {
+        let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .expect("xtask manifest lives at os/src/xtask")
+            .to_path_buf();
+        let page = std::fs::read_to_string(repo_root.join("goals").join("index.html"))
+            .expect("goals/index.html must be readable");
+        let facts = DashboardFacts { p0p1_stories: 85, p0p1_settled: 72, ..facts() };
+        let expected_population = format!(
+            "Of the {} <code>EPIC-P0</code>/<code>EPIC-P1</code> Stories",
+            facts.p0p1_stories
+        );
+        assert!(
+            page.contains(&expected_population),
+            "the committed page must carry `{expected_population}`"
         );
     }
 

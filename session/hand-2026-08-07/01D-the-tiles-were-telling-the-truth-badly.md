@@ -217,10 +217,22 @@ decision, and the thing standing behind it is a £15 relay and an afternoon.
 
 ## What this session did not do
 
-None of the 125 measured. No Story moved. `01C`'s task list — `EPIC-P1`'s
-missing `FEAT-P1-11` row, `LE-98`'s device-tree half, the board checklist — is
-still untouched and `FEAT-P1-11` is now carried through four handovers. The
-do-not-start list was honoured and no design surface was added.
+None of the 125 measured. No Story moved. Of `01C`'s task list, `LE-98`'s
+device-tree half and the board checklist are untouched. The do-not-start list
+was honoured and no design surface was added.
+
+**One correction, and it is against this session rather than an inherited
+claim.** `01C` item 1 said `EPIC-P1` was missing its `FEAT-P1-11` row in two
+places. That was true when written and is false now: a **concurrent session
+repaired both the Features table and the `Status:` header** while this session
+was mid-flight, and this session's `git add -A` swept that repair into commit
+`231a6db` under a message about the dashboard, with no mention of it. Nobody
+was misled for long, but two things follow. A cover note's task list can be
+actioned by someone else between writing and reading. And **`git add -A` in a
+tree with concurrent sessions commits work you did not do and did not read** —
+`01C`'s own trap list warns that a session can commit mid-turn, and the warning
+did not stop this because the trap is not the concurrent commit, it is the
+blind stage. `git status` before staging.
 
 ## Postscript: this session reddened the governance job, and the trap was its own
 
@@ -236,18 +248,23 @@ orphaning the attribute onto the next one. `cargo test --workspace` compiles
 that happily — it is a **warning** — and CI's `clippy -D warnings` makes it an
 **error**. Every gate this session ran was green.
 
-That is `01C`'s own clippy trap firing on the session that wrote it, and the
-useful half is the fix. The workspace clippy form is unusable here; the
-**per-package** form is not:
+That is `01C`'s own clippy trap firing on the session that wrote it. **And the
+first correction was itself wrong in the more interesting way:** it presented
+`cargo clippy -p xtask --all-targets -- -D warnings` as a discovery, when
+`cargo run -p xtask -- check-lints` **already existed** and runs exactly that —
+host clippy per package, so one crate's failure cannot hide the next crate's.
 
-```sh
-cargo clippy -p xtask --all-targets -- -D warnings   # two seconds, and it catches this
-```
+So the gate was never missing. It is absent from `ci.yml`, from the pre-commit
+hook and from `CI_ENFORCED`, which means `check-ci-gates` — the thing built to
+refuse a workflow where a filed mechanism is not wired in — **is blind to it**.
+That is `LE-100`'s own thesis recurring on a different gate days after `LE-100`
+closed, and it is filed as `LE-106`.
 
-Confirmed the required way — by re-introducing the defect into the real file
-and watching it fail. `01C`'s trap entry now carries it, because *"clippy is
-not a local gate here"* was true and, stated alone, was the reason nobody ran
-the form that works. **`cargo test` does not save you from a lint.**
+The lesson is sharper than the one I first wrote down: a trap entry that
+teaches a raw `cargo` invocation teaches *around* the project's own gate, and
+the next session then re-derives by hand a subcommand that was already there.
+**Before recording a command as the way to check something, run
+`xtask help`.** `01C`'s entry now names `check-lints`.
 
 ---
 

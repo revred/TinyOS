@@ -66,16 +66,17 @@ to put to the owner rather than a change to make.
 
 ## Your task, in order
 
-1. **`EPIC-P1` is missing `FEAT-P1-11` in two places, not one.** The Features
-   table jumps `FEAT-P1-10` straight to `FEAT-P1-12`, *and* the Epic's own
-   `Status:` header enumerates Features up to `FEAT-P1-10` and stops. Owner-
-   approved 2026-08-06; pre-existing drift; **carried unactioned through three
-   handovers**, this one included. Summarise it as board-proven but not
-   Complete and name what it waits on — `FEAT-P1-11.md`'s own header already
-   states the three gaps precisely (criterion 3's `Skipped`/`Failed` arms are
-   host-only, the round's cost with interrupts live is unmeasured, and there is
-   one task with no preemption, no `EL0` and no containment claim). This is
-   half an hour and it has outlived three mandates; do it first.
+1. ~~**`EPIC-P1` is missing `FEAT-P1-11`.**~~ **DONE — and not by the session
+   that wrote this line.** It was true when written: the Features table jumped
+   `FEAT-P1-10` straight to `FEAT-P1-12` and the `Status:` header stopped at
+   `FEAT-P1-10`. A **concurrent session repaired both** while `01D` was in
+   flight, and `01D`'s `git add -A` swept the repair into commit `231a6db`
+   under an unrelated message. Verified present in both places at `398cff1`.
+   **Two lessons, and the second is the one that costs.** A cover note's task
+   list can be actioned by somebody else between writing and reading, so
+   re-check before starting. And `git add -A` in a tree with concurrent
+   sessions commits work you did not do and did not read — `git status` before
+   staging, every time.
 2. **`LE-98`'s remaining half** — the device-tree parse that makes
    `SIMPLEFB_BASE` evidence rather than folklore, and removes the fault path's
    named exception with it. Safety precedes correctness: this is a 4 MB write
@@ -102,15 +103,19 @@ to put to the owner rather than a change to make.
   reason above, so a session that reaches for it misreads the result **in both
   directions**: red on code it did not break, and silent about the two defects
   `01B` found. `check-guest-images` and `check-boot-images` are the local gates
-  for board code, as `CLAUDE.md` says. **For a host-only crate, run
-  `cargo clippy -p <crate> --all-targets -- -D warnings`** — it has none of the
-  workspace's cfg problems and it is the only local thing that sees what CI's
-  `-D warnings` sees. `01D` learned this the expensive way: an `xtask` change
-  that passed `cargo test --workspace` reddened the governance job on a
-  `duplicated attribute` that is a *warning* locally and an *error* under
-  `-D warnings`. `cargo clippy -p xtask --all-targets -- -D warnings` catches
-  it in two seconds, confirmed by re-introducing the defect and watching it
-  fail. **`cargo test` will not save you from a lint.**
+  for board code, as `CLAUDE.md` says. **The local lint gate is
+  `cargo run -p xtask -- check-lints`** — host clippy per package, so one
+  crate's failure cannot hide the next crate's, and for `xtask` it runs exactly
+  the `-D warnings` command CI runs. `01D` learned this the expensive way
+  twice over: an `xtask` change that passed `cargo test --workspace` reddened
+  the governance job on a `duplicated attribute` — a *warning* locally, an
+  *error* under `-D warnings` — and then `01D`'s first correction to this very
+  entry taught the raw `cargo clippy -p xtask ...` invocation, **not knowing
+  the subcommand already existed**. Teaching the raw command teaches *around*
+  the gate. `check-lints` is filed as a mechanism and is wired into neither
+  `ci.yml`, the pre-commit hook, nor `CI_ENFORCED` — so `check-ci-gates`,
+  which exists to refuse exactly that, is blind to it (`LE-106`).
+  **`cargo test` will not save you from a lint.**
 - **`check-boot-images` and `check-guest-images` are siblings** and running one
   is not running the other (`LE-72`, `LE-92`). Touching `kernel`, `hal-arm64`,
   `pi5-image`, `exec` or `shell` means both.
