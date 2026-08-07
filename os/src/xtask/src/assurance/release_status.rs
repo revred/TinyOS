@@ -136,8 +136,20 @@ pub struct Implemented {
     pub empty: usize,
     /// Empty because the mechanism has not been built.
     pub mechanism_absent: usize,
-    /// Empty because nobody has measured. **Available today.**
+    /// Empty, instrumented, and simply not measured. **Available today.**
     pub measurable_today: usize,
+    /// Empty in a domain that has **no metric-emitting fixture at all**, so no
+    /// amount of running things today produces the number.
+    ///
+    /// `LE-109`, and it is a correction to this module's own arithmetic.
+    /// `measurable_today` was defined by subtraction — empty, minus the
+    /// mechanism-absent list — which silently asserted that whatever was left
+    /// could be measured. It never asked whether an instrument existed. Four of
+    /// the ten implemented in-play domains declare no `MetricLabel` anywhere:
+    /// `D01`, `D06`, `D08` and `D24`. Their gates are not measurement work,
+    /// they are fixture work with a measurement behind it, and publishing them
+    /// as "measurable today — no board, no decision" overstated by 56 gates.
+    pub no_instrument: usize,
     /// The same implemented half, split by domain, so that
     /// [`Self::measurable_today`] is a WORKLIST rather than a quantity.
     ///
@@ -163,6 +175,10 @@ pub struct DomainWork {
     /// Guardrail ids here that are unmeasured and measurable today, in id
     /// order. **This is the work.**
     pub measurable_today: Vec<String>,
+    /// Whether any fixture declares a metric for this domain at all
+    /// (`LE-109`). When false, [`Self::measurable_today`] is empty and every
+    /// one of this domain's empty gates sits in `no_instrument` instead.
+    pub instrumented: bool,
 }
 
 /// Derives the decomposition from the committed registers.
@@ -199,18 +215,29 @@ pub fn decompose(repo_root: &Path) -> Result<ReleaseStatus, String> {
     // `evidenced` and `empty` sets above rather than recomputed from the
     // catalogue, so the rows cannot disagree with the totals they sum to —
     // `the_per_domain_worklist_reconciles_with_the_totals` asserts it.
+    // `LE-109`: a domain with no `MetricLabel` anywhere has no instrument, so
+    // none of its empty gates is measurement work today however the
+    // subtraction above turns out.
+    let instrumented = crate::metric_labels::instrumented_domains(repo_root)?;
+
     let per_domain: Vec<DomainWork> = domains_with_readiness(false)
         .into_iter()
         .map(|(domain, readiness)| {
             let mine = |gate: &&&ReleaseGate| gate.domain == domain;
-            let mut measurable_today: Vec<String> = empty
-                .iter()
-                .filter(|gate| mine(gate))
-                .filter(|gate| !MECHANISM_ABSENT_GUARDRAILS.contains(&gate.guardrail.as_str()))
-                .map(|gate| gate.guardrail.clone())
-                .collect();
+            let has_instrument = instrumented.contains(&domain);
+            let mut measurable_today: Vec<String> = if has_instrument {
+                empty
+                    .iter()
+                    .filter(|gate| mine(gate))
+                    .filter(|gate| !MECHANISM_ABSENT_GUARDRAILS.contains(&gate.guardrail.as_str()))
+                    .map(|gate| gate.guardrail.clone())
+                    .collect()
+            } else {
+                Vec::new()
+            };
             measurable_today.sort();
             DomainWork {
+                instrumented: has_instrument,
                 evidenced: open
                     .iter()
                     .filter(|gate| gate.domain == domain && evidenced.contains(&gate.id))
@@ -253,7 +280,13 @@ pub fn decompose(repo_root: &Path) -> Result<ReleaseStatus, String> {
             refused: empty.iter().filter(|gate| refused.contains(&gate.id)).count(),
             empty: empty.len(),
             mechanism_absent,
-            measurable_today: empty.len() - mechanism_absent,
+            // Summed from the rows rather than subtracted, so the two can
+            // never disagree — `LE-109` exists because the subtracted form
+            // asserted something it had never checked.
+            measurable_today: per_domain.iter().map(|work| work.measurable_today.len()).sum(),
+            no_instrument: empty.len()
+                - mechanism_absent
+                - per_domain.iter().map(|work| work.measurable_today.len()).sum::<usize>(),
             per_domain,
         },
     })
@@ -387,7 +420,11 @@ pub fn render(status: &ReleaseStatus) -> String {
         present.mechanism_absent
     ));
     out.push_str(&format!(
-        "         +- unmeasured, and MEASURABLE TODAY                         {}\n",
+        "         +- no metric-emitting fixture exists for the domain         {}\n",
+        present.no_instrument
+    ));
+    out.push_str(&format!(
+        "         +- instrumented, unmeasured, and MEASURABLE TODAY           {}\n",
         present.measurable_today
     ));
     out.push_str(&format!(
@@ -405,7 +442,10 @@ pub fn render(status: &ReleaseStatus) -> String {
             .then_with(|| a.domain.cmp(&b.domain))
     });
     out.push('\n');
-    out.push_str("THE 125, BY DOMAIN — nearest to complete first.\n");
+    out.push_str(&format!(
+        "THE {} MEASURABLE TODAY, BY DOMAIN — nearest to complete first.\n",
+        present.measurable_today
+    ));
     out.push_str("Each row: gates already evidenced, gates needing a mechanism first, then the\n");
     out.push_str("guardrails that are measurement work available today.\n\n");
     out.push_str("  domain  readiness              evd  mech  today  guardrails\n");
@@ -441,8 +481,10 @@ pub fn render(status: &ReleaseStatus) -> String {
     rollup.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(b.0)));
     out.push('\n');
     out.push_str(&format!(
-        "THE SAME 125, BY GUARDRAIL — {} distinct measurements, not 125 jobs.\n",
-        rollup.len()
+        "THE SAME {}, BY GUARDRAIL — {} distinct measurements, not {} jobs.\n",
+        present.measurable_today,
+        rollup.len(),
+        present.measurable_today
     ));
     out.push_str(
         "Widest first: a guardrail owed by many domains is one arm that moves many gates.\n\n",
@@ -455,12 +497,15 @@ pub fn render(status: &ReleaseStatus) -> String {
     out.push('\n');
     out.push_str(&format!(
         "The defensible headline: {} of the {} are blocked by neither the qualification\n\
-         decision nor the board. {} are measurement work available today; {} need a\n\
-         mechanism built first. {} of the {} closable gates carry anything at all.\n",
+         decision nor the board. Of those, {} are measurement work available today; {}\n\
+         need a mechanism built first; and {} sit in domains with NO metric-emitting\n\
+         fixture at all, so they are fixture work with a measurement behind it rather\n\
+         than measurement work. {} of the {} closable gates carry anything at all.\n",
         present.empty,
         status.in_play,
         present.measurable_today,
         present.mechanism_absent,
+        present.no_instrument,
         present.evidenced,
         present.open
     ));
@@ -575,10 +620,28 @@ mod tests {
             "an open gate carries evidence or it does not"
         );
         assert_eq!(
-            present.mechanism_absent + present.measurable_today,
+            present.mechanism_absent + present.measurable_today + present.no_instrument,
             present.empty,
-            "an empty gate is unbuilt or it is merely unmeasured"
+            "an empty gate needs a mechanism, or has no instrument, or is merely unmeasured"
         );
+        // `LE-109`. Without this the `no_instrument` bucket could be zero and
+        // every sum above would still hold — which is exactly the state that
+        // shipped, and it published 56 fixture-building gates as measurement
+        // work available today.
+        assert!(
+            present.no_instrument > 0,
+            "four implemented in-play domains declare no MetricLabel; a zero here means the \
+             instrument check stopped being applied"
+        );
+        for work in &present.per_domain {
+            assert_eq!(
+                work.instrumented,
+                !work.measurable_today.is_empty(),
+                "{}: a domain with no instrument must offer no measurable-today work, and one \
+                 with an instrument and no work would be complete",
+                work.domain
+            );
+        }
         assert!(
             present.refused <= present.empty,
             "a refusal is a subset of the empty gates, never a sibling bucket"

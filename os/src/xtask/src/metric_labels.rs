@@ -522,6 +522,40 @@ fn rust_sources(root: &Path, into: &mut Vec<std::path::PathBuf>) -> Result<(), S
 ///
 /// Returns every finding together rather than the first: a gate that stops at
 /// one failure reports on a prefix of its subject (`LE-77`).
+/// The performance domains some fixture actually declares a metric for.
+///
+/// `LE-109`. `release_status`'s `measurable_today` bucket is defined by
+/// subtraction — empty, and not on the mechanism-absent list — so it silently
+/// asserts that everything left over can be measured today. **It never checked
+/// that an instrument exists.** Four of the ten implemented in-play domains
+/// (`D01`, `D06`, `D08`, `D24`) have no metric-emitting fixture at all, and
+/// their gates are not measurement work: they are fixture-building work with a
+/// measurement behind it.
+///
+/// Derived from the same walk [`check_metric_labels`] performs, over the same
+/// `MetricLabel` declarations, so a domain gains an instrument here at exactly
+/// the moment it gains one there.
+pub fn instrumented_domains(repo_root: &Path) -> Result<BTreeSet<String>, String> {
+    let source_root = repo_root.join("os").join("src");
+    let mut files = Vec::new();
+    rust_sources(&source_root, &mut files)?;
+    files.sort();
+
+    let mut domains = BTreeSet::new();
+    for path in &files {
+        let relative =
+            path.strip_prefix(repo_root).unwrap_or(path).to_string_lossy().replace('\\', "/");
+        if SELF_DOCUMENTING.contains(&relative.as_str()) {
+            continue;
+        }
+        let source = fs::read_to_string(path)
+            .map_err(|error| format!("failed to read {relative}: {error}"))?;
+        let (found, _) = declarations_in(&source, &relative)?;
+        domains.extend(found.into_iter().map(|declaration| declaration.domain));
+    }
+    Ok(domains)
+}
+
 pub fn check_metric_labels(repo_root: &Path) -> Result<MetricLabelSummary, String> {
     let selections = selected_domains(repo_root)?;
     let source_root = repo_root.join("os").join("src");
