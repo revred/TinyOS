@@ -17,6 +17,11 @@ fixture-mmu-fault = []
 # escape hook, and the park loop carries the recorded envelope on the canvas
 # and the wire. A fixture, never a default.
 fixture-measure = []
+# ADR 0005 Q3's arms (12A §0): forwarded so `boot` can name the fixture in
+# its TOS64-RESULT/1 line; the arm code itself lives in
+# `kernel::fixture_measure_arm64` behind the kernel's twin features.
+fixture-qual-control = ["fixture-measure"]
+fixture-qual-campaign = ["fixture-measure"]
 
 [dependencies]
 hal = { path = "../hal" }

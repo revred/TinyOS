@@ -633,7 +633,18 @@ extern "C" fn continue_at_el1() -> ! {
         // symbol; it runs single-core with the vector table installed, which
         // is its documented contract.
         let measured = unsafe { tinyos_arm64_fixture_measure() };
-        ("measure", self_check && measured)
+        // The Q3 arms (12A §0) are the measure fixture with one more arm, so
+        // the verdict line names which image this boot actually was — the
+        // capture is the evidence file, and a campaign boot whose RESULT said
+        // `measure` would leave the record citing an ambiguous line.
+        let fixture_name = if cfg!(feature = "fixture-qual-control") {
+            "qual-control"
+        } else if cfg!(feature = "fixture-qual-campaign") {
+            "qual-campaign"
+        } else {
+            "measure"
+        };
+        (fixture_name, self_check && measured)
     };
     #[cfg(not(feature = "fixture-measure"))]
     let (fixture_name, verdict) = (BOOT_FIXTURE_NAME, self_check);

@@ -1,7 +1,9 @@
 # TEST-P1-13-01-A — One Fact from a Hostile Tree, or a Named Refusal
 
 Status: **In progress — host clauses written Red first 2026-08-07 and Green the same
-session; clauses 8 and 9 await the consumption increment and the board**
+session; clause 8's host half Green later the same day (the `fb_addr=`/`src=` fields
+exist in `display_line`, exact bytes pinned, emitted by every fixture boot); clause
+8's board observation and clause 9 await the bench and the consumption increment**
 Story: [`STORY-P1-13-01`](../stories/STORY-P1-13-01.md)
 Tier: Host unit tests (header discipline, caps, structure walk, refusal taxonomy,
 linked-absence) **plus** a Tier 1 board half deferred to the consumption increment

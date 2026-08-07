@@ -160,6 +160,104 @@ fn phase_fault_latency(source: BoardSource, calibration: &Calibration) -> bool {
     unsafe { FAULT_ITERATIONS_RUN == WARMUP + SAMPLES }
 }
 
+/// `ADR 0005` Q3's positive control (`fixture-qual-control`, `12A` §2 boot 2):
+/// sixteen idle residency windows self-calibrate the PMU rate, then one
+/// window carries a benign `PSCI_VERSION` SMC at its midpoint — the one
+/// documented synchronous EL3 entry this platform has (Q2). The verdict is
+/// the trap clause itself: the probe must **see** the round-trip (the control
+/// window's unaccounted ticks strictly above every idle window's), or this
+/// fixture reports `ok=false` and the campaign is stopped before it starts.
+#[cfg(feature = "fixture-qual-control")]
+fn qual_smc_control<W: Write>(sink: &mut W) -> bool {
+    use crate::qual_campaign::{self, WindowSample};
+
+    const IDLE_WINDOWS: usize = 16;
+    let mut idle = [WindowSample::ZERO; IDLE_WINDOWS];
+    for slot in idle.iter_mut() {
+        let probe = hal_arm64::timer::probe_residency(PMU_PROBE_WINDOW_TICKS);
+        *slot = WindowSample {
+            cntpct_ticks: probe.cntpct_ticks,
+            cntvct_ticks: probe.cntvct_ticks,
+            pmccntr_delta: probe.pmccntr_delta,
+        };
+    }
+    let mut scratch = [0u64; IDLE_WINDOWS];
+    let summary = match qual_campaign::summarize(&idle, &mut scratch, PMU_PROBE_WINDOW_TICKS) {
+        Ok(summary) => summary,
+        Err(refusal) => {
+            let _ = qual_campaign::write_refusal_line(sink, "smc_control", refusal);
+            return false;
+        }
+    };
+
+    let mut version: u64 = 0;
+    let control = hal_arm64::timer::probe_residency_with_event(
+        PMU_PROBE_WINDOW_TICKS,
+        PMU_PROBE_WINDOW_TICKS / 2,
+        || version = hal_arm64::smc::psci_version(),
+    );
+    let sample = WindowSample {
+        cntpct_ticks: control.probe.cntpct_ticks,
+        cntvct_ticks: control.probe.cntvct_ticks,
+        pmccntr_delta: control.probe.pmccntr_delta,
+    };
+    let control_unaccounted = qual_campaign::unaccounted_ticks(&sample, summary.pmu_per_1000_ticks);
+    let seen = control.event_fired && qual_campaign::control_seen(&summary, control_unaccounted);
+    let _ = qual_campaign::write_control_line(
+        sink,
+        version,
+        &summary,
+        control_unaccounted,
+        control.event_fired,
+        seen,
+    );
+    seen
+}
+
+/// `ADR 0005` Q3's campaign (`fixture-qual-campaign`, `12A` §2 boot 3):
+/// 6,000 windows of 540,000 physical ticks — 60 seconds of accumulated
+/// window time at the proven size, satisfying both of `08A` §5's proposals
+/// (≥ 1,000 windows, ≥ 60 s) — summarized to the distribution of unaccounted
+/// physical ticks per window and put on the wire as one `TOS64-QUAL/1
+/// campaign` line. Environment is whatever the bench is (stated by the
+/// capture, not controlled); the bound claim is the *Report's* act, made
+/// against `unaccounted_max`, never this fixture's.
+#[cfg(feature = "fixture-qual-campaign")]
+fn qual_campaign_run<W: Write>(sink: &mut W) -> bool {
+    use crate::qual_campaign::{self, WindowSample};
+
+    const CAMPAIGN_WINDOWS: usize = 6_000;
+    static mut CAMPAIGN_SAMPLES: [WindowSample; CAMPAIGN_WINDOWS] =
+        [WindowSample::ZERO; CAMPAIGN_WINDOWS];
+    static mut CAMPAIGN_SCRATCH: [u64; CAMPAIGN_WINDOWS] = [0; CAMPAIGN_WINDOWS];
+    // SAFETY: single-core, non-reentrant fixture; this function runs once per
+    // boot and is the only reader or writer of these statics.
+    let (samples, scratch) = unsafe {
+        (
+            &mut *core::ptr::addr_of_mut!(CAMPAIGN_SAMPLES),
+            &mut *core::ptr::addr_of_mut!(CAMPAIGN_SCRATCH),
+        )
+    };
+    for slot in samples.iter_mut() {
+        let probe = hal_arm64::timer::probe_residency(PMU_PROBE_WINDOW_TICKS);
+        *slot = WindowSample {
+            cntpct_ticks: probe.cntpct_ticks,
+            cntvct_ticks: probe.cntvct_ticks,
+            pmccntr_delta: probe.pmccntr_delta,
+        };
+    }
+    match qual_campaign::summarize(samples, scratch, PMU_PROBE_WINDOW_TICKS) {
+        Ok(summary) => {
+            let _ = qual_campaign::write_campaign_line(sink, &summary);
+            true
+        }
+        Err(refusal) => {
+            let _ = qual_campaign::write_refusal_line(sink, "campaign", refusal);
+            false
+        }
+    }
+}
+
 /// The envelope sink: every byte to the PL011 (CR-framed by the driver) and,
 /// raw, into the transcript the park loop paints and transmits.
 struct BoardSink {
@@ -445,6 +543,21 @@ fn measure_run() -> bool {
     let samples: &mut Samples<SAMPLES> = unsafe { &mut *core::ptr::addr_of_mut!(SAMPLE_BUFFER) };
 
     let mut ok = conformance_ok;
+
+    // `12A` §0's two Q3 arms, riding the same interrupt-masked region as the
+    // three QUAL lines above — the campaign's own stated loop condition —
+    // and strictly before the measure phases, so a campaign boot's
+    // qualification evidence is on the transcript even if a later phase
+    // fails. Each folds its verdict into this run's `TOS64-RESULT/1`.
+    #[cfg(feature = "fixture-qual-control")]
+    {
+        ok &= qual_smc_control(&mut sink);
+    }
+    #[cfg(feature = "fixture-qual-campaign")]
+    {
+        ok &= qual_campaign_run(&mut sink);
+    }
+
     let mut collected: [Option<Measured>; METRICS] = [const { None }; METRICS];
 
     ok &= phase_reference_loop(&source, &calibration, samples);

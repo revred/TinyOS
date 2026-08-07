@@ -186,6 +186,82 @@ pub fn probe_residency_window<P: PhysicalCounter, V: VirtualCounter, C: VirtualC
     }
 }
 
+/// What [`probe_residency_window_with_event`] observed: the window, plus
+/// whether the mid-window event was actually issued.
+///
+/// `event_fired` is carried rather than assumed because a fired control is
+/// half the ADR's trap clause: a control window whose perturbation was never
+/// injected reads exactly like an idle window, and folding that arm into the
+/// verdict silently would be the instrument vouching for itself.
+#[derive(Debug, Clone, Copy)]
+pub struct EventProbe {
+    /// The window's three counter advances, exactly as
+    /// [`probe_residency_window`] reports them.
+    pub probe: ResidencyProbe,
+    /// Whether the event closure ran (once, and only once).
+    pub event_fired: bool,
+}
+
+/// [`probe_residency_window`] with one event injected mid-window: the Q3
+/// positive control's primitive (`12A` §0, `ADR 0005`'s trap clause).
+///
+/// Spins on the **physical** counter exactly as the plain probe does; the
+/// moment the physical advance reaches `event_at_ticks` the closure runs,
+/// once. An `event_at_ticks` at or past `window_ticks` never fires — reported
+/// honestly in [`EventProbe::event_fired`] rather than fired late, because an
+/// event outside its window would perturb a window other than the one whose
+/// excursion is being measured.
+///
+/// Generic over the register seams so the fire-once-mid-window claim is
+/// host-tested with scripted doubles before an `smc` instruction exists
+/// anywhere near it.
+#[must_use]
+pub fn probe_residency_window_with_event<P, V, C, F>(
+    physical: &P,
+    virtual_counter: &V,
+    pmu: &C,
+    window_ticks: u64,
+    max_spins: u32,
+    event_at_ticks: u64,
+    event: F,
+) -> EventProbe
+where
+    P: PhysicalCounter,
+    V: VirtualCounter,
+    C: VirtualCounter,
+    F: FnOnce(),
+{
+    let pmu_start = pmu.count();
+    let physical_start = physical.count();
+    let virtual_start = virtual_counter.count();
+    let mut event = Some(event);
+    let mut fired = false;
+    // Bounded exactly as the plain probe: a stuck CNTPCT converts to a short
+    // window (with the event honestly unfired), never a hang.
+    let mut spins: u32 = 0;
+    loop {
+        let advance = physical.count().wrapping_sub(physical_start);
+        if advance >= window_ticks || spins >= max_spins {
+            break;
+        }
+        if advance >= event_at_ticks && event_at_ticks < window_ticks {
+            if let Some(event) = event.take() {
+                event();
+                fired = true;
+            }
+        }
+        spins += 1;
+    }
+    EventProbe {
+        probe: ResidencyProbe {
+            pmccntr_delta: pmu.count().wrapping_sub(pmu_start),
+            cntpct_ticks: physical.count().wrapping_sub(physical_start),
+            cntvct_ticks: virtual_counter.count().wrapping_sub(virtual_start),
+        },
+        event_fired: fired,
+    }
+}
+
 /// The generic timer's virtual counter as a [`CycleSource`].
 ///
 /// Generic over the register seam so the same code that runs against `mrs` on
@@ -348,6 +424,28 @@ pub fn probe_residency(window_ticks: u64) -> ResidencyProbe {
         &PmuRegisters,
         window_ticks,
         2_000_000_000,
+    )
+}
+
+/// Enables the PMU and runs [`probe_residency_window_with_event`] against the
+/// real registers — the Q3 positive control's board half, as
+/// [`probe_residency`]'s sibling.
+#[cfg(target_arch = "aarch64")]
+#[must_use]
+pub fn probe_residency_with_event<F: FnOnce()>(
+    window_ticks: u64,
+    event_at_ticks: u64,
+    event: F,
+) -> EventProbe {
+    enable_pmu_cycle_counter();
+    probe_residency_window_with_event(
+        &SystemRegisters,
+        &SystemRegisters,
+        &PmuRegisters,
+        window_ticks,
+        2_000_000_000,
+        event_at_ticks,
+        event,
     )
 }
 
@@ -708,6 +806,76 @@ mod tests {
         // The window never closed; the bound converted a hang into a short
         // window, the same conversion `probe_pmccntr` already makes.
         assert_eq!(probe.cntpct_ticks, 0);
+    }
+
+    // The Q3 positive control's primitive (`12A` §0): the event fires once,
+    // mid-window, and the window still closes on the physical counter.
+    #[test]
+    fn the_event_fires_exactly_once_mid_window() {
+        let pair = OffsetPair::new(10, [0; 8]);
+        let fired = Cell::new(0u32);
+        let probe = probe_residency_window_with_event(
+            &&pair,
+            &&pair,
+            &StepCounter::new(0, 3),
+            100,
+            1_000,
+            50,
+            || fired.set(fired.get() + 1),
+        );
+        assert_eq!(fired.get(), 1, "once, and only once");
+        assert!(probe.event_fired);
+        assert!(probe.probe.cntpct_ticks >= 100, "the window still closes");
+    }
+
+    #[test]
+    fn an_event_at_or_past_the_window_close_never_fires() {
+        let pair = OffsetPair::new(10, [0; 8]);
+        let fired = Cell::new(0u32);
+        let probe = probe_residency_window_with_event(
+            &&pair,
+            &&pair,
+            &StepCounter::new(0, 3),
+            100,
+            1_000,
+            100,
+            || fired.set(fired.get() + 1),
+        );
+        assert_eq!(fired.get(), 0, "an event outside its window perturbs the wrong window");
+        assert!(!probe.event_fired);
+    }
+
+    #[test]
+    fn a_stuck_counter_bounds_the_event_probe_and_reports_the_unfired_event() {
+        let stuck = OffsetPair::new(0, [0; 8]);
+        let fired = Cell::new(0u32);
+        let probe = probe_residency_window_with_event(
+            &&stuck,
+            &&stuck,
+            &StepCounter::new(0, 1),
+            100,
+            16,
+            50,
+            || fired.set(fired.get() + 1),
+        );
+        assert_eq!(probe.probe.cntpct_ticks, 0);
+        assert!(!probe.event_fired, "a window that never opened injected nothing");
+    }
+
+    #[test]
+    fn the_event_probe_reports_the_same_counters_as_the_plain_probe() {
+        let pair = OffsetPair::new(10, [7; 8]);
+        let probe = probe_residency_window_with_event(
+            &&pair,
+            &&pair,
+            &StepCounter::new(0, 3),
+            50,
+            1_000,
+            25,
+            || {},
+        );
+        assert_eq!(probe.probe.cntpct_ticks, probe.probe.cntvct_ticks);
+        assert!(probe.probe.pmccntr_delta > 0);
     }
 
     // Clause 2: the shared conformance suite, unchanged, against the second

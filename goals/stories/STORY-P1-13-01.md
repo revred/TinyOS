@@ -3,7 +3,10 @@
 Status: **In progress — criteria 1, 2 and 3 met 2026-08-07 (the containment decision is
 recorded below: shape 2, with the argument against the quoted texts; the adversarial
 suite was red first and the walker is green on the host with every cap refusing by
-test); criterion 4 awaits the consumption increment and criterion 5 the board.** This
+test); criterion 4a host-Green the same day (`TOS64-DISPLAY/1` gains
+`fb_addr=… src=constant|refused`, pinned by test, riding whichever fixture image boots
+next — `12A` §0's sanctioned increment); criterion 4b (`src=dtb`) awaits the
+consumption increment and criterion 5 the board.** This
 Story exists because
 [`FEAT-P1-13`](../features/FEAT-P1-13.md) cannot be filed without one, and because the
 Feature's own §"The containment question" ends in a decision that must be taken *first*

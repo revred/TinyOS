@@ -41,6 +41,7 @@ pub mod pcie;
 pub mod pl011;
 pub mod rp1_clocks;
 pub mod rp1_gpio;
+pub mod smc;
 pub mod spoor;
 pub mod stat_led;
 pub mod thermal;

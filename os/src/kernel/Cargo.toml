@@ -139,6 +139,14 @@ fixture-actuation-overrun = []
 # the same discipline `fixture-broken-boot` established for the boot path.
 # Never enabled in a real image, and never by CI's own gate step.
 fixture-measure-regression = ["fixture-measure"]
+# ADR 0005 Q3's two arms (12A §0) — measurement instrumentation riding the
+# measure fixture, never a real boot image. `qual-control` injects one benign
+# PSCI_VERSION SMC mid-window and must SEE the EL3 round-trip (the trap
+# clause); `qual-campaign` runs 6,000 windows and puts the distribution of
+# unaccounted physical ticks on the wire. Both imply `fixture-measure` the way
+# `fixture-measure-regression` does: they are that fixture with one more arm.
+fixture-qual-control = ["fixture-measure"]
+fixture-qual-campaign = ["fixture-measure"]
 
 [[bin]]
 name = "kernel"

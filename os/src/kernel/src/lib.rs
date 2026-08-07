@@ -20,6 +20,7 @@ pub mod measure;
 #[cfg(feature = "fixture-measure")]
 pub mod measure_phases;
 pub mod mem;
+pub mod qual_campaign;
 pub mod sched;
 
 /// The AArch64 measurement fixture (`STORY-P1-07-06`) — the board-side twin

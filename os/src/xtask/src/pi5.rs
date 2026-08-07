@@ -93,6 +93,23 @@ pub const PI5_FIXTURES: &[Pi5Fixture] = &[
                   decoded translation-fault frame (far=0x20_0000_0000, level 1) on the canvas \
                   is the pass, and no TOS64-RESULT line is ever emitted",
     },
+    Pi5Fixture {
+        name: "qual-control",
+        feature: Some("fixture-qual-control"),
+        owning_test: "TEST-P1-07-06-A",
+        summary: "ADR 0005 Q3's silicon positive control (12A boot 2): sixteen idle residency \
+                  windows self-calibrate the PMU rate, one window carries a benign PSCI_VERSION \
+                  SMC mid-window, and the probe must SEE the EL3 round-trip — TOS64-QUAL/1 \
+                  smc_control seen=true, or the campaign is stopped",
+    },
+    Pi5Fixture {
+        name: "qual-campaign",
+        feature: Some("fixture-qual-campaign"),
+        owning_test: "TEST-P1-07-06-A",
+        summary: "ADR 0005 Q3's campaign (12A boot 3): 6,000 windows x 10 ms — 60 s accumulated \
+                  window time — summarized to the distribution of unaccounted physical ticks \
+                  per window as one TOS64-QUAL/1 campaign line, verdict riding TOS64-RESULT/1",
+    },
 ];
 
 /// Resolves a `--fixture=` value against [`PI5_FIXTURES`].

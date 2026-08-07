@@ -22,6 +22,11 @@ fixture-mmu-fault = ["hal-arm64/fixture-mmu-fault"]
 # call it — the first hardware measurement. Selected by
 # `xtask pi5 --fixture=measure`.
 fixture-measure = ["hal-arm64/fixture-measure", "kernel/fixture-measure"]
+# ADR 0005 Q3's two arms (12A §0, boots 2 and 3 of the Sitting B script):
+# the measure fixture with the SMC positive control, and with the 60-second
+# campaign. Selected by `xtask pi5 --fixture=qual-control` / `qual-campaign`.
+fixture-qual-control = ["hal-arm64/fixture-qual-control", "kernel/fixture-qual-control"]
+fixture-qual-campaign = ["hal-arm64/fixture-qual-campaign", "kernel/fixture-qual-campaign"]
 
 [dependencies]
 hal-arm64 = { path = "../hal-arm64" }

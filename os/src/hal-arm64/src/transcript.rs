@@ -50,9 +50,10 @@ pub const TRANSCRIPT_CAPACITY: usize = MAX_LINES * MAX_LINE_BYTES;
 /// `residency_probe` — `LE-103`), the `TOS64-RESULT/1` verdict (`LE-110`'s
 /// caveat closed: a capture now carries its own pass/fail), and the
 /// `TOS64-DISPLAY/1` display diagnosis (`LE-98`). The 14 metrics of
-/// 2026-08-06 plus seven such lines put it at **23**, and the five spare
-/// lines are what `LE-89` bought — a metric added without a capacity change
-/// is an ordinary edit rather than a lost board run.
+/// 2026-08-06 plus seven such lines put it at **23**; a `qual-control` or
+/// `qual-campaign` boot (`12A` §0) adds one more `TOS64-QUAL/1` line, 24.
+/// The spare lines are what `LE-89` bought — a metric added without a
+/// capacity change is an ordinary edit rather than a lost board run.
 pub const MAX_LINES: usize = 28;
 
 /// An append-only line buffer with bounded copy-out access.

@@ -306,9 +306,18 @@ pub enum ParkState {
 /// display diagnosis — until 2026-08-07 it reached only the canvas, which is
 /// dark exactly when the answer matters, and the UART, which this bench has
 /// never captured a byte from (`LE-47`). Pure; pinned by the tests.
+///
+/// `canvas_base` is the write target the canvas will actually use, or its
+/// absence (`STORY-P1-13-01` criterion 4a): `src=constant` when the base is
+/// the pinned `board::SIMPLEFB_BASE` a lit canvas proved on this firmware,
+/// `src=refused` when the canvas gate never opened and nothing writes.
+/// `src=dtb` is deliberately not producible yet — it arrives with the
+/// shape-2 consumption increment, and until then the honest vocabulary is
+/// exactly these two words.
 pub fn display_line(
     native: Option<(u32, u32)>,
     fb_granted: bool,
+    canvas_base: Option<u64>,
 ) -> ([u8; LINK_LINE_CAPACITY], usize) {
     let mut line = LineBuilder::new();
     line.push("TOS64-DISPLAY/1 native=");
@@ -322,6 +331,15 @@ pub fn display_line(
     }
     line.push(" fb=");
     line.push(if fb_granted { "granted" } else { "refused" });
+    line.push(" fb_addr=");
+    match canvas_base {
+        Some(base) => {
+            line.push("0x");
+            line.push_hex(base, 16);
+            line.push(" src=constant");
+        }
+        None => line.push("none src=refused"),
+    }
     line.push("\n");
     (line.bytes, line.at)
 }
@@ -1094,19 +1112,29 @@ mod tests {
     // cable): the display outcome must be statable on the wire, because the
     // two channels that carried it — the canvas and the UART — are dark or
     // unproven exactly when the answer matters.
+    //
+    // `STORY-P1-13-01` criterion 4a (2026-08-07): the line also states the
+    // canvas's write target and its justification — `src=constant` is the
+    // honest today-value (a pinned address a lit canvas proved on this
+    // firmware), `src=refused` when the canvas gate never opened, and
+    // `src=dtb` is reserved for the shape-2 consumption increment. The
+    // address rides beside it so the off-board DTB walk has the boot's own
+    // claim to corroborate or indict.
     #[test]
     fn the_display_line_reports_what_the_firmware_said_at_boot() {
-        let (bytes, len) = display_line(Some((1920, 1080)), false);
+        let (bytes, len) = display_line(Some((1920, 1080)), false, Some(0x3F80_0000));
         assert_eq!(
             core::str::from_utf8(&bytes[..len]).unwrap(),
-            "TOS64-DISPLAY/1 native=1920x1080 fb=refused\n"
+            "TOS64-DISPLAY/1 native=1920x1080 fb=refused fb_addr=0x000000003f800000 src=constant\n"
         );
         // `native=none` is the arm the blank-monitor diagnosis turns on: the
-        // firmware could not name a display, so the canvas gate never opened.
-        let (bytes, len) = display_line(None, true);
+        // firmware could not name a display, so the canvas gate never opened
+        // — and the write-target field says so rather than printing an
+        // address nothing will write to.
+        let (bytes, len) = display_line(None, true, None);
         assert_eq!(
             core::str::from_utf8(&bytes[..len]).unwrap(),
-            "TOS64-DISPLAY/1 native=none fb=granted\n"
+            "TOS64-DISPLAY/1 native=none fb=granted fb_addr=none src=refused\n"
         );
     }
 
@@ -1883,7 +1911,12 @@ mod glue {
         // capture can say whether the firmware ever saw a display this boot.
         #[cfg(feature = "fixture-measure")]
         {
-            let (line, len) = display_line(splash.native, fb_granted);
+            // The write target and its justification (`STORY-P1-13-01` 4a):
+            // the canvas's own permission decides — a painting canvas writes
+            // at the pinned constant, a dark one writes nowhere, and the line
+            // says which rather than leaving the capture to infer it.
+            let canvas_base = (!console.is_dark()).then_some(crate::board::SIMPLEFB_BASE);
+            let (line, len) = display_line(splash.native, fb_granted, canvas_base);
             crate::transcript::record(&line[..len]);
         }
         let mut animation = splash.framebuffer.map(|info| {
