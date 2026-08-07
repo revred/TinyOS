@@ -728,6 +728,60 @@ that only ever appears at the moment of the cut.
 That experiment does not exist and nothing above should be read as though it did.
 But the instrument does, and it arrived the same day as the claim.
 
+### Decision: repair is deferred, opt-in later — and what that actually defers
+
+> *We can opt in later to transparent repair — we don't lose much if every
+> mutation is a transaction.*
+
+**Accepted, and the reasoning is right, but the loss should be named precisely
+rather than as "not much", because the two things being traded are different
+kinds.**
+
+With atomicity and detection but no repair, the failure modes split cleanly:
+
+- **A power cut, a crash, a reset mid-write** — fully covered by the transaction.
+  Repair is irrelevant to these, which is the owner's point and it is correct.
+  This is also the *only* failure class this bench can currently produce.
+- **Bit rot, a misdirected write, a device that acknowledges a write it never
+  performed** — not covered, and a transaction cannot cover them, because the
+  commit was honest and the medium or the device lied afterwards.
+
+For that second class the outcome without repair is **detected and refused**: a
+named, fail-closed read error rather than a plausible wrong byte. So the honest
+statement of the trade is:
+
+> **Integrity is kept. Availability is what is deferred.** Without repair the
+> store never returns bad data; it sometimes cannot return data at all.
+
+That is the same trade this project takes everywhere else — refuse rather than
+return something plausible — so deferring repair is consistent rather than a
+concession. Two further reasons it costs nothing *today*: repair is meaningless
+for a **transient** cluster (§5e), which has no persistence obligation at all;
+and persistent clusters do not exist on this board, which cannot read a
+persistent device (§5).
+
+**The one condition that makes "opt in later" genuinely free.** §6 item 1b warns
+that the expensive mistake here is a decision that must be reversed after bytes
+exist, because reversing it is a data migration and this project has no
+migration story. Transparent repair is precisely such a decision **if the block
+pointer has no room for a second copy.** ZFS's ditto blocks work because its
+block pointer carries up to three device addresses from the start, most of them
+usually unused.
+
+So the deferral is free on two conditions, both of which cost nothing now:
+
+1. **The block pointer reserves room for replicas from the first written byte**,
+   even while every cluster writes exactly one copy. Reserved and unused is a
+   field; added later is a format change.
+2. **Detection ships from day one** — the checksum lives in the parent pointer,
+   as §5g's table already assumes. Without it, repair is not merely absent later,
+   it is *impossible* later: you cannot correct what you cannot identify, and a
+   store that cannot tell a good block from a bad one has no safe way to choose
+   between two copies.
+
+With those two, repair arrives later as a per-cluster entitlement (§5e) over an
+unchanged format, which is exactly the shape "opt in later" needs.
+
 ## 6. If this is ever picked up
 
 Not a plan — the conditions under which a plan would be worth writing.
@@ -757,7 +811,16 @@ Not a plan — the conditions under which a plan would be worth writing.
    *bounded*, not *deterministic*. A per-cluster dirty ceiling replaces ZFS's transaction
    groups, whose flush size is unbounded. The allocator COW forces on us is committed
    **inside** the transaction, which is how §4 item 2's no-`fsck` conclusion survives §5c's
-   warning. Files share a cluster when they share a **fate**
+   warning.
+1g. **Transparent repair is deferred, opt-in later** (owner, 2026-08-07) — the deferral
+   trades *availability*, never integrity: without it the store refuses a bad block rather
+   than returning it. **It is free only if the format keeps the option**, and both conditions
+   cost nothing today: the block pointer **reserves room for replicas from the first written
+   byte** even while every cluster writes one copy, and **detection ships from day one**,
+   because repair is impossible later without it — you cannot correct what you cannot
+   identify, nor choose between two copies. Reserved-and-unused is a field; added later is a
+   format change, which is §6 item 1b's one expensive mistake. Files share a cluster when
+   they share a **fate**
    (authority, lifetime, budget, integrity obligation); "related" is how a person
    recognises that, never the criterion itself. **No cross-cluster transactions**, ever:
    a guarantee spanning two clusters is a global commit, and a global commit is the global
