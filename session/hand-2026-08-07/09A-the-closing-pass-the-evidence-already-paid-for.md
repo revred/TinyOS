@@ -88,7 +88,48 @@ untouched, and inter-runner variance across shared `ubuntu-latest` instances
 is still unmeasured. If the push carrying this lands green, it is the first
 fully green `main` since the host suite reached the runner.
 
-## 5. Standing instruction earned
+## 5. Added later still: the assurance tiles were the next embarrassment named, and the register read what it already held
+
+The owner pointed at the release-status tiles. The locked tiles (`0/101`
+assurance-verified, `0/5` qualified) stay locked until the Q3 campaign — that
+is ADR 0005 working, not sparseness. The movable tile was `25/460` with **69
+gates measurable today**, and `LE-104`'s finding was that part of that number
+was not unmeasured but *unread*. This session read it. **Fourteen rows filed,
+every one from evidence already committed — no new measurement, no new
+instrument claimed:**
+
+- **Nine measured** (register at `34/460`, `34/220`): `D07-G10` met (the
+  pool-bench capture that labels its own output, LE-104's clearest instance);
+  `G05` jitter met on silicon for `D04`/`D05`/`D07`/`D11` from the 08-07
+  two-boot envelopes (jitter 0–18 cycles against 72–720-cycle budgets,
+  run-to-run p99 CV ≤ 0.5%, `n_runs=2` and `irq_state=masked` stated);
+  `D04-G06` met with 10× margin; and three honest misses — `D05-G06` at
+  **3.3×** over (selection cost dominates: 1512 of the 1630-cycle round),
+  `D07-G06` at **4.8×**, `D11-G06` at **1.7×** — each stable to ~2 cycles
+  across a power cycle, so the misses are the paths' real costs, and each gate
+  now holds a number for its owner to trade against instead of a blank.
+- **Five refused** (`D03-G01/G02/G03`, `D09-G02/G03`): the old Reports' TCG
+  numbers read against targets and *declined on the instrument*, extending the
+  same-day `D03-G06`/`D09-G01` refusals — run-to-run p99 CV of 22–71% against
+  G05's own 5% bar, plus `D03-G03`/`D09-G03` having no honest p99.9 sample at
+  all. Refusal-in-writing is `LE-104`'s second half and converts silence into
+  a recorded reason.
+- **Deliberately not filed:** `G12` (a label-less inference, LE-104's own
+  caution), `G07`/`G08` (need PMU instruction/branch/cache counters no fixture
+  emits — quoting rdtsc as a PMU is `LE-33`'s defect), `G09`/`G17`/`G18` (need
+  per-feature footprint / cold-start / warm-restart arms that do not exist —
+  those are the *mechanism* bucket wearing measurable-today's name, which is
+  `LE-109`'s stated residue), and Tier 0 TCG absolutes anywhere a silicon
+  number was the alternative — one register must not accept from one row what
+  it refused from another.
+
+Measurable-today drops 69 → **60**, and what remains is now genuinely
+measurement-shaped: mostly `G05`/`G06` twins for `D03`/`D09` awaiting Tier 1
+fixture arms, and the wide `G09`–`G18` families awaiting their harness arms.
+The next cheap tranche is a `D03` metric in the Tier 1 envelope — one fixture
+arm, and the two refusals above name it as their exit.
+
+## 6. Standing instruction earned
 
 **Evidence keyed to a channel dies with the channel; evidence keyed to a fact
 survives it.** Three Stories stalled for ten days because their criteria named

@@ -69,11 +69,11 @@ generator, so this page cannot go stale the way prose does.</p>
 <div class="grid">
   <div class="stat"><div class="n">0&nbsp;/&nbsp;101</div><div class="l">Stories assurance-verified</div><div class="why">Locked at zero by ADR 0005, not lagging. No engineering moves it.</div></div>
   <div class="stat"><div class="n">0&nbsp;/&nbsp;5</div><div class="l">Platforms qualified</div><div class="why">The decision that unlocks everything above. Owner's to take.</div></div>
-  <div class="stat"><div class="n">25&nbsp;/&nbsp;220</div><div class="l">Release gates with evidence, of those that CAN be closed</div><div class="why">Against the raw denominator this reads far better and means less.</div></div>
-  <div class="stat"><div class="n">69</div><div class="l">Gates measurable today</div><div class="why">No board, no decision, no missing mechanism. Ordinary work.</div></div>
+  <div class="stat"><div class="n">34&nbsp;/&nbsp;220</div><div class="l">Release gates with evidence, of those that CAN be closed</div><div class="why">Against the raw denominator this reads far better and means less.</div></div>
+  <div class="stat"><div class="n">60</div><div class="l">Gates measurable today</div><div class="why">No board, no decision, no missing mechanism. Ordinary work.</div></div>
 </div>
 <p class="note"><strong>A gate carrying evidence is a gate somebody measured — never a gate that
-passed.</strong> 6 of the evidence rows are <code>refused</code>: measured, read against the
+passed.</strong> 11 of the evidence rows are <code>refused</code>: measured, read against the
 target, and declined. This page counts evidence, and evidence is not a score.</p>
 <h2>The six founding goals, and the distance to each</h2>
 <p class="note">From <code>SeedMVP.md</code> &sect;3. These are what the roadmap and every Epic exist to serve, so they come before any internal arithmetic.</p>
@@ -107,7 +107,7 @@ target, and declined. This page counts evidence, and evidence is not a score.</p
 </ul>
 <h2>The release-gate ledger</h2>
 <p class="note">460 gates in play (20 in-play domains &times; 23 release guardrails). The raw
-<code>25&nbsp;/&nbsp;460</code> ratio overstates the work remaining and understates the indictment,
+<code>34&nbsp;/&nbsp;460</code> ratio overstates the work remaining and understates the indictment,
 because half the denominator cannot be closed by construction.</p>
 <table>
 <thead><tr><th>Bucket</th><th class="n">Gates</th><th>Who can move it</th></tr></thead>
@@ -115,10 +115,10 @@ because half the denominator cannot be closed by construction.</p>
 <tr><td>Domains whose subsystem does not exist</td><td class="n">230</td><td>Nobody yet — includes all 46 hardware-only gates</td></tr>
 <tr><td><code>G04</code> bound gates, barred by ADR 0005</td><td class="n">10</td><td><strong>The owner</strong>, by qualifying one platform</td></tr>
 <tr><td>Needing a board</td><td class="n">0</td><td>Nobody — derived, and it is zero. The board was never the constraint</td></tr>
-<tr><td>Carrying evidence</td><td class="n">25</td><td>Done (6 of them a reasoned refusal)</td></tr>
+<tr><td>Carrying evidence</td><td class="n">34</td><td>Done (11 of them a reasoned refusal)</td></tr>
 <tr><td>Mechanism not built</td><td class="n">70</td><td>Engineering — load, queueing, isolation, soak</td></tr>
 <tr><td>No metric-emitting fixture exists</td><td class="n">56</td><td>Engineering — build the instrument first</td></tr>
-<tr class="hi"><td>Instrumented, unmeasured, available today</td><td class="n">69</td><td><strong>Anyone, now</strong> — and it is 14 distinct measurements, not 69 jobs</td></tr>
+<tr class="hi"><td>Instrumented, unmeasured, available today</td><td class="n">60</td><td><strong>Anyone, now</strong> — and it is 14 distinct measurements, not 60 jobs</td></tr>
 </tbody>
 </table>
 <h2>The roadmap, against its own Epics</h2>
@@ -156,8 +156,8 @@ because half the denominator cannot be closed by construction.</p>
 <h2>What would move this forward, in order</h2>
 <ol class="next">
   <li><strong>Qualify one platform under ADR 0005.</strong><span>Unlocks 10 <code>G04</code> gates and makes assurance <code>verified</code> reachable for the first time. Q1 is largely held, Q2 is a laptop afternoon of vendor research, Q4 is already written; Q3 needs a corrected instrument (<code>LE-103</code>) and a campaign. <strong>This is the owner's decision and nothing else competes with it.</strong></span></li>
-  <li><strong>Read the numbers already taken.</strong><span>Some gates counted as unmeasured were measured, committed and never read against their target (<code>LE-104</code>). 6 rows are now refusals filed exactly that way. No code, no board — someone reading a committed number against a committed target.</span></li>
-  <li><strong>Measure the 69.</strong><span>14 distinct measurements across 6 instrumented domains, several owed by every one of them, so one harness arm moves many gates. Ordinary work with no dependency.</span></li>
+  <li><strong>Read the numbers already taken.</strong><span>Some gates counted as unmeasured were measured, committed and never read against their target (<code>LE-104</code>). 11 rows are now refusals filed exactly that way. No code, no board — someone reading a committed number against a committed target.</span></li>
+  <li><strong>Measure the 60.</strong><span>14 distinct measurements across 6 instrumented domains, several owed by every one of them, so one harness arm moves many gates. Ordinary work with no dependency.</span></li>
   <li><strong>Build the missing instruments.</strong><span>56 gates sit in domains with no metric-emitting fixture at all (<code>LE-109</code>). These are fixture-building jobs, not measurement jobs, and calling them measurable overstated the position by that much.</span></li>
   <li><strong>Build the absent mechanisms.</strong><span>70 gates describe machinery nobody has written — load, queueing, isolation under competing load, exhaustion containment, soak. You cannot flood a budget that does not exist.</span></li>
 </ol>
