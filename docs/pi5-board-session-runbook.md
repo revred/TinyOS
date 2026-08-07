@@ -62,43 +62,93 @@ The bench device is a **Shelly Plus Plug UK** (Type G), which speaks the Gen2
 JSON-RPC surface: `--dialect shelly-gen2`. No code was needed — the dialect's
 command, readback and the `was_on` trap were already written for it.
 
-**Commission it over its own access point, not through the app**, if you can:
-the plug boots into a `ShellyPlusPlugUK-XXXXXX` WiFi AP whose web UI at
-`http://192.168.33.1` joins it to your network with no account anywhere. The
-phone app works too, but it invites a cloud login that `LE-95` rules out at any
-price. Either way, finish with the four settings below.
+**Commissioned 2026-08-07. Device as verified on the wire:** model
+`SNPL-00112UK`, `gen: 2`, firmware `1.4.4`, `auth_en: false`, at
+**`http://192.168.1.20`** (static). Everything below is what the commissioning
+actually did, including the two places it went wrong, because both were silent
+failures that looked like something else.
+
+**Use the plug's own web UI over its access point, not the phone app.** The
+plug boots into a `ShellyPlusPlugUK-<MAC>` WiFi AP — open, 2.4 GHz — whose web
+UI at `http://192.168.33.1` joins it to the network with no account anywhere.
+On this bench the phone app accepted the WiFi settings twice, on static and
+then on DHCP, and left the plug in AP mode both times: nothing joined, and the
+only symptom was the LED still flashing blue. The web UI worked first try.
+
+**Two traps, both of which cost a round on this bench:**
+
+- **A Windows WiFi scan will lie about the AP being absent.**
+  `netsh wlan show networks` returns cached results and returned a partial list
+  three times running, with no `ShellyPlusPlugUK-*` in it, while the AP was
+  broadcasting at 95% signal. Scan two or three times a few seconds apart
+  before concluding the plug is not in AP mode.
+- **The web UI's static-IP fields can land in the *secondary* network slot.**
+  Gen2 devices hold two client networks, `sta` and `sta1`. After saving, the
+  static address was in `sta1` — `ssid: null`, `enable: false`, unreachable —
+  while the live `sta` was still `ipv4mode: dhcp` on the hub's lease. The
+  device was fully configured and entirely on the wrong slot, and nothing said
+  so. **Always read `GET /rpc/WiFi.GetConfig` back and check that the static
+  address is under `sta`, not `sta1`.** The fix is one call, and it merges
+  (the stored password is not returned by `GetConfig` and is preserved by a
+  partial write — verified on this device):
+
+  ```sh
+  curl -X POST http://<ip>/rpc -H "Content-Type: application/json" \
+    -d '{"id":1,"method":"WiFi.SetConfig","params":{"config":{"sta":{
+         "ipv4mode":"static","ip":"192.168.1.20","netmask":"255.255.255.0",
+         "gw":"192.168.1.254","nameserver":"192.168.1.254"}}}}'
+  curl http://<ip>/rpc/Shelly.Reboot
+  ```
+
+**Do the AP step from a browser, not from an agent session.** A coding agent is
+reached over the internet, so parking the laptop on the plug's AP — which has
+none — cuts the session off mid-commissioning. Join the AP, configure in the
+browser, rejoin the house network, and hand the address back to the agent.
+
+**mDNS is not an escape from pinning the address.** `*.local` did not resolve
+on this laptop, so `--plug` must name an IP and that IP must be fixed.
 
 **The four settings, and why each one is not optional.** Everything after the
 first is a way for a correctly-written fail-safe to be silently defeated by the
 device underneath it, so each is written as the RPC that sets it and the RPC
-that proves it:
+that proves it. On firmware 1.4.4 this unit shipped with settings 3 and 4
+already correct and setting 2 **wrong**:
 
 1. **A fixed address.** DHCP reservation on the router, or a static IP on the
    plug. `board-run --plug=` names a URL; a plug that moves is a bench that
    switches whatever now holds that address. Prove it with
    `http://<ip>/rpc/Shelly.GetDeviceInfo` and check the `id` is the plug you
    mean.
-2. **Power-on state must be `on`.**
-   `http://<ip>/rpc/Switch.SetConfig?id=0&config={"initial_state":"on"}`.
-   This is the important one. `tos64-power`'s first rule is that it never
-   leaves the board off, and it keeps that rule across every path it controls —
-   but it cannot keep it across a *plug* reboot. A firmware update, a brownout
-   or a WiFi-driven restart with `initial_state` at `off` or `restore_last`
-   leaves the board dark with no hand on the bench, which is the exact stall
-   the whole tool exists to remove. Prove it with
-   `Switch.GetConfig?id=0` and read `initial_state` back.
-3. **No auto-off timer.**
+2. **Power-on state must be `on`. This unit shipped `off`.**
+   `Switch.SetConfig?id=0&config={"initial_state":"on"}`.
+   This is the important one and the factory default is the wrong one.
+   `tos64-power`'s first rule is that it never leaves the board off, and it
+   keeps that rule across every path it controls — but it cannot keep it across
+   a *plug* reboot. A firmware update, a brownout or a WiFi-driven restart with
+   `initial_state` at `off` or `restore_last` leaves the board dark with no hand
+   on the bench, which is the exact stall the whole tool exists to remove. Prove
+   it with `Switch.GetConfig?id=0` and read `initial_state` back — do not trust
+   the write, which answers `{"restart_required":false}` either way.
+
+   Set this **before** touching the WiFi configuration. Then a static-address
+   change that strands the plug in AP mode still leaves the board *powered*,
+   which is the difference between a fiddly re-commissioning and a dead bench.
+3. **No auto-off timer.** Shipped `false` on this unit; assert it anyway.
    `Switch.SetConfig?id=0&config={"auto_off":false,"auto_on":false}`.
    An auto-off timer is a countdown to a power cut that no gate in this repo
    can see. `ADR 0005`'s Q3 residency campaign is sixty seconds of accumulated
    window time and future soaks are longer; a plug that helpfully switches off
    after an interval turns a campaign into an unexplained short capture.
-4. **Cloud disabled, not merely unused.**
-   `http://<ip>/rpc/Cloud.SetConfig?config={"enable":false}`. `LE-95` requires
-   local control with no vendor account, and a bench that cannot reboot the
-   board while somebody else's service is down is a new instrument failure —
-   this bench has had five. Bluetooth may stay on for recovery; nothing in the
-   loop uses it.
+4. **Cloud disabled, not merely unused.** Shipped disabled on this unit.
+   `Cloud.SetConfig?config={"enable":false}`; prove with `Cloud.GetConfig`.
+   `LE-95` requires local control with no vendor account, and a bench that
+   cannot reboot the board while somebody else's service is down is a new
+   instrument failure — this bench has had five. Bluetooth may stay on for
+   recovery; nothing in the loop uses it.
+
+The plug's other factory limits are comfortable for this load and were left
+alone: `power_limit` 3000 W, `current_limit` 13 A, `voltage_limit` 280 V,
+against a 27 W PSU.
 
 **Do not enable the plug's "restrict login" (HTTP auth).** `tos64-power` sends
 plain unauthenticated requests and has no credential path, so enabling it turns
@@ -110,12 +160,18 @@ live on a segment where auth is required, that is a code change to
 **Then verify against the real device, in this order.** The exit codes are
 distinct on purpose:
 
+```sh
+# from work/tools/power/ — or the published tos64-power on PATH
+dotnet run --project power.csproj -- --plug http://192.168.1.20 --dialect shelly-gen2 status
+dotnet run --project power.csproj -- --plug http://192.168.1.20 --dialect shelly-gen2 on
+dotnet run --project power.csproj -- --plug http://192.168.1.20 --dialect shelly-gen2 off
+dotnet run --project power.csproj -- --plug http://192.168.1.20 --dialect shelly-gen2 \
+    cycle --off-ms 5000 --on-wait 20
 ```
-tos64-power --plug http://<ip> --dialect shelly-gen2 status   # expect ON, exit 0
-tos64-power --plug http://<ip> --dialect shelly-gen2 off      # then status: OFF
-tos64-power --plug http://<ip> --dialect shelly-gen2 on       # then status: ON
-tos64-power --plug http://<ip> --dialect shelly-gen2 cycle --off-ms 5000 --on-wait 20
-```
+
+`status`, `on` and a confirming `status` were run against the real device on
+2026-08-07 and answered `plug: OFF` / `On: confirmed by readback (ON)` /
+`plug: ON`, all exit 0 — the first time this tool has driven anything.
 
 `0` done and confirmed · `1` refused by a guard · `2` usage · `3` **UNKNOWN —
 asked, not confirmed** · `4` **THE BOARD MAY BE OFF**. A `3` or a `4` is a
