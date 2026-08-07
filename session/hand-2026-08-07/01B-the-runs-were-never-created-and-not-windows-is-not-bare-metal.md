@@ -238,15 +238,39 @@ suite now runs on Linux, so the next instance announces itself as a crash
 rather than as nothing at all. That is a real improvement over the state
 `LE-100` closed in, and it is not the same thing as the class being closed.
 
+## 2c. `host-tests` is green
+
+Run [`31163298610`](https://github.com/revred/TinyOS/actions/runs/31163298610):
+
+```text
+LE-100 — the workspace host test suite  ->  success
+1231 host tests, 0 failed, 1 ignored, across 8 crates
+```
+
+**This is the first time in this project's history that its host test suite has
+passed on a runner.** `LE-100` was closed on the sentence *a gate is only as
+strong as the weakest place it is actually executed*; as of this run its
+mechanism has executed there. Two rounds were needed, and neither defect was
+visible from this bench — that is the whole content of `LE-102`.
+
+Two expectations recorded above were wrong and are corrected here rather than
+left standing. §5 item 1 predicted "another round, not a green tick" — there
+was no third round. And §2's residue #3 worried that the `no_main` `[[bin]]`s
+would fail to link under `cargo test` on Linux; they do not.
+
 ## 3. Which red was whose, on run 31161538569
 
 | job | verdict | whose |
 | --- | --- | --- |
 | `Format, lint, size, assurance, missing_docs` | success | — |
 | `governance-fixture-smoke-test` | success | — |
-| `host-tests` | **failure** | §2 above — fixed here |
+| `host-tests` | **failure** | §2 — the `_start` collision, fixed here |
 | `kernel-boot-x86_64` | **failure** | `LE-23`, owner decision |
 | `record-timing-baseline` | skipped | `workflow_dispatch` only |
+
+On `31162749587` (§2's fix): `host-tests` failed again, on §2b's `SIGSEGV`.
+On `31163298610` (§2b's fix): `host-tests` **success**, 1231 tests. Three runs,
+two defects, both of them invisible to every gate on this bench.
 
 `kernel-boot-x86_64` failed exactly where `01A` said it would, at
 `check-timing-regression`, with
@@ -275,13 +299,12 @@ design surface.
 
 ## 5. For the next session
 
-1. **Read the newest run first, and expect `host-tests` to still be red.**
-   Two rounds of this defect have been fixed on two runs; each fix let the
-   suite get further and reveal the next instance. `exec` crashed at test six
-   of eighty-six, so **eighty of `exec`'s tests and every test in every crate
-   after it have still never executed on Linux.** The honest expectation is
-   another round, not a green tick. §2b names where the remaining instances
-   live.
+1. **`main` is red, and the only red left is `LE-23`.** `check-timing-regression`
+   in `kernel-boot-x86_64` refuses three unbaselined spoored metrics. It is an
+   owner decision, declined by four independent sessions, and
+   `--update-baseline` is not the fix — see `01A` and `ci.yml`'s own comment.
+   Everything else on run `31163298610` is green, `host-tests` included. **Red
+   for any other reason is new and is yours.**
 2. **`origin/main` and `HEAD` are not the same thing.** This session's entire
    §1 existed because a handover asserted a push it had not made. `git
    ls-remote origin main` is one command and it is the only one that answers.
@@ -290,7 +313,11 @@ design surface.
 
 ---
 
-**Written 2026-08-07.** Loose ends: `LE-102` raised and closed. Gates run:
+**Written 2026-08-07.** Loose ends: `LE-102` raised and closed. Runner
+evidence: `31161538569` (run creation proven healthy, `host-tests` red at the
+linker), `31162749587` (linker clear, `host-tests` red on `SIGSEGV`),
+`31163298610` (**`host-tests` green, 1231 tests** — the first passing host suite
+on a runner in this project's history). Gates run:
 `cargo fmt --all --check`, `cargo test --workspace`,
 `cargo run -p xtask -- check-guest-images` (22 x86_64 Tier 0 binaries),
 `cargo run -p xtask -- check-boot-images` (3 AArch64 variants),
