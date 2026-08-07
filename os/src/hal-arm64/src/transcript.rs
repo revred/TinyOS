@@ -44,11 +44,15 @@ pub const TRANSCRIPT_CAPACITY: usize = MAX_LINES * MAX_LINE_BYTES;
 
 /// Most lines the transcript will index — envelope plus chatter headroom.
 ///
-/// The envelope is `BEGIN` + one per metric + `END`, plus the fixture's two
-/// trailing chatter lines: the 14 metrics of 2026-08-06 put it at **18**, and
-/// the six spare lines are what `LE-89` bought — a metric added without a
-/// capacity change is now an ordinary edit rather than a lost board run.
-pub const MAX_LINES: usize = 24;
+/// The envelope is `BEGIN` + one per metric + `END`, plus the fixture's
+/// chatter lines: two trailing ones since 2026-08-06 and, since 2026-08-07,
+/// the three `ADR 0005` qualification lines (`boot_entry`, `counter_split`,
+/// `residency_probe` — `LE-103`) and the `TOS64-RESULT/1` verdict (`LE-110`'s
+/// caveat closed: a capture now carries its own pass/fail). The 14 metrics of
+/// 2026-08-06 plus six such lines put it at **22**, and the six spare lines
+/// are what `LE-89` bought — a metric added without a capacity change is an
+/// ordinary edit rather than a lost board run.
+pub const MAX_LINES: usize = 28;
 
 /// An append-only line buffer with bounded copy-out access.
 pub struct TranscriptBuffer {

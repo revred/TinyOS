@@ -1106,6 +1106,24 @@ internal static class Program
             rotated.AddRange(envelope.GetRange(0, begin));
             envelope = rotated;
         }
+        // TOS64-QUAL/1 (2026-08-07): the ADR 0005 qualification lines — entry
+        // level, firmware CNTVOFF, counter split, residency probe — ride the
+        // same transcript cycle and belong in the same evidence file. They are
+        // appended rather than rotated for the RESULT reason: statements about
+        // the boot, not positional elements of the envelope. `xtask parse-meas`
+        // ignores them (its sentinel is `TOS64-MEAS`), so carrying them cannot
+        // perturb the envelope parse. Deduplicated because a capture window
+        // longer than one transcript cycle sees each line more than once, and
+        // a repeated statement adds nothing a reader can use.
+        var qual = new List<string>();
+        foreach (var line in text)
+        {
+            if (line.StartsWith("TOS64-QUAL/1", StringComparison.Ordinal) && !qual.Contains(line))
+            {
+                qual.Add(line);
+            }
+        }
+        envelope.AddRange(qual);
         envelope.AddRange(
             text.FindAll(line => line.StartsWith("TOS64-RESULT/1", StringComparison.Ordinal)));
         return envelope;

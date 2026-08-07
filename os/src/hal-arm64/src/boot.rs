@@ -224,6 +224,48 @@ core::arch::global_asm!(
     entry = sym entry,
 );
 
+/// The raw `CurrentEL` read at [`entry`], kept so the fixture can put the
+/// entry level on the *wire* — the UART report at entry predates the
+/// transcript, and `LE-47` demoted serial to a convenience, so `ADR 0005`
+/// Q1's "the exception level TinyOS is entered at" was reaching only the
+/// channel nobody can capture. `u64::MAX` is the never-stored sentinel: no
+/// `CurrentEL` read can produce it (bits outside [3:2] are RES0).
+#[cfg(target_arch = "aarch64")]
+static ENTERED_CURRENT_EL: core::sync::atomic::AtomicU64 =
+    core::sync::atomic::AtomicU64::new(u64::MAX);
+
+/// `CNTVOFF_EL2` as firmware left it, read at EL2 immediately before the
+/// drop zeroes it — evidence for `ADR 0005` Q2/Q3 about what the world above
+/// EL1 had configured, captured at the only moment this kernel can read the
+/// register at all.
+#[cfg(target_arch = "aarch64")]
+static FIRMWARE_CNTVOFF: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// Whether [`FIRMWARE_CNTVOFF`] was actually read — false when entry was not
+/// at EL2, where the register is not ours to read.
+#[cfg(target_arch = "aarch64")]
+static FIRMWARE_CNTVOFF_READ: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
+
+/// The raw `CurrentEL` value [`entry`] observed.
+#[cfg(target_arch = "aarch64")]
+#[must_use]
+pub fn entered_current_el() -> u64 {
+    ENTERED_CURRENT_EL.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+/// The `CNTVOFF_EL2` firmware handed over, or `None` when entry was not at
+/// EL2 and the register could not be read.
+#[cfg(target_arch = "aarch64")]
+#[must_use]
+pub fn firmware_cntvoff() -> Option<u64> {
+    if FIRMWARE_CNTVOFF_READ.load(core::sync::atomic::Ordering::Relaxed) {
+        Some(FIRMWARE_CNTVOFF.load(core::sync::atomic::Ordering::Relaxed))
+    } else {
+        None
+    }
+}
+
 /// The Rust side of the boot stub.
 ///
 /// **Unverified.** Never executed; see this module's documentation.
@@ -244,6 +286,9 @@ pub extern "C" fn entry(x0: u64, x1: u64, x2: u64, x3: u64) -> ! {
     }
 
     let handoff = Handoff { x0, x1, x2, x3, current_el };
+    // Kept for the fixture's wire report: the UART line below predates the
+    // transcript, and the transcript is the channel that gets captured.
+    ENTERED_CURRENT_EL.store(current_el, core::sync::atomic::Ordering::Relaxed);
 
     // TEST-P1-07-08-A clause 3: the lamp lights before the UART is
     // configured. Execution announces itself through the one device behind
@@ -297,6 +342,23 @@ pub extern "C" fn entry(x0: u64, x1: u64, x2: u64, x3: u64) -> ! {
 /// raised between here and there is a silent hang.
 #[cfg(target_arch = "aarch64")]
 unsafe fn drop_to_el1() -> ! {
+    // What did firmware leave in `CNTVOFF_EL2`? Read before the zeroing
+    // below destroys the answer — this is the one moment this kernel is at
+    // EL2 and the register is readable at all, and the value is `ADR 0005`
+    // Q2/Q3 evidence about the world above EL1.
+    // SAFETY: the caller established EL2; `CNTVOFF_EL2` is EL2-readable with
+    // no side effect.
+    let firmware_cntvoff: u64;
+    unsafe {
+        core::arch::asm!(
+            "mrs {value}, cntvoff_el2",
+            value = out(reg) firmware_cntvoff,
+            options(nomem, nostack, preserves_flags),
+        );
+    }
+    FIRMWARE_CNTVOFF.store(firmware_cntvoff, core::sync::atomic::Ordering::Relaxed);
+    FIRMWARE_CNTVOFF_READ.store(true, core::sync::atomic::Ordering::Relaxed);
+
     // SAFETY: the caller established EL2 and a stack; every register written
     // below is EL2-owned and this is the only writer.
     unsafe {
@@ -580,6 +642,18 @@ extern "C" fn continue_at_el1() -> ! {
     // driven by, emitted last so it vouches for every claim above it. This is
     // the line that turns a capture into a pass/fail rather than a transcript.
     let _ = report_result(&uart, fixture_name, verdict);
+    // And onto the transcript (2026-08-07): until here the verdict reached
+    // only the UART, once — so every passive wire capture parsed as an
+    // envelope with "no usable verdict line" and could close nothing
+    // (`LE-110`'s caveat, `LE-46`'s half-an-instrument shape). Recording it
+    // beside the envelope makes every capture of the cycling transcript
+    // carry the line that turns it into a pass/fail.
+    #[cfg(feature = "fixture-measure")]
+    {
+        crate::transcript::record(b"TOS64-RESULT/1 fixture=");
+        crate::transcript::record(fixture_name.as_bytes());
+        crate::transcript::record(if verdict { b" ok=true\n" } else { b" ok=false\n" });
+    }
 
     // `STORY-P1-07-07`: the boot splash, strictly after the verdict — the
     // screen is UX, the serial line is evidence, and the order is the

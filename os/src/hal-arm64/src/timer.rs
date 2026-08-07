@@ -83,6 +83,109 @@ pub trait CounterFrequency {
     fn hertz(&self) -> u64;
 }
 
+/// Reads the generic timer's **physical** count (`CNTPCT_EL0` on hardware).
+///
+/// The sibling `LE-103` was filed for. A separate trait rather than a second
+/// method on [`VirtualCounter`], for the same interface-segregation reason
+/// that trait is separate from [`CounterFrequency`] — and because the two
+/// registers are not interchangeable: `CNTVCT_EL0` is `CNTPCT_EL0` minus
+/// `CNTVOFF_EL2`, so an instrument that must detect a moved offset (`ADR 0005`
+/// Q3) needs the physical read *by type*, where handing it the virtual one is
+/// a compile error rather than a probe blind to exactly what it measures.
+pub trait PhysicalCounter {
+    /// Reads the current count. Same contract as [`VirtualCounter::count`]:
+    /// the register's own reading, unmodified.
+    fn count(&self) -> u64;
+}
+
+/// One paired read of the physical and virtual counters.
+///
+/// The pair is the `Q3` primitive: their difference is `CNTVOFF_EL2` as seen
+/// from NS-EL1, the register the architecture forbids NS-EL1 to read
+/// directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CounterSplit {
+    /// The physical count (`CNTPCT_EL0`).
+    pub cntpct: u64,
+    /// The virtual count (`CNTVCT_EL0`), read immediately after.
+    pub cntvct: u64,
+}
+
+impl CounterSplit {
+    /// The virtual offset the pair implies: `cntpct - cntvct`, wrapping.
+    ///
+    /// Wrapping rather than saturating because a virtual counter *ahead* of
+    /// the physical one (a negative `CNTVOFF_EL2`) is a real configuration,
+    /// and clamping it to zero would be the exact laundering this module's
+    /// counter contracts forbid.
+    #[must_use]
+    pub const fn virtual_offset(&self) -> u64 {
+        self.cntpct.wrapping_sub(self.cntvct)
+    }
+}
+
+/// Reads both counters back to back, physical first.
+///
+/// The reads are not atomic — the counter advances between them by however
+/// long the second `mrs` takes — so the derived offset is exact only to
+/// within that skew, which at 54 MHz is well under one tick.
+pub fn read_counter_split<P: PhysicalCounter, V: VirtualCounter>(
+    physical: &P,
+    virtual_counter: &V,
+) -> CounterSplit {
+    CounterSplit { cntpct: physical.count(), cntvct: virtual_counter.count() }
+}
+
+/// What the residency probe observed over one window.
+///
+/// Three counters over the same interval. `pmccntr_delta` is the work-rate
+/// reference, `cntpct_ticks` is the window as the un-offsettable physical
+/// counter saw it, and `cntvct_ticks` is the same window as the virtual
+/// counter tells it — so `cntpct_ticks - cntvct_ticks` is any `CNTVOFF_EL2`
+/// movement that happened *inside the window*, the phenomenon `LE-103`
+/// records the previous probe as blind to by construction.
+#[derive(Debug, Clone, Copy)]
+pub struct ResidencyProbe {
+    /// `PMCCNTR_EL0`'s advance across the window.
+    pub pmccntr_delta: u64,
+    /// The window's width in **physical** counter ticks.
+    pub cntpct_ticks: u64,
+    /// The same window in **virtual** counter ticks.
+    pub cntvct_ticks: u64,
+}
+
+/// Spins until the **physical** counter has advanced `window_ticks`, bounded
+/// by `max_spins`, and reports all three counters' advances.
+///
+/// The window is anchored to `CNTPCT_EL0` deliberately: a probe windowed on
+/// the virtual counter hands the length of its own window to whatever owns
+/// `CNTVOFF_EL2`, which is `LE-103`'s finding stated as code. Generic over
+/// the register seams so the anchoring claim is host-tested with scripted
+/// doubles before the registers ever answer.
+#[must_use]
+pub fn probe_residency_window<P: PhysicalCounter, V: VirtualCounter, C: VirtualCounter>(
+    physical: &P,
+    virtual_counter: &V,
+    pmu: &C,
+    window_ticks: u64,
+    max_spins: u32,
+) -> ResidencyProbe {
+    let pmu_start = pmu.count();
+    let physical_start = physical.count();
+    let virtual_start = virtual_counter.count();
+    // Bounded: a stuck CNTPCT converts to a short window, not a hang — the
+    // same conversion `probe_pmccntr` makes for a stuck CNTVCT.
+    let mut spins: u32 = 0;
+    while physical.count().wrapping_sub(physical_start) < window_ticks && spins < max_spins {
+        spins += 1;
+    }
+    ResidencyProbe {
+        pmccntr_delta: pmu.count().wrapping_sub(pmu_start),
+        cntpct_ticks: physical.count().wrapping_sub(physical_start),
+        cntvct_ticks: virtual_counter.count().wrapping_sub(virtual_start),
+    }
+}
+
 /// The generic timer's virtual counter as a [`CycleSource`].
 ///
 /// Generic over the register seam so the same code that runs against `mrs` on
@@ -207,6 +310,45 @@ impl VirtualCounter for SystemRegisters {
         }
         value
     }
+}
+
+#[cfg(target_arch = "aarch64")]
+impl PhysicalCounter for SystemRegisters {
+    fn count(&self) -> u64 {
+        let value: u64;
+        // SAFETY: `CNTPCT_EL0` is readable at EL1 once `CNTHCTL_EL2.EL1PCTEN`
+        // is set, which the boot stub's drop does (`hal_arm64::boot`,
+        // `orr x0, x0, #3` on `cnthctl_el2`); a refused read is a synchronous
+        // exception through `STORY-P1-07-02`'s handler, not a hang. The `isb`
+        // orders the read exactly as `CNTVCT_EL0`'s does — for the register
+        // `ADR 0005` Q3 is stated against, an unordered read would be the
+        // same class of silent corruption.
+        unsafe {
+            core::arch::asm!(
+                "isb",
+                "mrs {value}, cntpct_el0",
+                value = out(reg) value,
+                options(nostack, preserves_flags),
+            );
+        }
+        value
+    }
+}
+
+/// Enables the PMU and runs [`probe_residency_window`] against the real
+/// registers, windowed on the physical counter — the `Q3` instrument
+/// `LE-103` asked for, as `probe_pmccntr`'s sibling.
+#[cfg(target_arch = "aarch64")]
+#[must_use]
+pub fn probe_residency(window_ticks: u64) -> ResidencyProbe {
+    enable_pmu_cycle_counter();
+    probe_residency_window(
+        &SystemRegisters,
+        &SystemRegisters,
+        &PmuRegisters,
+        window_ticks,
+        2_000_000_000,
+    )
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -336,15 +478,20 @@ pub fn probe_pmccntr(window_ticks: u64) -> PmuProbe {
     enable_pmu_cycle_counter();
     let timer = SystemRegisters;
     let pmu = PmuRegisters;
+    // Disambiguated by trait since `SystemRegisters` reads the physical
+    // counter too (`LE-103`): this probe's window is the VIRTUAL counter's,
+    // which is correct *here* — it serves `LE-15`'s rate decision, not Q3.
     let pmu_start = pmu.count();
-    let started = timer.count();
+    let started = VirtualCounter::count(&timer);
     // Bounded: the loop ends when the window closes or the iteration bound
     // trips (a stuck CNTVCT converts to a short window, not a hang).
     let mut spins: u32 = 0;
-    while timer.count().wrapping_sub(started) < window_ticks && spins < 2_000_000_000 {
+    while VirtualCounter::count(&timer).wrapping_sub(started) < window_ticks
+        && spins < 2_000_000_000
+    {
         spins += 1;
     }
-    let window = timer.count().wrapping_sub(started);
+    let window = VirtualCounter::count(&timer).wrapping_sub(started);
     PmuProbe { pmccntr_delta: pmu.count().wrapping_sub(pmu_start), window_ticks: window }
 }
 
@@ -451,6 +598,116 @@ mod tests {
         fn hertz(&self) -> u64 {
             self.0
         }
+    }
+
+    /// A physical-counter double that shares its advance script with a
+    /// virtual-counter double, minus a scripted offset — the architecture's
+    /// own relation, `CNTVCT_EL0 = CNTPCT_EL0 - CNTVOFF_EL2`, as a test rig.
+    /// `offset` can change between reads, which is exactly the move `LE-103`
+    /// says a world above NS-EL1 would make.
+    struct OffsetPair {
+        physical: Cell<u64>,
+        /// The physical value most recently *returned* — the instant a
+        /// virtual read that follows a physical read observes.
+        last: Cell<u64>,
+        step: u64,
+        offsets: [u64; 8],
+        reads: Cell<usize>,
+    }
+
+    impl OffsetPair {
+        fn new(step: u64, offsets: [u64; 8]) -> Self {
+            OffsetPair {
+                physical: Cell::new(0),
+                last: Cell::new(0),
+                step,
+                offsets,
+                reads: Cell::new(0),
+            }
+        }
+    }
+
+    impl PhysicalCounter for &OffsetPair {
+        fn count(&self) -> u64 {
+            let value = self.physical.get();
+            self.physical.set(value + self.step);
+            self.last.set(value);
+            value
+        }
+    }
+
+    impl VirtualCounter for &OffsetPair {
+        fn count(&self) -> u64 {
+            let index = self.reads.get();
+            self.reads.set(index + 1);
+            let offset = self.offsets[index.min(self.offsets.len() - 1)];
+            // The virtual counter is the physical counter seen through the
+            // offset at the same instant as the adjacent physical read; it
+            // does not advance the shared clock itself.
+            self.last.get().wrapping_sub(offset)
+        }
+    }
+
+    // `LE-103`: the split is the physical counter minus the virtual one —
+    // the quantity `CNTVOFF_EL2` holds, recovered from NS-EL1's own reads.
+    #[test]
+    fn the_counter_split_reports_the_virtual_offset() {
+        let split = CounterSplit { cntpct: 1_000, cntvct: 400 };
+        assert_eq!(split.virtual_offset(), 600);
+        // A virtual counter AHEAD of the physical one is a negative offset;
+        // wrapping arithmetic keeps it faithful rather than clamping to zero.
+        let ahead = CounterSplit { cntpct: 400, cntvct: 1_000 };
+        assert_eq!(ahead.virtual_offset(), 600u64.wrapping_neg());
+    }
+
+    #[test]
+    fn reading_the_split_takes_both_registers_unmodified() {
+        struct FixedPhysical(u64);
+        impl PhysicalCounter for FixedPhysical {
+            fn count(&self) -> u64 {
+                self.0
+            }
+        }
+        let split = read_counter_split(&FixedPhysical(5_400), &StepCounter::new(5_100, 0));
+        assert_eq!(split.cntpct, 5_400);
+        assert_eq!(split.cntvct, 5_100);
+        assert_eq!(split.virtual_offset(), 300);
+    }
+
+    // `LE-103`'s defect, demonstrated in the direction that matters: the
+    // residency window is anchored to the PHYSICAL counter, so an offset that
+    // moves mid-window cannot shorten the window — it shows up as the virtual
+    // counter's advance disagreeing with the physical one's.
+    #[test]
+    fn a_moving_virtual_offset_is_visible_not_absorbed() {
+        // The offset grows by 40 ticks between the probe's two virtual reads:
+        // a hidden residency of 40 physical ticks, exactly what `CNTVOFF_EL2`
+        // movement looks like from NS-EL1.
+        let pair = OffsetPair::new(10, [0, 40, 40, 40, 40, 40, 40, 40]);
+        let probe = probe_residency_window(&&pair, &&pair, &StepCounter::new(0, 7), 100, 1_000);
+        assert!(probe.cntpct_ticks >= 100, "the window is the physical counter's");
+        assert_eq!(
+            probe.cntpct_ticks.wrapping_sub(probe.cntvct_ticks),
+            40,
+            "the moved offset must appear as the two advances disagreeing"
+        );
+    }
+
+    #[test]
+    fn an_honest_pair_of_counters_advances_in_lockstep() {
+        let pair = OffsetPair::new(10, [7; 8]);
+        let probe = probe_residency_window(&&pair, &&pair, &StepCounter::new(0, 3), 50, 1_000);
+        assert_eq!(probe.cntpct_ticks, probe.cntvct_ticks);
+        assert!(probe.pmccntr_delta > 0, "the PMU advanced across the window");
+    }
+
+    #[test]
+    fn a_stuck_physical_counter_trips_the_spin_bound_rather_than_hanging() {
+        let stuck = OffsetPair::new(0, [0; 8]);
+        let probe = probe_residency_window(&&stuck, &&stuck, &StepCounter::new(0, 1), 100, 16);
+        // The window never closed; the bound converted a hang into a short
+        // window, the same conversion `probe_pmccntr` already makes.
+        assert_eq!(probe.cntpct_ticks, 0);
     }
 
     // Clause 2: the shared conformance suite, unchanged, against the second

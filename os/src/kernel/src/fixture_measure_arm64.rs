@@ -365,6 +365,79 @@ fn measure_run() -> bool {
         }
     };
 
+    // `ADR 0005` Q1 and `LE-103`: the qualification lines, onto the channel
+    // that actually gets captured. The entry level reached only the UART
+    // until 2026-08-07, and the only Q3-shaped probe read the one counter
+    // `CNTVOFF_EL2` can lie through; these three lines are the corrected
+    // instrument's first output, interrupt-masked like everything here —
+    // exactly the loop condition Q3 states.
+    {
+        use hal_arm64::exception_level::ExceptionLevel;
+        let entered_raw = hal_arm64::boot::entered_current_el();
+        let entered = match ExceptionLevel::decode(entered_raw) {
+            Some(level) => level.as_str(),
+            None => "unknown",
+        };
+        let now_raw: u64;
+        // SAFETY: `CurrentEL` is readable at EL1 with no enablement and no
+        // side effect — the same read `hal_arm64::boot::entry` opens with.
+        unsafe {
+            core::arch::asm!(
+                "mrs {value}, CurrentEL",
+                value = out(reg) now_raw,
+                options(nomem, nostack, preserves_flags),
+            );
+        }
+        let now = match ExceptionLevel::decode(now_raw) {
+            Some(level) => level.as_str(),
+            None => "unknown",
+        };
+        // `TOS64-QUAL/1` rather than fixture chatter, deliberately: these
+        // lines are the qualification record's wire evidence, `timing.rs`'s
+        // SENTINEL (`TOS64-MEAS`) never matches them so the envelope parser
+        // is untouched, and ti64dink's harvest carries `TOS64-QUAL/1` into
+        // the same text file as the envelope.
+        match hal_arm64::boot::firmware_cntvoff() {
+            Some(cntvoff) => {
+                let _ = writeln!(
+                    sink,
+                    "TOS64-QUAL/1 boot_entry current_el={entered} raw={entered_raw:#018x} \
+                     now_at={now} firmware_cntvoff={cntvoff:#018x}"
+                );
+            }
+            None => {
+                // Entry was not at EL2, so the register was never ours to
+                // read — said in words rather than as a zero that would read
+                // as a measurement.
+                let _ = writeln!(
+                    sink,
+                    "TOS64-QUAL/1 boot_entry current_el={entered} raw={entered_raw:#018x} \
+                     now_at={now} firmware_cntvoff=unread"
+                );
+            }
+        }
+
+        let split = hal_arm64::timer::read_counter_split(
+            &hal_arm64::timer::SystemRegisters,
+            &hal_arm64::timer::SystemRegisters,
+        );
+        let _ = writeln!(
+            sink,
+            "TOS64-QUAL/1 counter_split cntpct={} cntvct={} virtual_offset={}",
+            split.cntpct,
+            split.cntvct,
+            split.virtual_offset()
+        );
+
+        let residency = hal_arm64::timer::probe_residency(PMU_PROBE_WINDOW_TICKS);
+        let _ = writeln!(
+            sink,
+            "TOS64-QUAL/1 residency window_ticks={PMU_PROBE_WINDOW_TICKS} \
+             cntpct_ticks={} cntvct_ticks={} pmccntr_delta={}",
+            residency.cntpct_ticks, residency.cntvct_ticks, residency.pmccntr_delta
+        );
+    }
+
     let calibration = Calibration::measure(&source, CALIBRATION_SAMPLES);
 
     // SAFETY: single-threaded, non-reentrant fixture; every phase below
