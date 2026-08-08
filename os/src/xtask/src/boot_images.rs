@@ -128,6 +128,14 @@ pub const HOST_LINT_TARGETS: &[HostLintTarget] = &[
     HostLintTarget { package: "exec", bin_only: false },
     HostLintTarget { package: "shell", bin_only: false },
     HostLintTarget { package: "motion", bin_only: false },
+    // `STORY-P1-09-18` gave this crate its first unit tests — the wire shell's
+    // grant set, its seed and its stack budget — and it was not in this list,
+    // so nothing local linted them and a `clippy::assertions_on_constants`
+    // reached CI past a green local gate set (run 31256380768). `bin_only`
+    // because it genuinely has no library: on a non-AArch64 host it is an
+    // inert `main` stub, which builds everywhere, so `--all-targets` is safe
+    // here in a way it is not for the `cfg(not(windows))` fixture bins above.
+    HostLintTarget { package: "pi5-image", bin_only: true },
     HostLintTarget { package: "xtask", bin_only: true },
 ];
 
@@ -208,14 +216,70 @@ mod tests {
         assert!(linted("shell"));
     }
 
-    /// `kernel`'s bin is the x86_64 Tier 0 guest and does not build on a Windows
-    /// host. Scoping it is what lets the rest of the list run at all; widening
-    /// `lib_only` to anything else would be hiding a failure rather than
-    /// scoping a lint.
+    /// Every workspace member this gate is responsible for is in the list.
+    ///
+    /// **Written after run 31256380768 went red on the runner and green here**
+    /// (2026-08-08). `STORY-P1-09-18` put unit tests into `pi5-image` for the
+    /// first time — the wire shell's grant set, its seeding and its stack
+    /// budget — and `pi5-image` was **not in this list**, so nothing local
+    /// linted a line of them. A `clippy::assertions_on_constants` in one of
+    /// those tests reached CI past a fully green local gate set.
+    ///
+    /// That is `LE-72`'s lesson for the third time and it is always the same
+    /// shape: **the defect is never in the compiler, it is in the list.** A
+    /// crate that gains its first test is a crate that has just entered this
+    /// gate's remit, and nothing said so. Enumerated against the workspace
+    /// rather than hand-listed, so the fourth time cannot happen either.
     #[test]
-    fn only_the_bin_only_crate_is_marked_as_one() {
+    fn every_crate_this_gate_is_responsible_for_is_in_the_list() {
+        // The workspace members whose host lint is this gate's job. `fdt-walk`
+        // and `os` are absent deliberately and are named here so their absence
+        // reads as a decision rather than as the same oversight again.
+        const OWNED: &[&str] = &[
+            "hal",
+            "hal-arm64",
+            "hal-x86_64",
+            "kernel",
+            "exec",
+            "shell",
+            "motion",
+            "pi5-image",
+            "xtask",
+        ];
+        for package in OWNED {
+            assert!(
+                HOST_LINT_TARGETS.iter().any(|target| target.package == *package),
+                "{package} is not linted locally, so its warnings reach CI first"
+            );
+        }
+        assert_eq!(HOST_LINT_TARGETS.len(), OWNED.len(), "a target was added without a decision");
+    }
+
+    /// `bin_only` is a fact about a crate, not a licence to widen a lint.
+    ///
+    /// It means exactly one thing — **this crate has no library target**, so
+    /// `--lib` would be an error rather than a narrowing — and it is true of
+    /// exactly the two crates that are a `main.rs` and nothing else. It was
+    /// `xtask` alone until `pi5-image` joined the list on 2026-08-08.
+    ///
+    /// The distinction that matters, and the reason this test still exists
+    /// after gaining a second member: `bin_only` selects `--all-targets`, and
+    /// `--all-targets` is only safe where the binary **builds on this host**.
+    /// Both of these do. The fixture bins in `exec`, `shell` and `kernel` do
+    /// not — they name `hal_x86_64` items gated `cfg(not(windows))` — which is
+    /// why those crates are `--lib --tests` and why marking one of them
+    /// `bin_only` would make the whole gate fail permanently for reasons
+    /// unrelated to the code under review (`LE-77`).
+    #[test]
+    fn bin_only_is_set_exactly_for_the_crates_that_have_no_library() {
+        const NO_LIBRARY: [&str; 2] = ["pi5-image", "xtask"];
         for target in HOST_LINT_TARGETS {
-            assert_eq!(target.bin_only, target.package == "xtask", "{}", target.package);
+            assert_eq!(
+                target.bin_only,
+                NO_LIBRARY.contains(&target.package),
+                "{} — bin_only is a fact about the crate, not a lint preference",
+                target.package
+            );
         }
     }
 

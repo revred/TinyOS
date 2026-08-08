@@ -1179,6 +1179,13 @@ name = "hal"
 version = "0.1.0"
 
 [[package]]
+name = "hal-arm64"
+version = "0.1.0"
+dependencies = [
+ "hal",
+]
+
+[[package]]
 name = "hal-x86_64"
 version = "0.1.0"
 dependencies = [
@@ -1599,6 +1606,7 @@ name = "kernel"
 version = "0.1.0"
 dependencies = [
  "hal",
+ "hal-arm64",
  "hal-x86_64",
 ]
 

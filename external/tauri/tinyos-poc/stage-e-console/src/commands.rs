@@ -98,6 +98,10 @@ impl ConsoleState {
                 let kind = match tab.kind() {
                     TabKind::Dos => "MS-DOS",
                     TabKind::Parity => "PARITY",
+                    // Named distinctly on purpose: an operator must be able to tell,
+                    // from the chrome alone, whether the thing answering them is this
+                    // laptop or a Raspberry Pi.
+                    TabKind::Board => "BOARD",
                 };
                 format!(
                     "{tx} {kind} \u{2014} {} tab(s) \u{2014} parity: {parity} \u{2014} authority denials: {}",
@@ -318,7 +322,9 @@ pub fn read_tab<R: tauri::Runtime>(
                 overall: suite.overall.clone(),
             })
         }
-        TabKind::Dos => None,
+        // Neither owns a suite: a DOS tab is an interactive session, and a board tab
+        // is an interactive session somewhere else.
+        TabKind::Dos | TabKind::Board => None,
     };
     Ok(TabSnapshot { info: tab.info(), transcript: tab.transcript().into(), suite })
 }

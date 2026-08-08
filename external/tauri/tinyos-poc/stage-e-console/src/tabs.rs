@@ -16,7 +16,7 @@ use shell::dos;
 use shell::labels::Labels;
 use shell::parity;
 use shell::policy::GrantSet;
-use shell::verbs::{Env, SpoorRow, SpoorView, VerbKind, World};
+use shell::verbs::{Env, Platform, SpoorRow, SpoorView, VerbKind, World};
 use shell::volume::RamVolume;
 
 /// Maximum concurrent tabs — one reviewable constant, mirrored by the manifest's
@@ -90,6 +90,15 @@ pub enum TabKind {
     Dos,
     /// The target-parity tab: runs the whole MS-DOS parity suite.
     Parity,
+    /// **A session on the board.** The line is not executed here at all — it crosses
+    /// the cable as one `TOS64-CMD/1` frame and the board's own `TINYCMD` answers it
+    /// (`STORY-P1-09-18`, `REPORT-2026-08-08-02`).
+    ///
+    /// The distinction a reader must not lose: a [`TabKind::Dos`] tab runs the verb
+    /// core *on this laptop*, and this one runs nothing locally. They render the same
+    /// because it is the same crate — the whole point of `FEAT-P2-01`'s `fmt::Write`
+    /// sink — but only one of them is TinyOS.
+    Board,
 }
 
 impl TabKind {
@@ -98,8 +107,71 @@ impl TabKind {
         match self {
             TabKind::Dos => "DOS",
             TabKind::Parity => "TARGET-PARITY",
+            TabKind::Board => "BOARD",
         }
     }
+}
+
+/// Why a line could not be carried to the board.
+///
+/// Every arm is a **named refusal the operator sees in the transcript**, never a
+/// silent empty answer: a board that did not reply and a board that replied "nothing"
+/// are different facts, and a console rendering them the same way is the instrument
+/// failure this project has had five of.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BoardError {
+    /// The line is wider than the wire's fixed argument field. Refused **here, before
+    /// anything is sent**, because the board answers an over-wide frame with `oversize`
+    /// — a refusal naming the envelope rather than the typing, which an operator
+    /// cannot act on.
+    LineTooLong {
+        /// What was typed.
+        octets: usize,
+        /// What a frame carries.
+        limit: usize,
+    },
+    /// No answer arrived inside the timeout.
+    NoAnswer,
+    /// The link itself failed (no adapter, no permission, no cable).
+    Link(String),
+}
+
+impl std::fmt::Display for BoardError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BoardError::LineTooLong { octets, limit } => {
+                write!(f, "line is {octets} octets; a frame carries {limit}")
+            }
+            BoardError::NoAnswer => f.write_str("the board did not answer"),
+            BoardError::Link(why) => write!(f, "link unavailable: {why}"),
+        }
+    }
+}
+
+/// The widest command line one `TOS64-CMD/1` frame carries.
+///
+/// `hal_arm64::tos64_cmd::ARGUMENT_BYTES`, which since 2026-08-08 *is*
+/// `shell::capacities::MAX_LINE` — the board holds the two equal at compile time in
+/// `pi5_image::wire_shell`. Named from `shell` rather than restated as a literal, so
+/// this console cannot drift from the width the board actually accepts.
+pub const BOARD_LINE_LIMIT: usize = shell::capacities::MAX_LINE;
+
+/// One exchange with the board: a line out, the board's own output back.
+///
+/// A trait rather than a concrete transport, so the tab model is testable without a
+/// Raspberry Pi on the desk and the raw-Ethernet half stays in one implementation
+/// instead of spread through session logic. The real implementor drives `ti64dink`,
+/// which already owns the frame builder, the Npcap capture and the answer parser —
+/// all gated by `check-tool-tests`.
+pub trait BoardLink {
+    /// Send `line` to the board and return the transcript it answered with.
+    fn exchange(&mut self, line: &str) -> Result<String, BoardError>;
+}
+
+/// A board-backed session: no `World`, because there is no world on this side.
+struct BoardSession {
+    link: Box<dyn BoardLink + Send>,
+    transcript: String,
 }
 
 /// A typed registry refusal — every failure is a named reason, never a panic.
@@ -145,6 +217,8 @@ pub struct Tab {
     kind: TabKind,
     /// `Some` for DOS tabs; the parity tab owns no interactive world.
     dos: Option<DosSession>,
+    /// `Some` for board tabs; they own a link, not a world.
+    board: Option<BoardSession>,
 }
 
 /// The host-run TINYCMD session a DOS tab owns.
@@ -162,6 +236,9 @@ impl Tab {
     /// The tab's rendered transcript (empty for the parity tab — its content is the
     /// suite state, not a session transcript).
     pub fn transcript(&self) -> &str {
+        if let Some(board) = self.board.as_ref() {
+            return board.transcript.as_str();
+        }
         self.dos.as_ref().map(|d| d.transcript.as_str()).unwrap_or("")
     }
 
@@ -219,6 +296,11 @@ fn seeded_world(session: &'static str) -> World<'static> {
         .expect("seed SAMPLE.TCB");
     World {
         volume,
+        // A host tab runs TINYCMD in-process on this laptop, so it says so
+        // (`LE-124`). The board's own session supplies `Tier 1 / aarch64` instead
+        // — the point of injecting the platform is that a tab and a board can
+        // render the same verb core and each name itself honestly.
+        platform: Platform::TIER0_X86_64,
         env: Env::new(),
         cwd: 0,
         echo: true,
@@ -271,9 +353,37 @@ impl TabRegistry {
             TabKind::Dos => {
                 Some(DosSession { world: seeded_world(session), transcript: String::new() })
             }
-            TabKind::Parity => None,
+            TabKind::Parity | TabKind::Board => None,
         };
-        self.tabs.push(Tab { label, session, kind, dos });
+        // A board tab cannot be opened by this method: it needs a link, and a link is
+        // a bench fact this registry must not invent. `open_board` takes one. Refusing
+        // beats opening a tab that silently answers nothing.
+        if kind == TabKind::Board {
+            return Err(TabError::WrongKind);
+        }
+        self.tabs.push(Tab { label, session, kind, dos, board: None });
+        self.focused = Some(self.tabs.len() - 1);
+        Ok(self.tabs[self.tabs.len() - 1].info())
+    }
+
+    /// Open a **board** tab in the lowest free slot, carrying `link`.
+    ///
+    /// Separate from [`Self::open`] because a board tab needs something [`Self::open`]
+    /// cannot conjure: a live link to a Raspberry Pi. Passing it in is what keeps this
+    /// registry testable — the tests drive a scripted link, the window drives
+    /// `ti64dink`.
+    pub fn open_board(&mut self, link: Box<dyn BoardLink + Send>) -> Result<TabInfo, TabError> {
+        let slot = (1..=MAX_TABS)
+            .find(|s| self.get(TAB_LABELS[s - 1]).is_none())
+            .ok_or(TabError::CapacityExhausted)?;
+        let (label, session) = (TAB_LABELS[slot - 1], SESSION_IDS[slot - 1]);
+        self.tabs.push(Tab {
+            label,
+            session,
+            kind: TabKind::Board,
+            dos: None,
+            board: Some(BoardSession { link, transcript: String::new() }),
+        });
         self.focused = Some(self.tabs.len() - 1);
         Ok(self.tabs[self.tabs.len() - 1].info())
     }
@@ -313,6 +423,33 @@ impl TabRegistry {
             .iter_mut()
             .find(|t| t.label == label)
             .ok_or(TabError::NoSuchTab)?;
+        // A board tab executes nothing here. The line crosses the cable and the
+        // board's own TINYCMD answers it; this side only renders.
+        if let Some(board) = tab.board.as_mut() {
+            board.transcript.push_str("A:\\>");
+            board.transcript.push_str(line);
+            board.transcript.push('\n');
+            let trimmed = line.trim();
+            let answer = if trimmed.len() > BOARD_LINE_LIMIT {
+                // Refused before the wire, so the operator reads what they typed
+                // rather than the envelope's word for it.
+                Err(BoardError::LineTooLong { octets: trimmed.len(), limit: BOARD_LINE_LIMIT })
+            } else {
+                board.link.exchange(trimmed)
+            };
+            match answer {
+                Ok(text) => board.transcript.push_str(&text),
+                // A refusal is rendered, never swallowed: an empty transcript under a
+                // command that failed is the silent loss this project refuses
+                // everywhere else.
+                Err(why) => {
+                    board.transcript.push_str("board: ");
+                    board.transcript.push_str(&why.to_string());
+                    board.transcript.push('\n');
+                }
+            }
+            return Ok(());
+        }
         let dos = tab.dos.as_mut().ok_or(TabError::WrongKind)?;
         let _ = batch::prompt(&dos.world, &mut dos.transcript);
         dos.transcript.push_str(line);
@@ -501,5 +638,136 @@ mod tests {
         reg.focus("tab-1").unwrap();
         assert!(reg.reserved_line().contains("tab-1"));
         assert!(reg.reserved_line().contains("[DOS session TAB-1]"));
+    }
+}
+
+/// The board-backed tab (`21A` §3 step 3, in the window rather than the CLI).
+#[cfg(test)]
+mod board_tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// A scripted link: records what was sent, answers what it was told to.
+    ///
+    /// The point of the [`BoardLink`] seam. Every property below is about the tab
+    /// model — routing, rendering, refusing — and none of them needs a Raspberry Pi,
+    /// an Npcap driver or a cable to be checked.
+    struct ScriptedLink {
+        sent: Rc<RefCell<Vec<String>>>,
+        answers: Vec<Result<String, BoardError>>,
+    }
+
+    impl BoardLink for ScriptedLink {
+        fn exchange(&mut self, line: &str) -> Result<String, BoardError> {
+            self.sent.borrow_mut().push(line.to_string());
+            if self.answers.is_empty() {
+                return Err(BoardError::NoAnswer);
+            }
+            self.answers.remove(0)
+        }
+    }
+
+    // The registry's box is `Send`; this double is single-threaded and is only ever
+    // moved into it, never shared across threads.
+    unsafe impl Send for ScriptedLink {}
+
+    type Sent = Rc<RefCell<Vec<String>>>;
+
+    fn link(answers: Vec<Result<String, BoardError>>) -> (Box<ScriptedLink>, Sent) {
+        let sent = Rc::new(RefCell::new(Vec::new()));
+        (Box::new(ScriptedLink { sent: Rc::clone(&sent), answers }), sent)
+    }
+
+    #[test]
+    fn a_board_tab_sends_the_line_to_the_board_and_renders_what_it_answered() {
+        let (l, sent) = link(vec![Ok(" README.TXT  112\n VERBS.TXT  49\n".into())]);
+        let mut reg = TabRegistry::new();
+        let info = reg.open_board(l).expect("a board tab opens");
+        assert_eq!(info.kind, TabKind::Board);
+
+        reg.run_line(&info.label, "DIR").expect("the line is carried");
+
+        assert_eq!(&*sent.borrow(), &["DIR".to_string()], "exactly what was typed, once");
+        let transcript = reg.get(&info.label).unwrap().transcript();
+        assert!(transcript.contains(r"A:\>DIR"), "{transcript}");
+        assert!(transcript.contains("README.TXT"), "the BOARD's output: {transcript}");
+    }
+
+    #[test]
+    fn a_board_tab_runs_nothing_locally() {
+        // The property that distinguishes this tab from a DOS tab, and the one a
+        // future "fall back to the local world when the link fails" change would
+        // silently lose: an unanswered command must NOT be executed on the laptop.
+        let (l, sent) = link(vec![Err(BoardError::NoAnswer)]);
+        let mut reg = TabRegistry::new();
+        let info = reg.open_board(l).unwrap();
+
+        reg.run_line(&info.label, "VER").unwrap();
+
+        assert_eq!(&*sent.borrow(), &["VER".to_string()]);
+        let transcript = reg.get(&info.label).unwrap().transcript();
+        assert!(transcript.contains("the board did not answer"), "{transcript}");
+        assert!(
+            !transcript.contains("TinyOS Version"),
+            "a local world answered a board tab: {transcript}"
+        );
+    }
+
+    #[test]
+    fn a_line_wider_than_a_frame_is_refused_here_and_never_reaches_the_wire() {
+        // Refused BEFORE the send, so the operator reads what they typed rather than
+        // the board's word for the envelope (`oversize`).
+        let (l, sent) = link(vec![Ok("unreachable".into())]);
+        let mut reg = TabRegistry::new();
+        let info = reg.open_board(l).unwrap();
+
+        let long = "ECHO ".to_string() + &"X".repeat(BOARD_LINE_LIMIT);
+        reg.run_line(&info.label, &long).unwrap();
+
+        assert!(sent.borrow().is_empty(), "nothing may reach the wire");
+        let transcript = reg.get(&info.label).unwrap().transcript();
+        assert!(transcript.contains(&format!("a frame carries {BOARD_LINE_LIMIT}")), "{transcript}");
+    }
+
+    #[test]
+    fn the_wire_limit_is_the_shells_own_line_limit_and_not_a_second_number() {
+        // `LE-124`'s lesson one layer out: a console restating the width as a literal
+        // would drift from the board the day the board changed.
+        assert_eq!(BOARD_LINE_LIMIT, shell::capacities::MAX_LINE);
+    }
+
+    #[test]
+    fn a_board_tab_cannot_be_opened_without_a_link() {
+        // `open` must refuse rather than produce a tab that answers nothing: a session
+        // with no transport is indistinguishable, to an operator, from a dead board.
+        let mut reg = TabRegistry::new();
+        assert_eq!(reg.open(TabKind::Board), Err(TabError::WrongKind));
+    }
+
+    #[test]
+    fn board_and_dos_tabs_coexist_and_do_not_share_a_session() {
+        let (l, _sent) = link(vec![Ok("board answered\n".into())]);
+        let mut reg = TabRegistry::new();
+        let dos = reg.open(TabKind::Dos).unwrap();
+        let board = reg.open_board(l).unwrap();
+
+        reg.run_line(&dos.label, "VER").unwrap();
+        reg.run_line(&board.label, "VER").unwrap();
+
+        let dos_text = reg.get(&dos.label).unwrap().transcript().to_string();
+        let board_text = reg.get(&board.label).unwrap().transcript().to_string();
+        assert!(dos_text.contains("TinyOS Version"), "the host tab ran locally: {dos_text}");
+        assert!(board_text.contains("board answered"), "{board_text}");
+        assert!(!board_text.contains("TinyOS Version"), "sessions bled: {board_text}");
+    }
+
+    #[test]
+    fn a_board_tab_names_itself_board_in_the_reserved_line() {
+        let (l, _) = link(vec![]);
+        let mut reg = TabRegistry::new();
+        let info = reg.open_board(l).unwrap();
+        reg.focus(&info.label).unwrap();
+        assert!(reg.reserved_line().contains("BOARD"), "{}", reg.reserved_line());
     }
 }
