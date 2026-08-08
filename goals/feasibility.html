@@ -68,7 +68,7 @@ generator, so this page cannot go stale the way prose does.</p>
 <h2>Where we stand, in four numbers</h2>
 <div class="grid">
   <div class="stat"><div class="n">0&nbsp;/&nbsp;102</div><div class="l">Stories assurance-verified</div><div class="why">Locked at zero by ADR 0005, not lagging. No engineering moves it.</div></div>
-  <div class="stat"><div class="n">0&nbsp;/&nbsp;5</div><div class="l">Platforms qualified</div><div class="why">The decision that unlocks everything above. Owner's to take.</div></div>
+  <div class="stat"><div class="n">1&nbsp;/&nbsp;5</div><div class="l">Platforms qualified</div><div class="why">The decision that unlocks everything above. Owner's to take.</div></div>
   <div class="stat"><div class="n">34&nbsp;/&nbsp;220</div><div class="l">Release gates with evidence, of those that CAN be closed</div><div class="why">Against the raw denominator this reads far better and means less.</div></div>
   <div class="stat"><div class="n">60</div><div class="l">Gates measurable today</div><div class="why">No board, no decision, no missing mechanism. Ordinary work.</div></div>
 </div>
@@ -162,7 +162,7 @@ because half the denominator cannot be closed by construction.</p>
   <li><strong>Build the absent mechanisms.</strong><span>70 gates describe machinery nobody has written — load, queueing, isolation under competing load, exhaustion containment, soak. You cannot flood a budget that does not exist.</span></li>
 </ol>
 <h2>Open defects</h2>
-<p class="note"><strong>53 open</strong> of 117 recorded, in <code>goals/assurance/loose-ends.tsv</code>. This register is deliberately adversarial: rows are written against the project, several against the session that wrote them. A rising count here is not decay — it is the instrument working.</p>
+<p class="note"><strong>55 open</strong> of 121 recorded, in <code>goals/assurance/loose-ends.tsv</code>. This register is deliberately adversarial: rows are written against the project, several against the session that wrote them. A rising count here is not decay — it is the instrument working.</p>
 <h2>How to refresh this page</h2>
 <pre><code>cd os
 cargo run -p xtask -- emit-feasibility &gt; ../goals/feasibility.html
