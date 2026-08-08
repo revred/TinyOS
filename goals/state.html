@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TinyOS — state of the project</title>
+<style>
+  :root { color-scheme: light dark; --bg:#fff; --fg:#1a1a1a; --muted:#5a5a5a; --border:#d8d8d8; --code:#f2f2f2; --accent:#0b5fff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14161a; --fg:#e8e8e8; --muted:#a0a0a0; --border:#333740; --code:#1e2126; --accent:#6fa8ff; }
+  }
+  * { box-sizing: border-box; }
+  body { max-width: 1100px; margin: 0 auto; padding: 2.5rem 1.5rem 5rem;
+         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+         background: var(--bg); color: var(--fg); line-height: 1.55; }
+  h1 { font-size: 1.7rem; } h2 { font-size: 1.2rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: .3rem; }
+  code { background: var(--code); padding: .1rem .3rem; border-radius: 4px; font-size: .9em; }
+  a { color: var(--accent); }
+  .muted { color: var(--muted); font-size: .92rem; }
+  .none { color: var(--muted); font-style: italic; }
+  .tiles span { display:inline-block; background: var(--code); border:1px solid var(--border);
+                border-radius:999px; padding:.15rem .7rem; margin:.15rem .3rem .15rem 0; font-size:.85rem; font-weight:600; }
+  table { border-collapse: collapse; width: 100%; margin: .6rem 0 1.2rem; display:block; overflow-x:auto; }
+  th, td { border: 1px solid var(--border); padding: .35rem .55rem; text-align: left; font-size: .88rem; vertical-align: top; }
+  th { background: var(--code); }
+</style>
+</head>
+<body>
+<h1>TinyOS &mdash; state of the project</h1>
+<p class="muted">Every figure and every row on this page is derived by <code>cargo run -p xtask -- emit-state</code> from the live registers. Nothing here is hand-maintained, because a coherence page that can go stale is worse than none &mdash; it looks like the answer (<code>LE-108</code>).</p>
+<p class="tiles"><span>6 Epics</span><span>33 Features</span><span>103 Stories</span><span>56 open loose ends</span><span>13 sessions</span><span>199 handovers</span></p>
+<h2>Epics</h2>
+<table><tr><th>Epic</th><th>State</th><th>Features</th><th>Open rows naming it</th></tr>
+<tr><td><code>EPIC-H2</code></td><td>Specified</td><td>0</td><td><code>LE-53</code></td></tr>
+<tr><td><code>EPIC-P0</code></td><td>Functionally complete</td><td>8</td><td></td></tr>
+<tr><td><code>EPIC-P1</code></td><td>In progress</td><td>13</td><td><code>LE-26</code></td></tr>
+<tr><td><code>EPIC-P2</code></td><td>Specified</td><td>4</td><td><code>LE-53</code> <code>LE-58</code></td></tr>
+<tr><td><code>EPIC-P6B</code></td><td>Specified</td><td>0</td><td></td></tr>
+<tr><td><code>EPIC-P9</code></td><td>Specified</td><td>8</td><td></td></tr>
+</table>
+<h2>Features, their Stories, and what blocks them</h2>
+<p class="muted"><strong>An empty blocker cell is not a clean bill of health.</strong> A row blocks what it <em>names</em>; a blocker nobody wrote into the register is invisible here exactly as it is everywhere else.</p>
+<table><tr><th>Feature</th><th>State</th><th>Stories</th><th>Must be addressed first</th></tr>
+<tr><td><code>FEAT-P0-01</code></td><td>Verified</td><td>10 (4 Verified)</td><td><code>LE-29</code> <code>LE-31</code> <code>LE-42</code></td></tr>
+<tr><td><code>FEAT-P0-02</code></td><td>Verified</td><td>5 (5 Verified)</td><td><code>LE-31</code></td></tr>
+<tr><td><code>FEAT-P0-03</code></td><td>Verified</td><td>3 (3 Verified)</td><td><code>LE-45</code></td></tr>
+<tr><td><code>FEAT-P0-04</code></td><td>Complete</td><td>3 (3 Verified)</td><td><span class="none">no open row names it</span></td></tr>
+<tr><td><code>FEAT-P0-05</code></td><td>Verified</td><td>4 (4 Verified)</td><td><code>LE-31</code></td></tr>
+<tr><td><code>FEAT-P0-06</code></td><td>Verified</td><td>4 (4 Verified)</td><td><span class="none">no open row names it</span></td></tr>
+<tr><td><code>FEAT-P0-07</code></td><td>Verified</td><td>3 (3 Verified)</td><td><code>LE-52</code></td></tr>
+<tr><td><code>FEAT-P0-08</code></td><td>Verified</td><td>1 (1 Verified)</td><td><span class="none">no open row names it</span></td></tr>
+<tr><td><code>FEAT-P1-01</code></td><td>Functionally complete</td><td>4 (0 Verified)</td><td><code>LE-16</code> <code>LE-18</code></td></tr>
+<tr><td><code>FEAT-P1-02</code></td><td>Functionally complete</td><td>2 (1 Verified)</td><td><code>LE-38</code> <code>LE-82</code></td></tr>
+<tr><td><code>FEAT-P1-03</code></td><td>Complete</td><td>3 (3 Verified)</td><td><span class="none">no open row names it</span></td></tr>
+<tr><td><code>FEAT-P1-04</code></td><td>Complete</td><td>5 (4 Verified)</td><td><code>LE-49</code> <code>LE-62</code></td></tr>
+<tr><td><code>FEAT-P1-05</code></td><td>Specified</td><td>1 (0 Verified)</td><td><span class="none">no open row names it</span></td></tr>
+<tr><td><code>FEAT-P1-06</code></td><td>In progress</td><td>2 (1 Verified)</td><td><code>LE-85</code></td></tr>
+<tr><td><code>FEAT-P1-07</code></td><td>In progress</td><td>10 (7 Verified)</td><td><code>LE-47</code> <code>LE-76</code> <code>LE-82</code> <code>LE-98</code></td></tr>
+<tr><td><code>FEAT-P1-08</code></td><td>In progress</td><td>2 (2 Verified)</td><td><code>LE-62</code></td></tr>
+<tr><td><code>FEAT-P1-09</code></td><td>In progress</td><td>18 (12 Verified)</td><td><code>LE-67</code> <code>LE-68</code> <code>LE-76</code> <code>LE-98</code> <code>LE-118</code></td></tr>
+<tr><td><code>FEAT-P1-10</code></td><td>In progress</td><td>5 (3 Verified)</td><td><code>LE-74</code> <code>LE-75</code> <code>LE-76</code></td></tr>
+<tr><td><code>FEAT-P1-11</code></td><td>In progress</td><td>1 (1 Verified)</td><td><span class="none">no open row names it</span></td></tr>
+<tr><td><code>FEAT-P1-12</code></td><td>Specified</td><td>1 (0 Verified)</td><td><span class="none">no open row names it</span></td></tr>
+<tr><td><code>FEAT-P1-13</code></td><td>Specified</td><td>1 (0 Verified)</td><td><span class="none">no open row names it</span></td></tr>
+<tr><td><code>FEAT-P2-01</code></td><td>In progress</td><td>1 (0 Verified)</td><td><span class="none">no open row names it</span></td></tr>
+<tr><td><code>FEAT-P2-02</code></td><td>In progress</td><td>1 (0 Verified)</td><td><span class="none">no open row names it</span></td></tr>
+<tr><td><code>FEAT-P2-04</code></td><td>In progress</td><td>1 (0 Verified)</td><td><span class="none">no open row names it</span></td></tr>
+<tr><td><code>FEAT-P2-07</code></td><td>In progress</td><td>2 (1 Verified)</td><td><span class="none">no open row names it</span></td></tr>
+<tr><td><code>FEAT-P9-01</code></td><td>Specified</td><td>2 (0 Verified)</td><td><span class="none">no open row names it</span></td></tr>
+<tr><td><code>FEAT-P9-02</code></td><td>Specified</td><td>1 (0 Verified)</td><td><span class="none">no open row names it</span></td></tr>
+<tr><td><code>FEAT-P9-03</code></td><td>Specified</td><td>1 (0 Verified)</td><td><span class="none">no open row names it</span></td></tr>
+<tr><td><code>FEAT-P9-04</code></td><td>Specified</td><td>2 (0 Verified)</td><td><span class="none">no open row names it</span></td></tr>
+<tr><td><code>FEAT-P9-05</code></td><td>Specified</td><td>1 (0 Verified)</td><td><span class="none">no open row names it</span></td></tr>
+<tr><td><code>FEAT-P9-06</code></td><td>Specified</td><td>1 (0 Verified)</td><td><span class="none">no open row names it</span></td></tr>
+<tr><td><code>FEAT-P9-07</code></td><td>Specified</td><td>1 (0 Verified)</td><td><span class="none">no open row names it</span></td></tr>
+<tr><td><code>FEAT-P9-08</code></td><td>Specified</td><td>1 (0 Verified)</td><td><span class="none">no open row names it</span></td></tr>
+</table>
+<h2>Open loose ends (56)</h2>
+<table><tr><th>Row</th><th>Finding</th><th>Raised in</th></tr>
+<tr><td><code>LE-03</code></td><td>No real fault handling for the remaining vectors; #XF (19) #MC (18) and every other vector still reach the shared fail-closed default</td><td>hand-2026-07-26/32</td></tr>
+<tr><td><code>LE-08</code></td><td>I/O APIC device-IRQ routing deferred; local APIC only</td><td>hand-2026-07-26/32</td></tr>
+<tr><td><code>LE-10</code></td><td>ECAM/MCFG config access and PCI bridge traversal deferred</td><td>hand-2026-07-26/32</td></tr>
+<tr><td><code>LE-11</code></td><td>Context::new seeds task rflags with IF set; reframed as load-bearing under preemption but still open for fixtures that arm no IDT</td><td>hand-2026-07-27/05</td></tr>
+<tr><td><code>LE-12</code></td><td>CI clippy never lints target-only fixture code</td><td>hand-2026-07-27/05</td></tr>
+<tr><td><code>LE-16</code></td><td>The Tier 0 timing gate detects only ~2x-or-worse regressions.</td><td>hand-2026-07-27/09</td></tr>
+<tr><td><code>LE-18</code></td><td>The timing gate was host-condition-sensitive; identical binaries moved every gated metric together by 1.8-2.2x.</td><td>hand-2026-07-27/09</td></tr>
+<tr><td><code>LE-19</code></td><td>--update-baseline rewrites every measured row; part (a) closed, part (b) open to refresh a named metric without touching the rest</td><td>hand-2026-07-27/09</td></tr>
+<tr><td><code>LE-21</code></td><td>The graceful-degradation tier is a downgrade attack on the forged-kernel defence; a TPM-unreachable fallback is strictly easier than forging measurements</td><td>hand-2026-07-28/07</td></tr>
+<tr><td><code>LE-25</code></td><td>unhandled_interrupt_handler cannot name the vector it caught; it is one shared stub installed for every unrouted vector and receives no vector argument, so the fail-closed sentinel proves containment was reached but not which vector reached it</td><td>hand-2026-07-28/18</td></tr>
+<tr><td><code>LE-26</code></td><td>EPIC-P1_5 recorded peer-to-peer Ethernet as the near-term deploy transport, but on a Pi 5 USB Ethernet and GPIO sit behind the RP1 southbridge over PCIe, so that transport implies PCIe bring-up plus an RP1 driver plus a NIC driver before one byte can be deployed; the decision is stale against the actual first board</td><td>hand-2026-07-28/19</td></tr>
+<tr><td><code>LE-28</code></td><td>--update-baseline is one command away from turning a confirmed cross-host offset into a false green: it rewrites measured rows with whatever the current host produced, and nothing in the tool asks where the previous rows came from or refuses when the recording host differs.</td><td>hand-2026-07-28/20</td></tr>
+<tr><td><code>LE-29</code></td><td>Declared-but-never-exercised is guarded for Tier 0 fixtures only.</td><td>hand-2026-07-28/20</td></tr>
+<tr><td><code>LE-31</code></td><td>Every Report and both index pages attribute the zero assurance-verified Stories to LE-09 (no hardware tier), and that attribution is wrong for nine of them.</td><td>hand-2026-07-28/22</td></tr>
+<tr><td><code>LE-34</code></td><td>README v1 supported-set list is prose and drifts.</td><td>hand-2026-07-28/28</td></tr>
+<tr><td><code>LE-37</code></td><td>CPACR_EL1 is never initialised.</td><td>hand-2026-07-28/29</td></tr>
+<tr><td><code>LE-38</code></td><td>No emergency fault stack on ARM64.</td><td>hand-2026-07-28/29</td></tr>
+<tr><td><code>LE-42</code></td><td>The D09 accept path measures 17.6-39.1x over every latency and cycle budget its own catalogue rows state: p50 4510818 cycles (1952.7 us) against G06 150000 cycles and G01 50 us, p99 8796646 against G07 500000.</td><td>hand-2026-07-28/30</td></tr>
+<tr><td><code>LE-45</code></td><td>The 72h soak behind STORY-P0-03-01 and PERF-D07-G22 logged an ANOMALY at elapsed_hours=35.85: the QEMU regression sweep returned priority-inversion exit 1 where 0 is expected, so that cycle is a FAIL.</td><td>hand-2026-07-28/40A</td></tr>
+<tr><td><code>LE-46</code></td><td>The soak QEMU regression sweep runs without --serial-capture, so when checkpoint 10 recorded a priority-inversion FAIL (LE-45) NO diagnostic existed for the one run that mattered, and 26 clean re-runs cannot recover what the failing instance would have printed.</td><td>hand-2026-07-28/40A</td></tr>
+<tr><td><code>LE-47</code></td><td>The Pi 5 bring-up never enumerated its option space for getting evidence off the board.</td><td>hand-2026-07-28/41A</td></tr>
+<tr><td><code>LE-49</code></td><td>Priority inheritance is released per TASK not per LOCK.</td><td>hand-2026-07-28/43A</td></tr>
+<tr><td><code>LE-52</code></td><td>The no-explicit-panic gate STORY-P0-07-03 added covers exactly one module.</td><td>hand-2026-07-29/01</td></tr>
+<tr><td><code>LE-53</code></td><td>EPIC-P2 section 6 excludes an entire implementation family for the tab host without saying so, and leaves the seam that would keep it possible unstated.</td><td>hand-2026-07-29/03A</td></tr>
+<tr><td><code>LE-55</code></td><td>13F section 2.3 orders live execution-level verification of the storage-free verbs (echo, env-get/env-set, task-list, clear-screen, prompt behaviour) through the Stage E console, but no interactive path exists end to end: no shell crate exists anywhere in the os/ workspace (LE-48 records the filesystem half of that absence), no fixture reads serial input, and hal-x86_64/src/serial.rs implements transmit only -- there is no UART RX path in the tree at all.</td><td>hand-2026-07-29/14G</td></tr>
+<tr><td><code>LE-57</code></td><td>No HELP/discovery verb exists: a session cannot enumerate what it is allowed to do.</td><td>hand-2026-07-30/05A session, owner feedback</td></tr>
+<tr><td><code>LE-58</code></td><td>No editor exists in any lane, and no interactive process model to host one: serial is TX-only on target (LE-55) and host tabs speak line-at-a-time to a library, not to a running process.</td><td>hand-2026-07-30/05A session, owner feedback</td></tr>
+<tr><td><code>LE-60</code></td><td>No monitors/tooling surface in the console: owner mockup (work/InterfaceV0.png) names a sidebar of developer tools, regression tests, CPU usage, memory usage, page-faults, speed measures, vulnerabilities, task and process monitors, IPC monitors, network tools and monitors, workload monitors, risk/attack monitors, and testing modes/flags.</td><td>hand-2026-07-30/05A session, owner feedback</td></tr>
+<tr><td><code>LE-61</code></td><td>The chrome does not state what mode the system is in or how far each flavour has come: owner mockup (work/InterfaceV0.png) asks for an EMULATION MODE (WIN32, ...) banner and a flavour progress bar (MS-DOS, Mac-OS, Linux, RT-OS, GUI).</td><td>hand-2026-07-30/05A session, owner feedback</td></tr>
+<tr><td><code>LE-62</code></td><td>Everything between the motion-group contracts and moving metal is undelivered: periodic phase-aligned release (MFS-02 on FEAT-P1-04 machinery), the full 16/32 deterministic plant simulator, coherent collector, coupled executor, atomic stage/commit on a timeline, the fixed C2-to-C3 process image, EtherCAT MainDevice core, NIC/DMA driver (compounded by LE-26 on Pi 5), CiA-402 drive adapter, and the synchronized HIL/hardware proof.</td><td>hand-2026-07-30/10A</td></tr>
+<tr><td><code>LE-63</code></td><td>The LAT-PHYS-10 architecture gate (ADR 0011, Derisk10usLatencyRequirement.md section 5) cannot close from software: three of section 13's immediate artifacts require hardware in hand -- (1) the bill of materials and topology for the latency-critical path, (2) vendor evidence for encoder latching, probe acquisition, drive command acceptance and interpolation semantics, (3) the initial hardware lower-bound capture on the selected link/topology -- and WP2..WP5 (bounded Hexapod solver + WCET harness, deterministic timeline, physical loop, ADR 0005 qualification) queue behind them.</td><td>hand-2026-07-30/11A</td></tr>
+<tr><td><code>LE-66</code></td><td>The first physical serial adapter exposed a class of defect the suite structurally could not catch: an I/O seam declared &quot;as thin as it reads&quot; (pi5 ChannelChunks reader thread) carried platform semantics -- Windows COM reads return Ok(0) on interval timeout meaning &quot;no data yet&quot; while the reader treated it as EOF, so a silent unpowered board ended captures as &quot;disconnected after 0 bytes&quot; before any power-cycle window.</td><td>hand-2026-08-03/02A session</td></tr>
+<tr><td><code>LE-67</code></td><td>FEAT-P1-09 masters GEM DMA with no IOMMU on the Pi 5 path and since STORY-P1-09-16 that is TWO pinned regions rather than one: the beacon staging region the CPU writes and the device reads, and a separate receive region the device writes.</td><td>hand-2026-08-03/05A</td></tr>
+<tr><td><code>LE-68</code></td><td>First physical exercise of FEAT-P1-09 (2026-08-03 evening): the laptop NIC saw a dead-flat PHY across three power cycles -- not one link-training transient -- while the power LED sat steady green.</td><td>hand-2026-08-03/05A</td></tr>
+<tr><td><code>LE-74</code></td><td>The boot epoch STORY-P1-10-04 puts in every spoor frame is a distinguisher, not an identifier.</td><td>hand-2026-08-04/05A session</td></tr>
+<tr><td><code>LE-75</code></td><td>TinyOS drives the Pi 5 with no thermal awareness of any kind: it never reads the SoC temperature sensor, has no throttle path, and does not program RP1 PWM, so the fan connector is dead on every TinyOS boot.</td><td>hand-2026-08-04/06A session</td></tr>
+<tr><td><code>LE-76</code></td><td>The TOS64-MEAS/2 measurement envelope rides the wire as a CYCLING TEXT TRANSCRIPT with none of the guarantees the spoor channel next to it has, and the gap is structural rather than cosmetic.</td><td>hand-2026-08-05/03A session</td></tr>
+<tr><td><code>LE-78</code></td><td>Every board image this project cites by hash is an identifier for an artifact NOBODY RETAINED and that CANNOT BE REBUILT.</td><td>hand-2026-08-05/05A session</td></tr>
+<tr><td><code>LE-81</code></td><td>tos64-netboot CRASHED ON THE FIRST PACKET IT EVER ANSWERED, and the mechanism is a fail-safe violation rather than a configuration mistake.</td><td>hand-2026-08-05/08A session</td></tr>
+<tr><td><code>LE-82</code></td><td>Rung::FaultTaken IS DECLARED IN BOTH VOCABULARIES AND STAMPED BY NOTHING, so a fault on this board leaves no audit record at all.</td><td>hand-2026-08-05/08A session</td></tr>
+<tr><td><code>LE-85</code></td><td>STORY-P1-06-01's decision-to-actuation path is proven in a FIXTURE and has never run on the shipping os image, and the loose end its own Report promised for exactly this was never filed -- owed since 2026-07-29.</td><td>hand-2026-08-05/09A session</td></tr>
+<tr><td><code>LE-86</code></td><td>Handover 09A section 8 step 1 instructed the next session to file PERF-Dnn-G09 evidence &quot;against the 8 MB image ceiling CI already computes&quot;, describing it as REGISTRATION RATHER THAN MEASUREMENT.</td><td>hand-2026-08-06/01A session</td></tr>
+<tr><td><code>LE-94</code></td><td>THE 0 OF 99 ASSURANCE-VERIFIED FIGURE IS ARITHMETICALLY LOCKED AND NOTHING RECORDS THAT IT IS.</td><td>hand-2026-08-06/04C</td></tr>
+<tr><td><code>LE-96</code></td><td>THE BOARD-RUN EXECUTOR HAS NEVER RUN AGAINST A PLUG, AND IT IS THE ONLY PART OF THE POWER PATH THAT IS NOT TESTED.</td><td>hand-2026-08-06/06C</td></tr>
+<tr><td><code>LE-98</code></td><td>THE CANVAS WAS DARK ON A NETBOOTED RUN THAT WAS OTHERWISE COMPLETELY HEALTHY, AND NOTHING IN THE IMAGE CAN TELL.</td><td>hand-2026-08-06/07C</td></tr>
+<tr><td><code>LE-104</code></td><td>SOME OF THE 125 UNMEASURED GATES ARE NOT UNMEASURED.</td><td>hand-2026-08-07/01D</td></tr>
+<tr><td><code>LE-105</code></td><td>not(target_os = &quot;windows&quot;) IS USED THROUGHOUT hal-x86_64 AND kernel AS A SYNONYM FOR BARE METAL, AND A LINUX HOST SATISFIES IT EXACTLY AS x86_64-tinyos DOES.</td><td>hand-2026-08-07/02D</td></tr>
+<tr><td><code>LE-106</code></td><td>THE LOCAL LINT GATE THIS PROJECT ALREADY OWNS IS REQUIRED BY NOTHING, SO A SESSION THAT HIT EXACTLY THE DEFECT IT CATCHES RE-DERIVED IT BY HAND AND PUSHED RED.</td><td>hand-2026-08-07/02D</td></tr>
+<tr><td><code>LE-110</code></td><td>THE BOARD HAS BEEN TRANSMITTING A COMPLETE TIER 1 MEASUREMENT ENVELOPE FOR FOURTEEN HOURS AND NOTHING WAS LISTENING, WHILE FOUR HANDOVERS RECORDED THE BOARD LOOP AS BLOCKED.</td><td>hand-2026-08-07/01D</td></tr>
+<tr><td><code>LE-111</code></td><td>THREE GUARDRAIL-EVIDENCE ROWS QUOTE A BOOT THAT IS NO LONGER THE ONE ON THE WIRE, AND LE-110 HAS JUST MADE RE-HARVESTING THE CHEAPEST ACTION ON THE BENCH.</td><td>hand-2026-08-07/03D</td></tr>
+<tr><td><code>LE-113</code></td><td>THE CRATE-SIZE CEILING WARNS AT THE POINT THE STANDARD SAYS IT IS ALREADY TOO LATE, AND THE CRATE CLOSEST TO IT IS THE ONE EVERY NEW GATE LANDS IN.</td><td>hand-2026-08-07/06D</td></tr>
+<tr><td><code>LE-117</code></td><td>THE QUALIFICATION RECORD DECLARES ITS OWN VOID CONDITION AND NOTHING ON THIS BENCH WOULD NOTICE IT FIRING.</td><td>hand-2026-08-07/08A</td></tr>
+<tr><td><code>LE-118</code></td><td>A RECEIVE STATUS CARRYING BOTH A FRAME AND A TERMINAL ERROR THROWS THE FRAME AWAY AND KILLS THE EAR, AND ON ANY SEGMENT WITH BROADCAST TRAFFIC THAT IS THE EXPECTED FIRST OUTCOME RATHER THAN AN EDGE CASE.</td><td>hand-2026-08-07/16A</td></tr>
+<tr><td><code>LE-120</code></td><td>THE Q3 CAMPAIGN'S OWN RESULT LINE WAS TRUNCATED BY THE FRAME THAT CARRIED IT, LOSING EXACTLY THE TWO FIELDS THE RECORD IS QUOTED FROM.</td><td>hand-2026-08-07/18A</td></tr>
+<tr><td><code>LE-121</code></td><td>THE Q3 RESIDENCY INSTRUMENT CANNOT TELL SECURE-WORLD RESIDENCY FROM CPU FREQUENCY SCALING, AND ON THE FIRST REAL CAMPAIGN IT REPORTED THE SECOND AS THE FIRST.</td><td>hand-2026-08-07/18A</td></tr>
+<tr><td><code>LE-125</code></td><td>NOTHING IN CI OR IN ANY LOCAL GATE COMPILES THE TAURI OPERATOR CONSOLE, SO A CHANGE TO os/src/shell CAN BREAK THE PLANNED GUI WITH EVERY GATE GREEN -- AND ON 2026-08-08 IT DID.</td><td>hand-2026-08-08/24A</td></tr>
+</table>
+<h2>Sessions (13 dates, 199 handovers)</h2>
+<table><tr><th>Date folder</th><th>Handovers</th></tr>
+<tr><td><a href="../session/hand-2026-07-26/index.html"><code>hand-2026-07-26</code></a></td><td>38</td></tr>
+<tr><td><a href="../session/hand-2026-07-27/index.html"><code>hand-2026-07-27</code></a></td><td>11</td></tr>
+<tr><td><a href="../session/hand-2026-07-28/index.html"><code>hand-2026-07-28</code></a></td><td>47</td></tr>
+<tr><td><a href="../session/hand-2026-07-29/index.html"><code>hand-2026-07-29</code></a></td><td>17</td></tr>
+<tr><td><a href="../session/hand-2026-07-30/index.html"><code>hand-2026-07-30</code></a></td><td>12</td></tr>
+<tr><td><a href="../session/hand-2026-07-31/index.html"><code>hand-2026-07-31</code></a></td><td>1</td></tr>
+<tr><td><a href="../session/hand-2026-08-01/index.html"><code>hand-2026-08-01</code></a></td><td>7</td></tr>
+<tr><td><a href="../session/hand-2026-08-03/index.html"><code>hand-2026-08-03</code></a></td><td>9</td></tr>
+<tr><td><a href="../session/hand-2026-08-04/index.html"><code>hand-2026-08-04</code></a></td><td>6</td></tr>
+<tr><td><a href="../session/hand-2026-08-05/index.html"><code>hand-2026-08-05</code></a></td><td>9</td></tr>
+<tr><td><a href="../session/hand-2026-08-06/index.html"><code>hand-2026-08-06</code></a></td><td>14</td></tr>
+<tr><td><a href="../session/hand-2026-08-07/index.html"><code>hand-2026-08-07</code></a></td><td>21</td></tr>
+<tr><td><a href="../session/hand-2026-08-08/index.html"><code>hand-2026-08-08</code></a></td><td>7</td></tr>
+</table>
+</body>
+</html>

@@ -73,6 +73,12 @@ jobs:
       - name: The feasibility report still agrees with the spine
         run: cargo run -p xtask -- check-feasibility
 
+      # The coherence page: sessions, Epics, Features, open rows and the join
+      # that says what blocks what. Stale, it would send a session at the wrong
+      # Feature — so it is generated and gated rather than maintained.
+      - name: The state page still agrees with the registers
+        run: cargo run -p xtask -- check-state
+
       - name: missing_docs check
         run: cargo doc --workspace --no-deps
         env:

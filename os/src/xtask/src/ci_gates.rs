@@ -87,7 +87,7 @@ const GOVERNANCE_JOB: &str = "governance-gates";
 /// should be equally deliberate, and is now equally visible.
 ///
 /// `check-ci-gates` is in its own list on purpose — see rule 4.
-pub const CI_ENFORCED: [&str; 8] = [
+pub const CI_ENFORCED: [&str; 9] = [
     "check-assurance-spine",
     "check-performance-catalogue",
     "check-crate-sizes",
@@ -106,6 +106,12 @@ pub const CI_ENFORCED: [&str; 8] = [
     // drops, and dropping this one must fail the build rather than quietly
     // returning work/tools/ to the ungated state it sat in for its whole life.
     "check-tool-tests",
+    // `goals/state.html` — the coherence page: every session, Epic, Feature,
+    // open row, and the join saying what blocks what. It is the page somebody
+    // reaches for to decide what to work on, which is exactly why a stale copy
+    // is worse than none: it would send a session at a Feature whose blockers
+    // were cleared a week ago, or hide one whose blockers arrived yesterday.
+    "check-state",
 ];
 
 /// What the gate found, for the operator line.

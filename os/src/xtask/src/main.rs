@@ -26,6 +26,7 @@ mod pi5;
 mod probe_pe;
 mod shell_parity;
 mod spine_files;
+mod state;
 mod timing;
 mod tool_tests;
 mod txe;
@@ -480,6 +481,14 @@ const SUBCOMMANDS: &[Subcommand] = &[
     },
     Subcommand { name: "list-fixtures", summary: "List every fixture and its owning Test" },
     Subcommand { name: "list-status", summary: "Emit Epic/Feature/Story state as TSV on stdout" },
+    Subcommand {
+        name: "emit-state",
+        summary: "Print goals/state.html — sessions, Epics, Features, open rows, and what blocks what",
+    },
+    Subcommand {
+        name: "check-state",
+        summary: "Refuse a committed goals/state.html that disagrees with the live registers",
+    },
     Subcommand { name: "measure", summary: "Run a measurable fixture and emit its envelope" },
     Subcommand {
         name: "parse-meas",
@@ -594,6 +603,45 @@ fn main() -> ExitCode {
         // Emitted rather than committed: a generated file checked into the tree
         // is one more thing that can drift from the documents it summarises,
         // which is the problem this replaces.
+        subcommand @ ("emit-state" | "check-state") => {
+            let result = os_root().and_then(|root| {
+                let repo_root = root.parent().ok_or_else(|| {
+                    format!("could not resolve repository root from {}", root.display())
+                })?;
+                state::emit(repo_root).map(|page| (repo_root.to_path_buf(), page))
+            });
+            match result {
+                Ok((repo_root, page)) if subcommand == "emit-state" => {
+                    let _ = repo_root;
+                    print!("{page}");
+                    ExitCode::SUCCESS
+                }
+                Ok((repo_root, page)) => {
+                    // Byte-compare, for the same reason `check-feasibility`
+                    // does: a generated page whose committed copy is stale is
+                    // `LE-108` wearing a different filename.
+                    let path = repo_root.join("goals/state.html");
+                    let committed = std::fs::read_to_string(&path)
+                        .map(|text| text.replace("\r\n", "\n"))
+                        .unwrap_or_default();
+                    if committed == page.replace("\r\n", "\n") {
+                        println!("state-check: goals/state.html agrees with the live registers");
+                        ExitCode::SUCCESS
+                    } else {
+                        eprintln!(
+                            "xtask: goals/state.html is STALE — it disagrees with the registers \
+                             that just ran. Regenerate it:"
+                        );
+                        eprintln!("  cargo run -p xtask -- emit-state > ../goals/state.html");
+                        ExitCode::FAILURE
+                    }
+                }
+                Err(message) => {
+                    eprintln!("xtask: {subcommand}: {message}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         "list-status" => {
             let result = os_root().and_then(|root| {
                 let repo_root = root.parent().ok_or_else(|| {

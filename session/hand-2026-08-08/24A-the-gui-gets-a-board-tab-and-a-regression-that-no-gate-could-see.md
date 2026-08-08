@@ -109,6 +109,27 @@ a reason to skip the first: the seam is what makes the two constraints
    running window — the seam is done and tested; this is the transport plumbing
    behind it.
 
+## 4b. Attribution correction for `bbf7ac4`
+
+**The commit that carried this document carried a second session's work too, and
+its message does not say so.** `bbf7ac4` contains
+[`25A`](25A-a-crate-that-gains-its-first-test-changes-a-gate-and-says-nothing.md),
+the `HOST_LINT_TARGETS` repair in `os/src/xtask/src/boot_images.rs`, and
+`LE-126` — none of them this session's, all of them swept in by a `git add -A`
+run while that session's work sat uncommitted in the tree.
+
+That is `CONCURRENT_SESSIONS` rule 3, broken by the session that had refused the
+same sweep two commits earlier and said so in writing. Recorded here rather than
+by rewriting pushed history, because the correction a reader needs is *what the
+commit contains*, and that is a fact about the record rather than about the
+tree. **`LE-126` and `25A` are that session's, not this one's.**
+
+One thing the collision itself demonstrated, worth keeping: the spine refused
+two `24A-*` files with *"a citation must name exactly one"*. Two sessions
+filing at one number is the exact case `session/README.md`'s letter rule
+exists for, and the gate caught it before either document could be cited
+ambiguously.
+
 ## 5. Standing instruction earned
 
 **A gate that checks a relationship is not a gate that checks the thing.**
