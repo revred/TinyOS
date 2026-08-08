@@ -445,6 +445,7 @@ pub fn receive_line(
     state: gem_receive::ReceiveState,
     accepted: u32,
     refused: u32,
+    dropped: u32,
 ) -> ([u8; LINK_LINE_CAPACITY], usize) {
     let mut line = LineBuilder::new();
     line.push("TOS64-RX/1 state=");
@@ -453,9 +454,6 @@ pub fn receive_line(
         gem_receive::ReceiveState::Listening => line.push("listening"),
         gem_receive::ReceiveState::Stopped(gem_receive::ReceiveError::Overrun) => {
             line.push("stopped reason=overrun");
-        }
-        gem_receive::ReceiveState::Stopped(gem_receive::ReceiveError::BufferUnavailable) => {
-            line.push("stopped reason=nobuffer");
         }
         gem_receive::ReceiveState::Refused(gem_receive::EnableError::UnencodableBufferSize) => {
             line.push("refused reason=size");
@@ -471,6 +469,14 @@ pub fn receive_line(
     line.push_dec(accepted);
     line.push(" refused=");
     line.push_dec(refused);
+    // `LE-118`: frames the MAC had nowhere to put. Reported rather than
+    // swallowed, because a drop that leaves no trace is the silent loss this
+    // project refuses everywhere else — and because on a one-descriptor ring
+    // polled once per beat this count *is* the measure of how contended the
+    // single slot is. A conversation that needs three attempts is a bench
+    // fact worth having in numbers rather than in an operator's impression.
+    line.push(" dropped=");
+    line.push_dec(dropped);
     line.push("\n");
     (line.bytes, line.at)
 }
@@ -1231,35 +1237,43 @@ mod tests {
     // TEST-P1-09-16-A clause 3, the reported half: the inbound row.
 
     #[test]
-    fn the_receive_line_is_exact_bytes_and_always_carries_both_counts() {
+    fn the_receive_line_is_exact_bytes_and_always_carries_every_count() {
         use crate::gem_receive::{EnableError, ReceiveError, ReceiveState};
-        let (bytes, len) = receive_line(ReceiveState::Idle, 0, 0);
+        let (bytes, len) = receive_line(ReceiveState::Idle, 0, 0, 0);
         assert_eq!(
             core::str::from_utf8(&bytes[..len]).unwrap(),
-            "TOS64-RX/1 state=idle accepted=0 refused=0\n",
+            "TOS64-RX/1 state=idle accepted=0 refused=0 dropped=0\n",
             "zero is a claim; a missing field would only be an absence of information"
         );
-        let (bytes, len) = receive_line(ReceiveState::Listening, 1, 0);
+        let (bytes, len) = receive_line(ReceiveState::Listening, 1, 0, 0);
         assert_eq!(
             core::str::from_utf8(&bytes[..len]).unwrap(),
-            "TOS64-RX/1 state=listening accepted=1 refused=0\n"
+            "TOS64-RX/1 state=listening accepted=1 refused=0 dropped=0\n"
         );
-        let (bytes, len) = receive_line(ReceiveState::Listening, 3, 17);
+        // `LE-118`: the ear is LISTENING with drops counted — the state the
+        // board could not previously be in, because the first drop stopped
+        // it. A drop beside a healthy accept is the ordinary bench beat.
+        let (bytes, len) = receive_line(ReceiveState::Listening, 3, 17, 42);
         assert_eq!(
             core::str::from_utf8(&bytes[..len]).unwrap(),
-            "TOS64-RX/1 state=listening accepted=3 refused=17\n"
+            "TOS64-RX/1 state=listening accepted=3 refused=17 dropped=42\n"
         );
-        // Every stop reason is spoken, never relabelled as quiet.
+        // Every stop reason is spoken, never relabelled as quiet — and
+        // `nobuffer` is gone from the vocabulary with the variant that
+        // produced it, because a state the board cannot enter must not be
+        // advertised as one it can.
         for (state, expected) in [
             (ReceiveState::Stopped(ReceiveError::Overrun), "stopped reason=overrun"),
-            (ReceiveState::Stopped(ReceiveError::BufferUnavailable), "stopped reason=nobuffer"),
             (ReceiveState::Refused(EnableError::UnencodableBufferSize), "refused reason=size"),
             (ReceiveState::Refused(EnableError::MisalignedRing), "refused reason=align"),
             (ReceiveState::Refused(EnableError::AliasedGrants), "refused reason=alias"),
         ] {
-            let (bytes, len) = receive_line(state, 2, 5);
+            let (bytes, len) = receive_line(state, 2, 5, 1);
             let text = core::str::from_utf8(&bytes[..len]).unwrap();
-            assert_eq!(text, format!("TOS64-RX/1 state={expected} accepted=2 refused=5\n"));
+            assert_eq!(
+                text,
+                format!("TOS64-RX/1 state={expected} accepted=2 refused=5 dropped=1\n")
+            );
         }
     }
 
@@ -1346,9 +1360,11 @@ mod tests {
 
     #[test]
     fn the_receive_line_never_overruns_its_buffer_at_the_widest_counts() {
-        use crate::gem_receive::{ReceiveError, ReceiveState};
+        use crate::gem_receive::{EnableError, ReceiveState};
         let (_, len) = receive_line(
-            ReceiveState::Stopped(ReceiveError::BufferUnavailable),
+            // The longest state word, now that `nobuffer` is gone.
+            ReceiveState::Refused(EnableError::UnencodableBufferSize),
+            u32::MAX,
             u32::MAX,
             u32::MAX,
         );
@@ -1777,13 +1793,16 @@ mod glue {
         device: &M,
         state: gem_receive::ReceiveState,
         admitted: &mut [u8; crate::tos64_cmd::ADMITTED_CAPACITY],
-    ) -> (gem_receive::ReceiveState, u32, u32, usize) {
+    ) -> (gem_receive::ReceiveState, u32, u32, u32, usize) {
         if state != gem_receive::ReceiveState::Listening {
-            return (state, 0, 0, 0);
+            return (state, 0, 0, 0, 0);
         }
         // Status first: an overrun makes whatever is in the buffer suspect,
         // so it is read before the descriptor rather than after.
         let status = gem_receive::read_status(device);
+        // `LE-118`: a drop is carried alongside, not instead of, whatever the
+        // descriptor holds — the frame that arrived is still classified.
+        let dropped = u32::from(matches!(status, Ok(s) if s.dropped));
         // SAFETY: as `arm_receive`. The read is of memory this core owns and
         // the device writes; the maintenance below makes the device's stores
         // visible before either word is read.
@@ -1847,18 +1866,18 @@ mod glue {
             }
         }
         match plan {
-            gem_receive::BeatPlan::Quiet => (state, 0, 0, 0),
+            gem_receive::BeatPlan::Quiet => (state, 0, 0, dropped, 0),
             gem_receive::BeatPlan::Stop(error) => {
                 gem_receive::disable_receive(device);
-                (gem_receive::ReceiveState::Stopped(error), 0, 0, 0)
+                (gem_receive::ReceiveState::Stopped(error), 0, 0, dropped, 0)
             }
             // A descriptor that cannot be a frame is counted as a refusal by
             // its own name; the ear stays open, because the device is exactly
             // the thing this Feature contracts as compromisable.
-            gem_receive::BeatPlan::Malformed(_) => (state, 0, 1, 0),
+            gem_receive::BeatPlan::Malformed(_) => (state, 0, 1, dropped, 0),
             gem_receive::BeatPlan::Classify { .. } => match admission {
-                Some(gem_receive::Admission::Accepted) => (state, 1, 0, payload_len),
-                _ => (state, 0, 1, 0),
+                Some(gem_receive::Admission::Accepted) => (state, 1, 0, dropped, payload_len),
+                _ => (state, 0, 1, dropped, 0),
             },
         }
     }
@@ -2180,13 +2199,16 @@ mod glue {
         let mut receive = gem_receive::ReceiveState::Idle;
         let mut rx_accepted: u32 = 0;
         let mut rx_refused: u32 = 0;
+        // LE-118: frames the MAC had nowhere to put, counted rather than
+        // fatal — the measure of how contended the single slot is.
+        let mut rx_dropped: u32 = 0;
         // `STORY-P1-09-17`: the command channel. Deny-by-default, two rows,
         // one line per beat. It holds no authority and reaches nothing — the
         // whole of its state is one pending line, one drop count and two
         // counters.
         let mut commands = crate::tos64_cmd::CommandChannel::new();
         let mut admitted = [0u8; crate::tos64_cmd::ADMITTED_CAPACITY];
-        let (rx_text, rx_len) = receive_line(receive, rx_accepted, rx_refused);
+        let (rx_text, rx_len) = receive_line(receive, rx_accepted, rx_refused, rx_dropped);
         crate::canvas::draw_line(
             &mut console,
             crate::canvas::RX_Y,
@@ -2413,7 +2435,8 @@ mod glue {
                                 crate::transcript::copy_line(nth, &mut line)
                             }
                             CycleSlot::ReceiveRow => {
-                                let (text, len) = receive_line(receive, rx_accepted, rx_refused);
+                                let (text, len) =
+                                    receive_line(receive, rx_accepted, rx_refused, rx_dropped);
                                 line[..len].copy_from_slice(&text[..len]);
                                 Some(len)
                             }
@@ -2456,11 +2479,12 @@ mod glue {
                     if receive == gem_receive::ReceiveState::Idle {
                         receive = arm_receive(&gem_window);
                     }
-                    let (next, accepted, refused, payload_len) =
+                    let (next, accepted, refused, dropped, payload_len) =
                         poll_receive(&gem_window, receive, &mut admitted);
                     receive = next;
                     rx_accepted = rx_accepted.saturating_add(accepted);
                     rx_refused = rx_refused.saturating_add(refused);
+                    rx_dropped = rx_dropped.saturating_add(dropped);
                     // `STORY-P1-09-17`: the admitted payload is offered to the
                     // verb table. `offer` decides and transmits nothing — the
                     // only producer of bytes is the bounded slot below, which
@@ -2509,7 +2533,7 @@ mod glue {
                     &cmd_text[..cmd_len.saturating_sub(1)],
                     crate::canvas::TEXT,
                 );
-                let (rx_text, rx_len) = receive_line(receive, rx_accepted, rx_refused);
+                let (rx_text, rx_len) = receive_line(receive, rx_accepted, rx_refused, rx_dropped);
                 crate::canvas::draw_line(
                     &mut console,
                     crate::canvas::RX_Y,

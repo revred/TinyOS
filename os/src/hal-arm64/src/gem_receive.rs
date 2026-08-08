@@ -57,7 +57,9 @@ pub mod register {
 /// Bits inside [`register::RSR`].
 pub mod rsr {
     /// `BNA` — buffer not available: a frame arrived and the descriptor was
-    /// still owned by software. Terminal here (`SEC-20`).
+    /// still owned by software. A **counted drop** since 2026-08-08, not
+    /// terminal — see [`super::read_status`] for why the two error bits are
+    /// different failures wearing one word (`LE-118`).
     pub const BUFFER_NOT_AVAILABLE: u32 = 1 << 0;
     /// `REC` — a frame was received.
     pub const FRAME_RECEIVED: u32 = 1 << 1;
@@ -74,6 +76,14 @@ pub mod ncfgr_receive {
     pub const COPY_ALL_FRAMES: u32 = 1 << 4;
     /// `NBC` — no broadcast. Left clear: the host's first frame is expected
     /// to be broadcast, exactly as the board's own beacon is.
+    ///
+    /// It is also the next lever if the single descriptor proves too
+    /// contended to hold a conversation (`LE-118`'s disposition 2): setting
+    /// it keeps ambient broadcast out of the ring entirely, at the cost of
+    /// `STORY-P1-09-16` criterion 4's *broadcast* `ping` arm, which would
+    /// then be dropped by hardware and the unicast arm become primary. Not
+    /// set today, because the drop count now measures the contention rather
+    /// than leaving it to be guessed at.
     pub const NO_BROADCAST: u32 = 1 << 5;
 }
 
@@ -304,27 +314,75 @@ pub fn disable_receive<M: Mmio>(device: &M) {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReceiveError {
     /// `OVR` — the MAC's receive FIFO overflowed.
+    ///
+    /// The only terminal receive error, and deliberately the only one. `BNA`
+    /// was the second until 2026-08-08; it is now [`ReceiveStatus::dropped`],
+    /// a counted drop, because it describes a frame that never entered the
+    /// ring rather than a device whose accounting broke (`LE-118`). The
+    /// variant is **gone rather than unreachable**: a terminal error that
+    /// cannot fire is a taxonomy that lies, and the canvas would advertise a
+    /// `stopped reason=nobuffer` state the board can no longer enter.
     Overrun,
-    /// `BNA` — a frame arrived while the one descriptor was still owned by
-    /// software. On a one-descriptor ring polled once per beat this means the
-    /// peer is transmitting faster than the poll, which is a condition this
-    /// Story does not attempt to serve.
-    BufferUnavailable,
 }
 
-/// Reads and clears the receive status. [`Ok`] carries whether the MAC
-/// signalled a frame this pass; both [`Err`] arms have already had their
-/// status bit cleared and require the caller to disable receive permanently.
-pub fn read_status<M: Mmio>(device: &M) -> Result<bool, ReceiveError> {
+/// What one status read says: a frame may be waiting, frames may have been
+/// dropped for want of a descriptor, or the MAC's own accounting broke.
+///
+/// Three outcomes rather than two, and the third is the `LE-118` fix. `BNA`
+/// used to collapse into [`ReceiveError`] *before* `REC` was even read, so a
+/// status of `REC|BNA` — one frame safely in the ring, plus a second the MAC
+/// had nowhere to put — discarded the good frame and killed the channel for
+/// the boot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReceiveStatus {
+    /// `REC`: the MAC signalled a frame this pass.
+    pub frame_waiting: bool,
+    /// `BNA`: at least one frame arrived with no descriptor free and was
+    /// dropped by the MAC. **Counted, not terminal** — see [`read_status`].
+    pub dropped: bool,
+}
+
+/// Reads and clears the receive status.
+///
+/// # Why `BNA` is a counted drop and `OVR` is not (`LE-118`, 2026-08-08)
+///
+/// They are different failures wearing one word. `OVR` is the MAC's receive
+/// FIFO overflowing: a frame was torn, the device's own accounting broke, and
+/// a descriptor that looks like a whole frame underneath it is exactly the
+/// frame least worth believing. That stays terminal, and the safe state for
+/// an input path that cannot be trusted is deaf.
+///
+/// `BNA` is **backpressure**, and it says nothing about the frame in the
+/// ring. It means a frame arrived while the single descriptor was still
+/// software-owned — which on a one-descriptor ring polled once per park beat
+/// is the *designed* consequence of two frames inside one second, not a
+/// malfunction. `STORY-P1-09-16` made it terminal believing it pathological;
+/// the first capture that could read the row (2026-08-08, once `LE-119` put
+/// it on the wire) showed a freshly netbooted board already
+/// `stopped reason=nobuffer accepted=0 refused=0` with no host frame sent,
+/// because ordinary Windows broadcast puts two frames in a beat routinely.
+/// Terminal-on-`BNA` was therefore not a fail-safe posture but a guarantee
+/// that the board can never be spoken to on any real segment.
+///
+/// The drop is **counted and spoken**, never swallowed: a dropped frame that
+/// left no trace would be the silent loss this project refuses everywhere
+/// else, and the count is also the only measure of how contended the single
+/// slot is.
+///
+/// # Errors
+///
+/// [`ReceiveError::Overrun`] only. Its status bit is already cleared, and the
+/// caller must disable receive permanently.
+pub fn read_status<M: Mmio>(device: &M) -> Result<ReceiveStatus, ReceiveError> {
     let status = device.read_u32(register::RSR);
     device.write_u32(register::RSR, status);
     if status & rsr::OVERRUN != 0 {
         return Err(ReceiveError::Overrun);
     }
-    if status & rsr::BUFFER_NOT_AVAILABLE != 0 {
-        return Err(ReceiveError::BufferUnavailable);
-    }
-    Ok(status & rsr::FRAME_RECEIVED != 0)
+    Ok(ReceiveStatus {
+        frame_waiting: status & rsr::FRAME_RECEIVED != 0,
+        dropped: status & rsr::BUFFER_NOT_AVAILABLE != 0,
+    })
 }
 
 // --- believing the descriptor (criterion 2) ----------------------------------
@@ -487,13 +545,20 @@ impl BeatPlan {
 
 /// Decides one bounded receive pass — total over both inputs.
 ///
-/// The status outranks the descriptor deliberately: an overrun or a
-/// buffer-not-available says the MAC's own accounting broke, and a descriptor
-/// that looks like a whole frame under either of them is exactly the frame
-/// least worth believing. Both stay terminal, which is the refusal
-/// `STORY-P1-09-16` criterion 3 committed to and the re-arm does not weaken.
+/// An **overrun** outranks the descriptor deliberately: it says the MAC's own
+/// accounting broke, and a descriptor that looks like a whole frame
+/// underneath one is exactly the frame least worth believing. That refusal is
+/// `STORY-P1-09-16` criterion 3's and neither the re-arm nor `LE-118`
+/// weakens it.
+///
+/// A **drop** ([`ReceiveStatus::dropped`]) does not outrank anything, and
+/// that is the `LE-118` fix: it is backpressure about a frame that never
+/// entered the ring, so it says nothing about the frame that did. The waiting
+/// frame is classified and the descriptor handed back exactly as on a quiet
+/// beat — which is what keeps the ear alive on a segment where two frames per
+/// second is the median rather than a flood.
 pub const fn beat_plan(
-    status: Result<bool, ReceiveError>,
+    status: Result<ReceiveStatus, ReceiveError>,
     descriptor: DescriptorState,
 ) -> BeatPlan {
     match status {
@@ -895,10 +960,13 @@ mod tests {
 
     // TEST-P1-09-16-A clause 6: fail-closed, and every error arm terminal.
 
+    const QUIET: ReceiveStatus = ReceiveStatus { frame_waiting: false, dropped: false };
+    const FRAME: ReceiveStatus = ReceiveStatus { frame_waiting: true, dropped: false };
+
     #[test]
     fn a_quiet_pass_reports_no_frame_and_leaves_receive_enabled() {
         let device = ScriptedRx::new().steady(register::RSR, 0);
-        assert_eq!(read_status(&device), Ok(false));
+        assert_eq!(read_status(&device), Ok(QUIET));
         assert!(
             device.written_to(gem::register::NCR).is_empty(),
             "nothing happened, so nothing was disabled"
@@ -908,7 +976,7 @@ mod tests {
     #[test]
     fn a_signalled_frame_clears_its_status_bit() {
         let device = ScriptedRx::new().steady(register::RSR, rsr::FRAME_RECEIVED);
-        assert_eq!(read_status(&device), Ok(true));
+        assert_eq!(read_status(&device), Ok(FRAME));
         assert_eq!(
             device.written_to(register::RSR),
             vec![rsr::FRAME_RECEIVED],
@@ -917,7 +985,7 @@ mod tests {
     }
 
     #[test]
-    fn an_overrun_and_a_buffer_not_available_are_two_distinct_terminal_errors() {
+    fn an_overrun_is_terminal_and_outranks_a_frame_in_the_buffer() {
         let device = ScriptedRx::new().steady(register::RSR, rsr::OVERRUN);
         assert_eq!(read_status(&device), Err(ReceiveError::Overrun));
         assert_eq!(
@@ -926,13 +994,58 @@ mod tests {
             "cleared even on the error"
         );
 
-        let device = ScriptedRx::new().steady(register::RSR, rsr::BUFFER_NOT_AVAILABLE);
-        assert_eq!(read_status(&device), Err(ReceiveError::BufferUnavailable));
-
         // An overrun that arrives alongside a received frame is still an
         // overrun: the frame in the buffer may be the truncated one.
         let device = ScriptedRx::new().steady(register::RSR, rsr::OVERRUN | rsr::FRAME_RECEIVED);
         assert_eq!(read_status(&device), Err(ReceiveError::Overrun));
+    }
+
+    // `LE-118`, and the fix's whole point: `BNA` is backpressure about a
+    // frame that never entered the ring, so it is counted, and it says
+    // nothing about the frame that did.
+
+    #[test]
+    fn a_buffer_not_available_is_a_counted_drop_and_not_terminal() {
+        let device = ScriptedRx::new().steady(register::RSR, rsr::BUFFER_NOT_AVAILABLE);
+        assert_eq!(read_status(&device), Ok(ReceiveStatus { frame_waiting: false, dropped: true }));
+        assert!(
+            device.written_to(gem::register::NCR).is_empty(),
+            "a dropped frame does not disable the ear"
+        );
+        assert_eq!(
+            device.written_to(register::RSR),
+            vec![rsr::BUFFER_NOT_AVAILABLE],
+            "and the bit is still cleared, so the next beat reads the next pass"
+        );
+    }
+
+    /// **The status word that killed the channel**, and the reason the ear was
+    /// deaf on arrival: one frame safely in the ring plus a second the MAC had
+    /// nowhere to put. On this bench that is the median beat, not an edge case
+    /// — and it used to discard the good frame and stop receive for the boot.
+    #[test]
+    fn a_frame_arriving_beside_a_drop_is_kept_and_the_drop_is_counted() {
+        let device = ScriptedRx::new()
+            .steady(register::RSR, rsr::FRAME_RECEIVED | rsr::BUFFER_NOT_AVAILABLE);
+        assert_eq!(read_status(&device), Ok(ReceiveStatus { frame_waiting: true, dropped: true }));
+        assert!(device.written_to(gem::register::NCR).is_empty(), "the ear survives");
+    }
+
+    /// The plan-level statement of the same property: a drop classifies and
+    /// re-arms exactly as a quiet beat does, and only an overrun stops.
+    #[test]
+    fn a_drop_still_classifies_the_waiting_frame_and_hands_the_descriptor_back() {
+        let dropped = ReceiveStatus { frame_waiting: true, dropped: true };
+        let plan = beat_plan(Ok(dropped), DescriptorState::Frame { length: 64 });
+        assert_eq!(plan, BeatPlan::Classify { length: 64 });
+        assert!(plan.hands_descriptor_back(), "the ear is re-armed for the next beat");
+        // And the terminal arm is untouched by any of it.
+        assert_eq!(
+            beat_plan(Err(ReceiveError::Overrun), DescriptorState::Frame { length: 64 }),
+            BeatPlan::Stop(ReceiveError::Overrun)
+        );
+        assert!(!beat_plan(Err(ReceiveError::Overrun), DescriptorState::MacOwns)
+            .hands_descriptor_back());
     }
 
     #[test]
@@ -1079,7 +1192,10 @@ mod tests {
     #[test]
     fn a_quiet_beat_leaves_the_descriptor_exactly_where_the_mac_has_it() {
         for signalled in [false, true] {
-            let plan = beat_plan(Ok(signalled), DescriptorState::MacOwns);
+            let plan = beat_plan(
+                Ok(ReceiveStatus { frame_waiting: signalled, dropped: false }),
+                DescriptorState::MacOwns,
+            );
             assert_eq!(plan, BeatPlan::Quiet, "nothing arrived, so nothing is handed back");
             assert!(!plan.hands_descriptor_back());
         }
@@ -1087,7 +1203,7 @@ mod tests {
 
     #[test]
     fn a_whole_frame_is_classified_and_the_descriptor_is_handed_back() {
-        let plan = beat_plan(Ok(true), DescriptorState::Frame { length: 60 });
+        let plan = beat_plan(Ok(FRAME), DescriptorState::Frame { length: 60 });
         assert_eq!(
             plan,
             BeatPlan::Classify { length: 60 },
@@ -1106,7 +1222,7 @@ mod tests {
             DescriptorRefusal::ZeroLength,
             DescriptorRefusal::OverLength,
         ] {
-            let plan = beat_plan(Ok(true), DescriptorState::Refused(refusal));
+            let plan = beat_plan(Ok(FRAME), DescriptorState::Refused(refusal));
             assert_eq!(
                 plan,
                 BeatPlan::Malformed(refusal),
@@ -1124,7 +1240,7 @@ mod tests {
         // The exhaustive statement of TEST-P1-09-16-A clause 6 against the
         // re-arm added by clause 10: whatever the descriptor happens to say,
         // a terminal status is terminal and hands nothing back.
-        for error in [ReceiveError::Overrun, ReceiveError::BufferUnavailable] {
+        for error in [ReceiveError::Overrun] {
             for descriptor in every_descriptor_state() {
                 let plan = beat_plan(Err(error), descriptor);
                 assert_eq!(
@@ -1144,9 +1260,16 @@ mod tests {
     fn the_beat_plan_is_total_and_exactly_the_healthy_arms_hand_the_descriptor_back() {
         let mut handed_back = 0;
         let mut kept = 0;
-        for status in
-            [Ok(false), Ok(true), Err(ReceiveError::Overrun), Err(ReceiveError::BufferUnavailable)]
-        {
+        // All four status shapes: quiet, a frame, a drop, a frame beside a
+        // drop — plus the one terminal error. `LE-118` is why the drop arms
+        // are here and why `BufferUnavailable` is not.
+        for status in [
+            Ok(QUIET),
+            Ok(FRAME),
+            Ok(ReceiveStatus { frame_waiting: false, dropped: true }),
+            Ok(ReceiveStatus { frame_waiting: true, dropped: true }),
+            Err(ReceiveError::Overrun),
+        ] {
             for descriptor in every_descriptor_state() {
                 let plan = beat_plan(status, descriptor);
                 // Totality: every input has an answer, and the answer's
@@ -1163,7 +1286,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(handed_back + kept, 4 * 5, "every combination classified");
+        assert_eq!(handed_back + kept, 5 * 5, "every combination classified");
         assert!(handed_back > 0 && kept > 0, "both halves are reachable");
     }
 
@@ -1197,10 +1320,10 @@ mod tests {
         // frame does not exist until the MAC has somewhere to put it, so the
         // beat immediately after a hand-back reads the descriptor the MAC
         // owns again — a bound rather than a hope.
-        let first = beat_plan(Ok(true), DescriptorState::Frame { length: 60 });
+        let first = beat_plan(Ok(FRAME), DescriptorState::Frame { length: 60 });
         assert!(first.hands_descriptor_back());
         let next =
-            beat_plan(Ok(false), classify_descriptor(rearm(0x0008_3000).expect("aligned")[0], 0));
+            beat_plan(Ok(QUIET), classify_descriptor(rearm(0x0008_3000).expect("aligned")[0], 0));
         assert_eq!(next, BeatPlan::Quiet);
     }
 
