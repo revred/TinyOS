@@ -69,12 +69,21 @@ pub const COMMAND_PAYLOAD_BYTES: usize = 46;
 /// How many octets the board copies out of the receive region before handing
 /// the descriptor back — one more than the envelope, on purpose.
 ///
-/// The extra octet is what keeps [`CommandRefusal::Oversize`] reachable. A
+/// The extra octets are what keep [`CommandRefusal::Oversize`] reachable. A
 /// buffer sized exactly to the envelope would truncate every over-long frame
 /// into a perfectly well-formed command, so the refusal would exist in this
 /// file and be unreachable on the board: the classifier would answer a frame
 /// it is specified to refuse, and no test on the wire would ever say so.
-pub const ADMITTED_CAPACITY: usize = COMMAND_PAYLOAD_BYTES + 1;
+///
+/// **Sixteen spare rather than one, since 2026-08-08 (`LE-122`).** One spare
+/// octet made the refusal reachable but made its *width* unknowable: the
+/// first real console exchange reported `lastlen=47` for a 46-octet envelope,
+/// and 47 was simply the cap, so the board could say "too wide" and not by
+/// how much. A copy-out bound that saturates at one past the limit measures
+/// nothing beyond it, and this project's own rule is that a refusal names
+/// what it refused. Sixteen is enough to carry any plausible framing surplus
+/// — an FCS is four — while staying far inside the region's own bound.
+pub const ADMITTED_CAPACITY: usize = COMMAND_PAYLOAD_BYTES + 16;
 
 /// The fixed offsets. Every read in this module goes through one of these
 /// ranges and there is no other addressing of the payload anywhere.
@@ -551,11 +560,24 @@ mod tests {
         // receive region. Sized to the envelope exactly, an over-long frame
         // would arrive here truncated into a well-formed command and the
         // board would answer something it is specified to refuse.
-        assert_eq!(ADMITTED_CAPACITY, COMMAND_PAYLOAD_BYTES + 1);
+        //
+        // The headroom is asserted as a *floor* rather than an exact width
+        // (`LE-122`): one spare octet keeps the refusal reachable but makes
+        // its width unknowable, and the board must be able to report how far
+        // over an over-long frame was. A count is a floor, never a total.
+        assert!(ADMITTED_CAPACITY > COMMAND_PAYLOAD_BYTES, "the refusal must stay reachable");
+        assert!(
+            ADMITTED_CAPACITY >= COMMAND_PAYLOAD_BYTES + 4,
+            "and wide enough to measure a framing surplus — an FCS is four"
+        );
         let good = payload(Verb::Ping.id(), 1);
         let mut over = [0u8; ADMITTED_CAPACITY];
         over[..COMMAND_PAYLOAD_BYTES].copy_from_slice(&good);
         assert_eq!(classify(&over), Err(CommandRefusal::Oversize));
+        // Every width past the envelope is refused, not just the first.
+        for width in COMMAND_PAYLOAD_BYTES + 1..=ADMITTED_CAPACITY {
+            assert_eq!(classify(&over[..width]), Err(CommandRefusal::Oversize), "at {width}");
+        }
         assert_eq!(
             classify(&over[..COMMAND_PAYLOAD_BYTES]),
             Ok(Command { verb: Verb::Ping, sequence: 1 })

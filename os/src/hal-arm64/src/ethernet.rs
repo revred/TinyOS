@@ -496,6 +496,7 @@ pub fn command_line(
     last: Option<crate::tos64_cmd::Verb>,
     answered: u32,
     refused: u32,
+    last_payload_len: usize,
 ) -> ([u8; LINK_LINE_CAPACITY], usize) {
     let mut line = LineBuilder::new();
     line.push("TOS64-CMD/1 last=");
@@ -507,6 +508,15 @@ pub fn command_line(
     line.push_dec(answered);
     line.push(" refused=");
     line.push_dec(refused);
+    // The width of the last admitted payload, as the BOARD measured it
+    // (`LE-122`). A host that sends an exactly-46-octet envelope and a board
+    // that answers `oversize` disagree about a number, and until the board
+    // states its own the disagreement can only be guessed at — the leading
+    // hypothesis being that the descriptor's frame length includes the
+    // 4-octet FCS. Reported rather than inferred; a measured field costs one
+    // decimal on a line that already rides the wire.
+    line.push(" lastlen=");
+    line.push_dec(last_payload_len as u32);
     line.push("\n");
     (line.bytes, line.at)
 }
@@ -1283,10 +1293,10 @@ mod tests {
     #[test]
     fn the_command_line_names_the_last_verb_answered_and_both_counts() {
         use crate::tos64_cmd::{CommandChannel, Verb, ANSWER_CAPACITY};
-        let (bytes, len) = command_line(None, 0, 0);
+        let (bytes, len) = command_line(None, 0, 0, 0);
         assert_eq!(
             core::str::from_utf8(&bytes[..len]).unwrap(),
-            "TOS64-CMD/1 last=none answered=0 refused=0\n",
+            "TOS64-CMD/1 last=none answered=0 refused=0 lastlen=0\n",
             "a board that has answered nothing says so; a blank row is not a claim"
         );
 
@@ -1301,22 +1311,23 @@ mod tests {
         payload[crate::tos64_cmd::field::VERB].copy_from_slice(&Verb::Ping.id().to_be_bytes());
         channel.offer(&payload);
         channel.take(b"", &mut out);
-        let (bytes, len) = command_line(channel.last(), channel.answered(), channel.refused());
+        let (bytes, len) = command_line(channel.last(), channel.answered(), channel.refused(), 46);
         assert_eq!(
             core::str::from_utf8(&bytes[..len]).unwrap(),
-            "TOS64-CMD/1 last=PING answered=1 refused=0\n"
+            "TOS64-CMD/1 last=PING answered=1 refused=0 lastlen=46\n"
         );
 
-        let (bytes, len) = command_line(Some(Verb::Status), 4, 9);
+        let (bytes, len) = command_line(Some(Verb::Status), 4, 9, 46);
         assert_eq!(
             core::str::from_utf8(&bytes[..len]).unwrap(),
-            "TOS64-CMD/1 last=STATUS answered=4 refused=9\n"
+            "TOS64-CMD/1 last=STATUS answered=4 refused=9 lastlen=46\n"
         );
     }
 
     #[test]
     fn the_command_line_never_overruns_its_buffer_at_the_widest_counts() {
-        let (_, len) = command_line(Some(crate::tos64_cmd::Verb::Status), u32::MAX, u32::MAX);
+        let (_, len) =
+            command_line(Some(crate::tos64_cmd::Verb::Status), u32::MAX, u32::MAX, usize::MAX);
         assert!(len <= LINK_LINE_CAPACITY);
     }
 
@@ -2202,6 +2213,10 @@ mod glue {
         // LE-118: frames the MAC had nowhere to put, counted rather than
         // fatal — the measure of how contended the single slot is.
         let mut rx_dropped: u32 = 0;
+        // LE-122: the width of the last admitted payload as the board
+        // measured it, so a host/board disagreement about a fixed width is
+        // read off the wire rather than inferred.
+        let mut rx_last_len: usize = 0;
         // `STORY-P1-09-17`: the command channel. Deny-by-default, two rows,
         // one line per beat. It holds no authority and reaches nothing — the
         // whole of its state is one pending line, one drop count and two
@@ -2445,6 +2460,7 @@ mod glue {
                                     commands.last(),
                                     commands.answered(),
                                     commands.refused(),
+                                    rx_last_len,
                                 );
                                 line[..len].copy_from_slice(&text[..len]);
                                 Some(len)
@@ -2491,6 +2507,7 @@ mod glue {
                     // is what keeps "no path transmits in response to a frame
                     // outside the answer slot" a shape rather than a promise.
                     if payload_len > 0 {
+                        rx_last_len = payload_len;
                         commands.offer(&admitted[..payload_len]);
                     }
                 } else if receive == gem_receive::ReceiveState::Listening {
@@ -2525,8 +2542,12 @@ mod glue {
                         }
                     }
                 }
-                let (cmd_text, cmd_len) =
-                    command_line(commands.last(), commands.answered(), commands.refused());
+                let (cmd_text, cmd_len) = command_line(
+                    commands.last(),
+                    commands.answered(),
+                    commands.refused(),
+                    rx_last_len,
+                );
                 crate::canvas::draw_line(
                     &mut console,
                     crate::canvas::CMD_Y,
