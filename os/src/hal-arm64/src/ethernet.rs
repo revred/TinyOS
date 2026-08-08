@@ -392,6 +392,44 @@ pub fn emit_heartbeat<M: Mmio>(
     }
 }
 
+/// Which frame the transcript cycle transmits on one beat (`LE-119`).
+///
+/// The cycle is the transcript's recorded lines **plus two live rows** — the
+/// receive channel and the command channel — so the inbound channel's state
+/// and counters exist on the wire even when the canvas is refused (`LE-98`'s
+/// open condition, and exactly the boot `17A` found them invisible on: a
+/// running board whose capture carried every outbound channel and nothing at
+/// all about the inbound one). Slots, not extra transmits: the beat still
+/// carries one text frame, so the cadence a capture window is sized against
+/// does not move (`hand-2026-08-06/03B` §3a's constraint, kept) — the rows
+/// simply join the rotation and come round once per cycle, carrying whatever
+/// the counters say at that beat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CycleSlot {
+    /// The nth recorded transcript line.
+    Transcript(usize),
+    /// The live `TOS64-RX/1` row.
+    ReceiveRow,
+    /// The live `TOS64-CMD/1` row.
+    CommandRow,
+}
+
+/// Resolves one beat to its slot in the widened cycle. Pure; pinned by the
+/// tests, because the park-loop glue that consumes it is the one place no
+/// host test can reach.
+#[must_use]
+pub fn cycle_slot(beat: u32, transcript_count: usize) -> CycleSlot {
+    let slots = transcript_count + 2;
+    let nth = beat as usize % slots;
+    if nth < transcript_count {
+        CycleSlot::Transcript(nth)
+    } else if nth == transcript_count {
+        CycleSlot::ReceiveRow
+    } else {
+        CycleSlot::CommandRow
+    }
+}
+
 /// Builds one `TOS64-RX/1` line (`STORY-P1-09-16`): the board's first inbound
 /// channel, reported every beat on the canvas.
 ///
@@ -1268,6 +1306,44 @@ mod tests {
         assert!(len <= LINK_LINE_CAPACITY);
     }
 
+    // `LE-119`: the inbound channel must exist on the wire, not only on a
+    // canvas the firmware may refuse — and the rotation is the pure piece
+    // the unreachable park-loop glue consumes.
+
+    #[test]
+    fn the_cycle_carries_every_transcript_line_and_both_live_rows() {
+        let count = 23;
+        let mut seen_rx = false;
+        let mut seen_cmd = false;
+        let mut transcript = [false; 23];
+        for beat in 0..(count as u32 + 2) {
+            match cycle_slot(beat, count) {
+                CycleSlot::Transcript(nth) => transcript[nth] = true,
+                CycleSlot::ReceiveRow => seen_rx = true,
+                CycleSlot::CommandRow => seen_cmd = true,
+            }
+        }
+        assert!(transcript.iter().all(|&carried| carried), "every recorded line rides");
+        assert!(seen_rx && seen_cmd, "and so do both live rows");
+    }
+
+    #[test]
+    fn an_empty_transcript_still_reports_the_live_rows() {
+        assert_eq!(cycle_slot(0, 0), CycleSlot::ReceiveRow);
+        assert_eq!(cycle_slot(1, 0), CycleSlot::CommandRow);
+        assert_eq!(cycle_slot(2, 0), CycleSlot::ReceiveRow);
+    }
+
+    #[test]
+    fn the_cycle_length_is_the_transcript_plus_exactly_two() {
+        // A capture window is sized from the cycle length (the comment at the
+        // transmit site states it as `count + 2` seconds); this is the pin
+        // that keeps that sentence true.
+        for beat in 0..100u32 {
+            assert_eq!(cycle_slot(beat, 5), cycle_slot(beat + 7, 5));
+        }
+    }
+
     #[test]
     fn the_receive_line_never_overruns_its_buffer_at_the_widest_counts() {
         use crate::gem_receive::{ReceiveError, ReceiveState};
@@ -1897,8 +1973,13 @@ mod glue {
     /// Stages one transcript line as a text frame (`STORY-P1-07-06`), and
     /// since `STORY-P1-09-17` the command channel's answers and refusals —
     /// one staging region, one frame builder, no second grant.
+    ///
+    /// Through the *spoken* builder (`LE-120`): a line too long for its frame
+    /// rides as a self-describing `TOS64-TRUNC/1` refusal, never truncated
+    /// (the first campaign's fate) and never silently dropped (the same loss
+    /// one layer up).
     fn stage_text_line(line: &[u8]) -> u64 {
-        let (frame, len) = gem::text_frame(line);
+        let (frame, len) = gem::text_frame_spoken(line);
         stage_bytes(&frame, len)
     }
 
@@ -2308,29 +2389,51 @@ mod glue {
                 // measurement. Same fail-safe as the beacon: one refusal ends
                 // the channel and is spoken.
                 //
-                // **A full cycle is `count` beats, and the beat is 1 Hz, so it
-                // is `count` seconds — 18 at the 14-metric envelope of
-                // 2026-08-06.** Stated as a function of `count` rather than as
-                // the "dozen-odd seconds" this comment used to claim: that was
-                // written when the envelope was shorter, and a capture window
-                // sized from a stale constant is how an operator concludes a
-                // line was never transmitted when it simply had not come round
-                // yet. Size the capture from `line_count`, with margin.
+                // **A full cycle is `count + 2` beats (the transcript plus
+                // the two live rows, `LE-119`), and the beat is 1 Hz, so it
+                // is `count + 2` seconds.** Stated as a function of `count`
+                // rather than as the "dozen-odd seconds" this comment used to
+                // claim: that was written when the envelope was shorter, and
+                // a capture window sized from a stale constant is how an
+                // operator concludes a line was never transmitted when it
+                // simply had not come round yet. Size the capture from
+                // `line_count`, with margin.
                 #[cfg(feature = "fixture-measure")]
                 if beaconing {
                     if let Some((speed, full_duplex)) = speed_config {
+                        // `LE-119`: the rotation now includes the two live
+                        // rows, so the inbound channel's state and counters
+                        // reach a passive capture even on a refused-canvas
+                        // boot — the values are the previous beat's, which is
+                        // the honest reading at transmit time.
                         let count = crate::transcript::line_count();
-                        if count > 0 {
-                            let mut line = [0u8; crate::gem::TEXT_FRAME_CAPACITY];
-                            let nth = beat_seq as usize % count;
-                            if let Some(len) = crate::transcript::copy_line(nth, &mut line) {
-                                let ring_dma = stage_text_line(&line[..len]);
-                                if let Err(refused) =
-                                    gem::transmit_once(&gem_window, ring_dma, speed, full_duplex)
-                                {
-                                    stopped = Some(refused);
-                                    beaconing = false;
-                                }
+                        let mut line = [0u8; crate::gem::TEXT_FRAME_CAPACITY];
+                        let staged = match cycle_slot(beat_seq, count) {
+                            CycleSlot::Transcript(nth) => {
+                                crate::transcript::copy_line(nth, &mut line)
+                            }
+                            CycleSlot::ReceiveRow => {
+                                let (text, len) = receive_line(receive, rx_accepted, rx_refused);
+                                line[..len].copy_from_slice(&text[..len]);
+                                Some(len)
+                            }
+                            CycleSlot::CommandRow => {
+                                let (text, len) = command_line(
+                                    commands.last(),
+                                    commands.answered(),
+                                    commands.refused(),
+                                );
+                                line[..len].copy_from_slice(&text[..len]);
+                                Some(len)
+                            }
+                        };
+                        if let Some(len) = staged {
+                            let ring_dma = stage_text_line(&line[..len]);
+                            if let Err(refused) =
+                                gem::transmit_once(&gem_window, ring_dma, speed, full_duplex)
+                            {
+                                stopped = Some(refused);
+                                beaconing = false;
                             }
                         }
                     }

@@ -657,12 +657,23 @@ mod tests {
             .to_path_buf()
     }
 
-    /// `ADR 0005` decision 3 states the count of qualified platforms is zero.
-    /// This asserts it as a value, which is the whole reason the register
-    /// exists — and it is the test that fails loudly the day someone marks a
-    /// platform qualified without a Report to point at.
+    /// Every qualified platform in the committed register cites a Report that
+    /// exists — the property `ADR 0005` decision 3 actually protects.
+    ///
+    /// **This test asserted `qualified_count() == 0` until 2026-08-08**, and
+    /// on 2026-08-07 the Q3 campaign closed, `rpi5-bcm2712` became the first
+    /// qualified platform, and this literal went red on `main` while
+    /// describing the state as a violation. It was never a violation: the
+    /// zero was a *population* count, and `08A` §1's rule is that a count of
+    /// how much work exists is a floor, never a total — including, and
+    /// especially, in a test literal, where it hides better and fires later.
+    ///
+    /// What ADR 0005 forbids is a bound quoted from an *unqualified* source,
+    /// which `validate_platforms` enforces structurally: a `qualified` row
+    /// with no citable Report is refused, an `unqualified` row citing one is
+    /// refused. That is the invariant, and it holds at any count.
     #[test]
-    fn no_platform_in_the_committed_register_is_qualified() {
+    fn every_qualified_platform_in_the_committed_register_cites_a_real_report() {
         let repo_root = repo_root();
         let contents =
             fs::read_to_string(repo_root.join("goals/assurance/qualified-platforms.tsv"))
@@ -676,9 +687,14 @@ mod tests {
                 }
             }
         }
+        // The validator IS the assertion: it refuses a qualified row whose
+        // Report does not exist, and an unqualified row that cites one.
         let index =
             validate_platforms(&contents, &report_ids).expect("committed register is valid");
-        assert_eq!(index.qualified_count(), 0, "ADR 0005 decision 3");
         assert!(index.count() >= 5, "the register names the platforms that measure");
+        assert!(
+            index.qualified_count() <= index.count(),
+            "a qualified platform is one of the registered ones"
+        );
     }
 }

@@ -410,9 +410,20 @@ pub const BEACON_CAPACITY: usize = 64;
 pub const MINIMUM_FRAME_LEN: usize = 60;
 
 /// Capacity of a transcript text frame (`STORY-P1-07-06`): the 14-byte
-/// header plus one `TOS64-MEAS/2` envelope line. Larger than
-/// [`BEACON_CAPACITY`] because a `METRIC` line is ~130 bytes.
-pub const TEXT_FRAME_CAPACITY: usize = 192;
+/// header plus one full transcript line.
+///
+/// **Derived from [`crate::transcript::MAX_LINE_BYTES`], and that is the
+/// `LE-120` fix's structural half.** Until 2026-08-08 this was a bare `192`
+/// while the transcript recorded lines up to 256 octets — so a line the
+/// transcript accepted could be unrideable by the frame, and the first real
+/// campaign line was silently cut mid-field at exactly the old boundary.
+/// Worse, the margin was thinner than it looked: a `METRIC` row with today's
+/// longest name needs only seven-digit latency tails to pass 178 octets, so
+/// every fault-latency outlier was one bad tail away from the same silent
+/// loss. A capacity that is a constant beside its consumers goes stale the
+/// moment anyone adds a field; this one is now a function of the recorder it
+/// carries for (`LE-89`'s rule, applied where it was learned).
+pub const TEXT_FRAME_CAPACITY: usize = 14 + crate::transcript::MAX_LINE_BYTES;
 
 /// Capacity of a spoor frame (`STORY-P1-10-02`): the 14-byte Ethernet header
 /// plus a full `kernel::spoor_wire` payload of 184 packed records.
@@ -443,21 +454,97 @@ pub fn payload_frame(payload: &[u8]) -> Option<([u8; SPOOR_FRAME_CAPACITY], usiz
     Some((frame, len))
 }
 
-/// Builds a broadcast frame whose payload is `text` (truncated to fit) —
+/// The most text octets one [`text_frame`] can carry.
+pub const TEXT_PAYLOAD_CAPACITY: usize = TEXT_FRAME_CAPACITY - 14;
+
+/// Builds a broadcast frame whose payload is `text` **verbatim**, or refuses —
 /// same destination, source and EtherType as the beacon, so the same
 /// `pktmon`/Wireshark filter captures both. The transcript-on-the-wire
 /// carrier (`STORY-P1-07-06`): each envelope line rides as one frame.
-pub fn text_frame(text: &[u8]) -> ([u8; TEXT_FRAME_CAPACITY], usize) {
+///
+/// Returns [`None`] rather than truncating (`LE-120`). This function
+/// truncated until 2026-08-07, and the first real Q3 campaign paid for it:
+/// the campaign line arrived at exactly [`TEXT_PAYLOAD_CAPACITY`] characters,
+/// cut mid-field at `unaccounted_ma`, and **the surviving prefix still parsed
+/// as well-formed `key=value` pairs** — the worst-case excursion the record
+/// is quoted against was silently gone, with nothing anywhere saying so. A
+/// truncated text line is not a shorter version of the same evidence; it is
+/// different evidence wearing the same name.
+#[must_use]
+pub fn text_frame(text: &[u8]) -> Option<([u8; TEXT_FRAME_CAPACITY], usize)> {
+    if text.len() > TEXT_PAYLOAD_CAPACITY {
+        return None;
+    }
     let mut frame = [0u8; TEXT_FRAME_CAPACITY];
     frame[0..6].copy_from_slice(&[0xFF; 6]);
     frame[6..12].copy_from_slice(&BEACON_SOURCE_MAC);
     frame[12] = (BEACON_ETHERTYPE >> 8) as u8;
     frame[13] = BEACON_ETHERTYPE as u8;
-    let take = text.len().min(TEXT_FRAME_CAPACITY - 14);
-    frame[14..14 + take].copy_from_slice(&text[..take]);
-    let at = 14 + take;
+    frame[14..14 + text.len()].copy_from_slice(text);
+    let at = 14 + text.len();
     let len = if at < MINIMUM_FRAME_LEN { MINIMUM_FRAME_LEN } else { at };
-    (frame, len)
+    Some((frame, len))
+}
+
+/// [`text_frame`], with the refusal **spoken** instead of returned.
+///
+/// A line that does not fit rides as `TOS64-TRUNC/1 refused_len=… cap=…` —
+/// a self-describing statement that a line existed and was refused, which a
+/// capture can carry into the register. The alternative shapes are both
+/// worse: truncation is the silent loss `LE-120` records, and a plain `None`
+/// at the park loop would drop the line with nothing on any channel saying a
+/// line was ever there — the same silence one layer up.
+///
+/// The refusal line itself always fits: its widest form (a 20-digit length)
+/// is under 60 octets, pinned by test.
+#[must_use]
+pub fn text_frame_spoken(text: &[u8]) -> ([u8; TEXT_FRAME_CAPACITY], usize) {
+    if let Some(built) = text_frame(text) {
+        return built;
+    }
+    // `TOS64-TRUNC/1 refused_len=<n> cap=<cap>\n`, built without `fmt` to
+    // keep this path allocation- and panic-free like every frame builder.
+    let mut line = [0u8; 64];
+    let mut at = 0;
+    for byte in b"TOS64-TRUNC/1 refused_len=" {
+        line[at] = *byte;
+        at += 1;
+    }
+    at += push_decimal(&mut line[at..], text.len() as u64);
+    for byte in b" cap=" {
+        line[at] = *byte;
+        at += 1;
+    }
+    at += push_decimal(&mut line[at..], TEXT_PAYLOAD_CAPACITY as u64);
+    line[at] = b'\n';
+    at += 1;
+    match text_frame(&line[..at]) {
+        Some(built) => built,
+        // Unreachable by construction (64 < TEXT_PAYLOAD_CAPACITY), and the
+        // fallback is an empty frame rather than a panic in the park loop.
+        None => text_frame(b"").unwrap_or(([0u8; TEXT_FRAME_CAPACITY], MINIMUM_FRAME_LEN)),
+    }
+}
+
+/// Writes `value` in decimal, most significant digit first, returning the
+/// digit count. The buffer must hold 20 octets past `at` — callers size for
+/// `u64::MAX`.
+fn push_decimal(into: &mut [u8], value: u64) -> usize {
+    let mut digits = [0u8; 20];
+    let mut count = 0;
+    let mut rest = value;
+    loop {
+        digits[count] = b'0' + (rest % 10) as u8;
+        count += 1;
+        rest /= 10;
+        if rest == 0 {
+            break;
+        }
+    }
+    for index in 0..count {
+        into[index] = digits[count - 1 - index];
+    }
+    count
 }
 
 /// Builds the board-present beacon frame: broadcast destination,
@@ -933,7 +1020,7 @@ mod tests {
 
     #[test]
     fn a_text_frame_carries_its_line_behind_the_same_header_as_the_beacon() {
-        let (frame, len) = text_frame(b"TOS64-MEAS/2 END metrics=8");
+        let (frame, len) = text_frame(b"TOS64-MEAS/2 END metrics=8").expect("a short line fits");
         assert_eq!(&frame[0..6], &[0xFF; 6], "broadcast destination");
         assert_eq!(&frame[6..12], &BEACON_SOURCE_MAC);
         assert_eq!(frame[12], 0x88);
@@ -941,11 +1028,109 @@ mod tests {
         assert_eq!(&frame[14..40], b"TOS64-MEAS/2 END metrics=8" as &[u8]);
         assert_eq!(len, MINIMUM_FRAME_LEN, "short payloads pad to the Ethernet minimum");
         assert!(frame[40..MINIMUM_FRAME_LEN].iter().all(|&b| b == 0), "zero padding");
-        // A long line truncates to the capacity, never wraps or overruns.
+        // `LE-120`: a long line is REFUSED, never truncated — the first real
+        // campaign line was cut mid-field at exactly the old truncation
+        // boundary and the surviving prefix still parsed as well-formed
+        // key=value pairs, which is the worst available failure shape.
         let long = [b'M'; TEXT_FRAME_CAPACITY * 2];
-        let (frame, len) = text_frame(&long);
+        assert!(text_frame(&long).is_none());
+        // The boundary is exact: the largest fitting line fits verbatim.
+        let (frame, len) = text_frame(&long[..TEXT_PAYLOAD_CAPACITY]).expect("exactly fits");
         assert_eq!(len, TEXT_FRAME_CAPACITY);
         assert!(frame[14..].iter().all(|&b| b == b'M'));
+    }
+
+    /// `LE-120`'s spoken half: the park loop must never silently drop a line
+    /// either, so the refusal itself rides the wire, self-describing.
+    #[test]
+    fn an_overlong_line_rides_as_a_spoken_refusal_not_a_silence() {
+        let long = [b'M'; 300];
+        let (frame, len) = text_frame_spoken(&long);
+        let payload = core::str::from_utf8(&frame[14..len]).expect("ASCII payload");
+        assert!(
+            payload.starts_with("TOS64-TRUNC/1 refused_len=300 cap=256\n"),
+            "the refusal names what was lost: {payload}"
+        );
+        // A fitting line is untouched by the wrapper.
+        let (frame, len) = text_frame_spoken(b"TOS64-MEAS/2 END metrics=8");
+        assert_eq!(&frame[14..40], b"TOS64-MEAS/2 END metrics=8" as &[u8]);
+        assert_eq!(len, MINIMUM_FRAME_LEN);
+    }
+
+    /// The refusal line's own widest form fits with room to spare — a refusal
+    /// that could itself be refused would recurse into the silence it exists
+    /// to prevent.
+    #[test]
+    fn the_refusal_line_always_fits_its_own_frame() {
+        let mut line = [0u8; 64];
+        let mut at = 0;
+        for byte in b"TOS64-TRUNC/1 refused_len=" {
+            line[at] = *byte;
+            at += 1;
+        }
+        at += push_decimal(&mut line[at..], u64::MAX);
+        for byte in b" cap=" {
+            line[at] = *byte;
+            at += 1;
+        }
+        at += push_decimal(&mut line[at..], TEXT_PAYLOAD_CAPACITY as u64);
+        line[at] = b'\n';
+        at += 1;
+        assert!(at <= TEXT_PAYLOAD_CAPACITY, "widest refusal is {at} octets");
+        // And it is still a well-formed line at that width, not merely a
+        // short one: the refusal is evidence a reader must be able to parse.
+        let widest = core::str::from_utf8(&line[..at]).expect("ASCII");
+        assert!(widest.starts_with("TOS64-TRUNC/1 refused_len=18446744073709551615 cap="));
+        assert!(widest.ends_with('\n'));
+    }
+
+    /// `LE-120`'s general half, pinned at the producer that motivated it: a
+    /// `METRIC` row at a stated set of budgets fits the frame that carries
+    /// it, so a metric rename or a wider tail fails on a laptop instead of
+    /// silently losing the row's end on a boot (the campaign line's fate,
+    /// 2026-08-07).
+    ///
+    /// The budgets, stated rather than implied: a 64-octet name (today's
+    /// longest is 53), twelve-digit cycle fields (4×10¹¹ cycles ≈ 167 s at
+    /// 2.4 GHz — beyond any single measured operation by orders), and
+    /// seven-digit counts (`SAMPLES` is 1,000). Genuinely wider values — a
+    /// wrapped counter's `u64::MAX` — are the broken-instrument case, and the
+    /// spoken `TOS64-TRUNC/1` refusal is the honest carrier for those, not a
+    /// frame sized for pathology.
+    #[test]
+    fn the_widest_metric_row_fits_the_text_frame_that_carries_it() {
+        use kernel::measure::{Metric, Summary};
+        let widest = Summary {
+            n: 9_999_999,
+            dropped: 9_999_999,
+            min: 999_999_999_999,
+            p50: 999_999_999_999,
+            p99: 999_999_999_999,
+            p99_9: 999_999_999_999,
+            max: 999_999_999_999,
+        };
+        let name = "m".repeat(64);
+        let metric = Metric { domain: "D25", name: &name, warmup: 9_999_999, summary: widest };
+        let environment = kernel::measure::Environment {
+            tier: "T1",
+            arch: "aarch64",
+            platform: "rpi5-bcm2712",
+            qualification: kernel::measure::UNQUALIFIED,
+            cycle_source: "pmccntr_el0",
+            overhead_cycles: u64::MAX,
+            cycles_per_us: None,
+        };
+        let mut sink = String::new();
+        let mut report =
+            kernel::measure::Report::begin(&mut sink, &environment).expect("begin writes");
+        report.metric(&metric).expect("metric writes");
+        report.end().expect("end writes");
+        let line = sink.lines().nth(1).expect("the METRIC line");
+        assert!(
+            line.len() <= TEXT_PAYLOAD_CAPACITY,
+            "a METRIC row at the 64-octet name budget must fit: {} octets",
+            line.len()
+        );
     }
 
     #[test]
