@@ -565,11 +565,12 @@ mod tests {
         // (`LE-122`): one spare octet keeps the refusal reachable but makes
         // its width unknowable, and the board must be able to report how far
         // over an over-long frame was. A count is a floor, never a total.
-        assert!(ADMITTED_CAPACITY > COMMAND_PAYLOAD_BYTES, "the refusal must stay reachable");
-        assert!(
-            ADMITTED_CAPACITY >= COMMAND_PAYLOAD_BYTES + 4,
-            "and wide enough to measure a framing surplus — an FCS is four"
-        );
+        // `const` blocks: these are claims about constants, so they belong to
+        // compilation rather than to a test run — and plain `assert!` on a
+        // constant is a clippy error under `-D warnings` on the runner.
+        const { assert!(ADMITTED_CAPACITY > COMMAND_PAYLOAD_BYTES) };
+        // Wide enough to measure a framing surplus — an FCS is four.
+        const { assert!(ADMITTED_CAPACITY >= COMMAND_PAYLOAD_BYTES + 4) };
         let good = payload(Verb::Ping.id(), 1);
         let mut over = [0u8; ADMITTED_CAPACITY];
         over[..COMMAND_PAYLOAD_BYTES].copy_from_slice(&good);
