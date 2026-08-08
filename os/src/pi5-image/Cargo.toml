@@ -34,3 +34,14 @@ hal-arm64 = { path = "../hal-arm64" }
 # `fixture-measure` feature selects it; otherwise contributes nothing to the
 # image (the kernel lib's arch-neutral core is dead-stripped).
 kernel = { path = "../kernel" }
+# `STORY-P1-09-18` / `21A` §3 step 2: the usable OS, carried by the image a
+# human boots. `TINYCMD`'s verb core, the labelled RAM volume and the DOS
+# front-end — the surface that existed, was tested, and until `LE-123` was
+# compiled into the x86_64 side only.
+#
+# The dependency belongs *here* rather than in `hal-arm64` because it cannot
+# live there: `shell` depends on `kernel`, and on AArch64 the dependency runs
+# `kernel` → `hal-arm64`, so a HAL that named `shell` would be a cycle. This
+# crate is the composition root — the one place that sees the whole graph —
+# and `src/wire_shell.rs` is where it does the composing.
+shell = { path = "../shell" }

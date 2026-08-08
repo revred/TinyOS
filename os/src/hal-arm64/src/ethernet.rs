@@ -1310,7 +1310,7 @@ mod tests {
         payload[crate::tos64_cmd::field::MAGIC].copy_from_slice(crate::tos64_cmd::COMMAND_MAGIC);
         payload[crate::tos64_cmd::field::VERB].copy_from_slice(&Verb::Ping.id().to_be_bytes());
         channel.offer(&payload);
-        channel.take(b"", &mut out);
+        channel.take(crate::tos64_cmd::AnswerText { status: b"", output: b"" }, &mut out);
         let (bytes, len) = command_line(channel.last(), channel.answered(), channel.refused(), 46);
         assert_eq!(
             core::str::from_utf8(&bytes[..len]).unwrap(),
@@ -2530,8 +2530,29 @@ mod glue {
                     if let Some((speed, full_duplex)) = speed_config {
                         let mut status = [0u8; STATUS_TEXT_CAPACITY];
                         let status_len = boot_verdict(&mut status);
+                        // `STORY-P1-09-18`: the `SHELL` row's answer needs its
+                        // line run before it can be rendered, and the run
+                        // happens **here**, inside the bounded slot. That
+                        // placement is the containment and not a convenience:
+                        // a command therefore costs exactly the one beat the
+                        // answer was always going to cost, so widening the
+                        // table did not widen the work an unauthenticated peer
+                        // can make this board do per beat (`SEC-20`). The
+                        // runner is stateless and lives behind a symbol seam —
+                        // see `crate::wire_shell`.
+                        let mut output = [0u8; crate::tos64_cmd::SHELL_OUTPUT_CAPACITY];
+                        let output_len = match commands.pending_line() {
+                            Some(line) => crate::wire_shell::run(line, &mut output),
+                            None => 0,
+                        };
                         let mut answer = [0u8; crate::tos64_cmd::ANSWER_CAPACITY];
-                        if let Some(len) = commands.take(&status[..status_len], &mut answer) {
+                        if let Some(len) = commands.take(
+                            crate::tos64_cmd::AnswerText {
+                                status: &status[..status_len],
+                                output: &output[..output_len],
+                            },
+                            &mut answer,
+                        ) {
                             let ring_dma = stage_text_line(&answer[..len]);
                             if let Err(refused) =
                                 gem::transmit_once(&gem_window, ring_dma, speed, full_duplex)

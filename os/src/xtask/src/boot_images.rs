@@ -86,10 +86,26 @@ pub struct ClippyTarget {
 /// crates short: `kernel` is the crate whose target-gating broke the link
 /// twice, and `pi5-image` is where the `#[used]` link seam lives. A lint gate
 /// that cannot see the crate that failed is not a gate over it.
+///
+/// **`shell` joined on 2026-08-08 (`21A` §4, `LE-123`), and it is here for a
+/// different reason than the other three.** They are board crates that a
+/// regression could stop compiling. `shell` is the crate that *never* compiled
+/// for this target — its library is arch-neutral by construction, but its
+/// manifest named `hal-x86_64` as a crate-wide dependency for the benefit of
+/// its x86_64 fixture binary, so the board target dragged an x86 HAL it never
+/// calls into. That is why the usable OS lived on one architecture and the
+/// board ran instruments on another. Clippy for the target both compiles and
+/// lints, so one row here is the whole gate.
+///
+/// This entry is written **before** the manifest that satisfies it, on purpose:
+/// the dependency is exactly the kind someone re-adds while fixing an unrelated
+/// fixture, and a crate that compiles for the board today and silently stops
+/// tomorrow is the failure this module exists to catch.
 pub const CLIPPY_TARGETS: &[ClippyTarget] = &[
     ClippyTarget { package: "hal-arm64", lib_only: false },
     ClippyTarget { package: "kernel", lib_only: true },
     ClippyTarget { package: "pi5-image", lib_only: false },
+    ClippyTarget { package: "shell", lib_only: true },
 ];
 
 /// Packages whose HOST lint must be checked one at a time (`LE-77`).
@@ -203,18 +219,57 @@ mod tests {
         }
     }
 
-    /// The one narrowing that is legitimate, pinned so it stays the only one:
-    /// `kernel`'s bin is the x86_64 Tier 0 guest and is not an AArch64
-    /// artifact. Widening `lib_only` to another crate would be hiding a
-    /// failure rather than scoping a lint.
+    /// The narrowing rule, stated as a rule rather than as a list of one:
+    /// `--lib` is legitimate exactly for a crate whose `[[bin]]` is an x86_64
+    /// Tier 0 fixture and therefore not an AArch64 artifact at all. `kernel`
+    /// and `shell` are both that shape; the other two are board crates whose
+    /// binaries *are* the thing being gated. Narrowing anything else would be
+    /// hiding a failure rather than scoping a lint.
     #[test]
-    fn only_the_kernel_library_is_linted_and_only_the_kernel() {
+    fn only_the_crates_whose_binary_is_an_x86_64_fixture_are_scoped_to_their_library() {
+        const X86_FIXTURE_HOSTS: [&str; 2] = ["kernel", "shell"];
         for target in CLIPPY_TARGETS {
             assert_eq!(
                 target.lib_only,
-                target.package == "kernel",
+                X86_FIXTURE_HOSTS.contains(&target.package),
                 "{} scopes clippy to its library",
                 target.package
+            );
+        }
+    }
+
+    /// `21A` §4 / `LE-123` — the row this whole gate was extended for.
+    ///
+    /// The usable OS (`TINYCMD`'s verb core, the labelled volume, the DOS
+    /// front-end, the `.TCB` runner) is `shell`. Until this entry existed
+    /// nothing in the tree compiled it for the board, so "the shell is
+    /// arch-neutral" was an argument from its source rather than a fact about
+    /// a build — and the manifest disagreed with the argument for as long as
+    /// nobody asked. Asserted here rather than left to the operator, because
+    /// the whole lesson of `LE-72` is that coverage is a property of the list.
+    #[test]
+    fn the_shell_library_is_compiled_for_the_board() {
+        let entry = CLIPPY_TARGETS
+            .iter()
+            .find(|target| target.package == "shell")
+            .expect("shell --lib for the board target is step 1 of 21A §3");
+        assert!(
+            entry.lib_only,
+            "shell's [[bin]] is the x86_64 Tier 0 parity fixture and is not a board artifact"
+        );
+    }
+
+    /// The three crates the board image is actually built from stay covered.
+    ///
+    /// Pinned separately from the `shell` row so that adding a crate to this
+    /// list can never be mistaken for a licence to drop one: `21A`'s step 1 is
+    /// an addition to `LE-72`'s gate, not a replacement of it.
+    #[test]
+    fn adding_the_shell_did_not_displace_the_crates_the_image_links() {
+        for package in ["hal-arm64", "kernel", "pi5-image"] {
+            assert!(
+                CLIPPY_TARGETS.iter().any(|target| target.package == package),
+                "{package} left the board lint set"
             );
         }
     }

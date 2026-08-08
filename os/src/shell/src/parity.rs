@@ -4,7 +4,7 @@
 
 use crate::labels::Labels;
 use crate::policy::{GrantSet, VerbPolicy};
-use crate::verbs::{Env, KillAuthority, NoSpoors, SpoorView, TaskInfo, VerbKind, World};
+use crate::verbs::{Env, KillAuthority, NoSpoors, Platform, SpoorView, TaskInfo, VerbKind, World};
 use crate::volume::RamVolume;
 
 /// Every verb the parity session is granted — the MVP set minus [`WITHHELD`].
@@ -124,6 +124,13 @@ pub fn world_with<'a>(
         .expect("seed LIST");
     World {
         volume,
+        // Part of this lane's determinism, like the serial and the timestamps:
+        // the golden transcript IS the Tier 0 transcript, so its platform is
+        // fixed here where determinism is owned rather than inherited from
+        // wherever the harness happens to run. A board-side parity lane would
+        // need its own golden, not this one with a different `VER` line
+        // (`LE-124`).
+        platform: Platform::TIER0_X86_64,
         env: Env::new(),
         cwd: 0,
         echo: true,

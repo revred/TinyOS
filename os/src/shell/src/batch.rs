@@ -80,7 +80,7 @@ pub fn run(
 mod tests {
     use super::*;
     use crate::policy::GrantSet;
-    use crate::verbs::{Env, VerbKind, World};
+    use crate::verbs::{Env, Platform, VerbKind, World};
     use crate::volume::RamVolume;
 
     const GRANTS: &[VerbKind] = &[VerbKind::Echo, VerbKind::VersionInfo, VerbKind::PrintCwd];
@@ -88,6 +88,7 @@ mod tests {
     fn world(policy: &'static GrantSet) -> World<'static> {
         World {
             volume: RamVolume::new(Some("TINYOS"), (0x1234, 0xABCD)),
+            platform: Platform::TIER0_X86_64,
             env: Env::new(),
             cwd: 0,
             echo: true,

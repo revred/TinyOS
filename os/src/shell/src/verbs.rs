@@ -407,10 +407,39 @@ impl Env {
     }
 }
 
+/// What the session is running on, as facts the composition supplies.
+///
+/// Injected for the same reason `tasks` and `spoors` are (`EPIC-P2` §3.2): the
+/// verb core is flavour-agnostic and must not carry a fact about one host. It
+/// was a literal until 2026-08-08, and `LE-124` is what a literal of that kind
+/// costs — `(Tier 0, x86_64)` was true of every context this crate had ever run
+/// in, which is indistinguishable from a fact right up until the crate moves.
+/// The first move is exactly when nobody is looking for it.
+///
+/// The vocabulary is the board's own: it already announces `tier=T1
+/// arch=aarch64` in every `TOS64-MEAS/2` envelope, so this renders the same
+/// two facts rather than inventing a second naming for them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Platform<'a> {
+    /// Measurement tier — `Tier 0` for the QEMU gate, `Tier 1` for silicon.
+    pub tier: &'a str,
+    /// Target architecture, as the board names itself.
+    pub arch: &'a str,
+}
+
+impl Platform<'_> {
+    /// The Tier 0 QEMU gate: the context every fixture ran in when this was a
+    /// literal, kept as a named constant so the golden transcript's platform
+    /// is stated once rather than repeated at each construction site.
+    pub const TIER0_X86_64: Platform<'static> = Platform { tier: "Tier 0", arch: "x86_64" };
+}
+
 /// Everything a session executes against.
 pub struct World<'a> {
     /// The labelled volume.
     pub volume: RamVolume,
+    /// What this session runs on (`LE-124`). Never a literal in this crate.
+    pub platform: Platform<'a>,
     /// Session environment.
     pub env: Env,
     /// Current directory index.
@@ -776,7 +805,14 @@ pub fn execute(world: &mut World<'_>, request: &Request<'_>, sink: &mut dyn Writ
         Request::ClearScreen => write!(sink, "\u{1b}[2J"),
         Request::VersionInfo => {
             writeln!(sink)?;
-            writeln!(sink, "TinyOS Version 0.2.0 (Tier 0, x86_64)")?;
+            // `LE-124`: the tier and the architecture come from the session,
+            // never from this crate. A shell that names its own host is a
+            // shell that lies the first time it is moved.
+            writeln!(
+                sink,
+                "TinyOS Version 0.2.0 ({}, {})",
+                world.platform.tier, world.platform.arch
+            )?;
             writeln!(sink)
         }
         Request::VolumeInfo => {
@@ -904,6 +940,7 @@ mod tests {
     fn world<'a>(policy: &'a (dyn VerbPolicy + Sync)) -> World<'a> {
         World {
             volume: RamVolume::new(Some("TINYOS"), (0x1234, 0xABCD)),
+            platform: Platform::TIER0_X86_64,
             env: Env::new(),
             cwd: 0,
             echo: true,
@@ -963,6 +1000,37 @@ mod tests {
         out.clear();
         execute(&mut w, &Request::Unknown, &mut out).unwrap();
         assert_eq!(out, "Bad command or file name\n");
+    }
+
+    /// `LE-124` — `VER` reports the platform the session is running on, and
+    /// the platform is a fact the composition supplies rather than a literal
+    /// this crate carries.
+    ///
+    /// The defect this pins was invisible by construction: the literal
+    /// `(Tier 0, x86_64)` was true of every context the shell had ever run in,
+    /// so nothing distinguished it from a fact until `STORY-P1-09-18` moved
+    /// the verb core onto a Raspberry Pi 5 and it answered the wrong
+    /// architecture. `TEST-P2-07-01-A`'s byte-exact golden gate could not
+    /// catch it — the gate was the thing *requiring* the false string.
+    #[test]
+    fn version_info_reports_the_platform_the_session_was_given_not_a_baked_one() {
+        const GRANTS: &[VerbKind] = &[VerbKind::VersionInfo];
+        let policy = GrantSet { granted: GRANTS, withheld: None, supervisor: false };
+        let mut w = world(&policy);
+
+        // The Tier 0 fixture's platform, unchanged — this is what keeps the
+        // golden transcript byte-identical across this fix.
+        w.platform = Platform { tier: "Tier 0", arch: "x86_64" };
+        let mut out = String::new();
+        execute(&mut w, &Request::VersionInfo, &mut out).unwrap();
+        assert!(out.contains("TinyOS Version 0.2.0 (Tier 0, x86_64)"), "{out}");
+
+        // The board's, which is what the wire session must answer.
+        w.platform = Platform { tier: "Tier 1", arch: "aarch64" };
+        out.clear();
+        execute(&mut w, &Request::VersionInfo, &mut out).unwrap();
+        assert!(out.contains("TinyOS Version 0.2.0 (Tier 1, aarch64)"), "{out}");
+        assert!(!out.contains("x86_64"), "the architecture must not survive the move: {out}");
     }
 
     /// C3 — explicit task-kill authority needs supervisor scope, independent

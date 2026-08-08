@@ -7,13 +7,40 @@ publish.workspace = true
 description = "TINYCMD: canonical verb core + ACI policy seam (FEAT-P2-01), labelled RAM volume (FEAT-P2-02), DOS front-end (FEAT-P2-04), .TCB batch runner (FEAT-P2-07). The library is #![forbid(unsafe_code)]; the QEMU fixture binary below is boot glue on the exec-fixture pattern."
 
 [dependencies]
-# Fixture binary only — the library itself is pure core.
-hal-x86_64 = { path = "../hal-x86_64" }
 # Fixture binary and the `#[cfg(test)]`-only spoor_policy include (`LE-56`) —
 # the shipped library never uses it: the shell crate stays kernel-free and
 # flavour-agnostic (EPIC-P2 §3.2). The dependency exists so the journaling
 # decorator beside the fixture can stamp real kernel spoors.
+#
+# Deliberately **not** target-gated, unlike `hal-x86_64` below. `kernel`'s
+# library is arch-neutral, is already built and linted for `aarch64-tinyos` by
+# `check-boot-images`, and is what the `#[cfg(test)]` include needs on whatever
+# host runs `cargo test`. Gating it to x86_64 would buy nothing on the board
+# and would break the host suite on an AArch64 development machine — see
+# `LE-123`, which measured that only one of these two dependencies ever
+# blocked the board build.
 kernel = { path = "../kernel" }
+
+# `LE-123` / `21A` §4. Used by exactly one file — `fixture_batch_main.rs`, the
+# x86_64 Tier 0 QEMU fixture — and by no line of the library.
+#
+# Cargo dependencies are crate-wide, so as an unconditional entry this dragged
+# an x86 HAL onto every target `shell` was built for. Nothing noticed for as
+# long as nobody built `shell` for anything but x86_64, and that is precisely
+# the period in which `TINYCMD` — the usable OS — could not be compiled into
+# the board image at all. The failure was never in `shell`'s own source, which
+# is `no_std`, heap-free, `#![forbid(unsafe_code)]` and arch-neutral by
+# construction; it was in this line.
+#
+# Target-gated rather than feature-gated on purpose: `hal-x86_64` is x86
+# inline assembly (`out dx, al`, `att_syntax`, `core::arch::x86_64`), so the
+# architecture *is* the condition. A feature would let someone select it for
+# AArch64 and get the same wall of `invalid register` errors with an extra flag
+# in front. The board target is held to this by
+# `xtask check-boot-images`, which now compiles and lints `shell --lib` for
+# `aarch64-tinyos`.
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+hal-x86_64 = { path = "../hal-x86_64" }
 
 [[bin]]
 # `TEST-P2-07-01-A`'s Tier 0 QEMU fixture: seeds the labelled RAM volume,

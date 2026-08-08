@@ -1388,20 +1388,26 @@ mod tests {
     }
 
     #[test]
-    fn a_minimum_ethernet_frame_offers_exactly_the_command_envelope_after_the_strip() {
-        // The arithmetic LE-122 turned from a mystery into a number, stated
-        // where a later reader can see both halves at once. The host builds
-        // 14 + 46 = 60 octets; the wire adds a four-octet FCS; the MAC strips
-        // it, so the descriptor reports 60 and the payload is 46 — not 50.
-        let on_the_wire = crate::gem::MINIMUM_FRAME_LEN + FRAME_CHECK_SEQUENCE_BYTES;
-        assert_eq!(on_the_wire, 64);
-        let reported = on_the_wire - FRAME_CHECK_SEQUENCE_BYTES;
-        assert_eq!(reported, crate::gem::MINIMUM_FRAME_LEN);
-        assert_eq!(
-            reported - HEADER_BYTES,
-            crate::tos64_cmd::COMMAND_PAYLOAD_BYTES,
-            "the fixed-width envelope is measured against a length that excludes the FCS"
-        );
+    fn the_strip_makes_a_reported_length_the_length_the_host_sent() {
+        // The arithmetic LE-122 turned from a mystery into a number. The FCS
+        // rides every frame and the descriptor's length counts it unless the
+        // MAC is told otherwise; the strip is what makes "reported" mean
+        // "sent". Stated over BOTH widths that matter, because the constant
+        // this used to be written against stopped being the minimum frame on
+        // 2026-08-08 and the property never depended on it.
+        for sent in
+            [crate::gem::MINIMUM_FRAME_LEN, HEADER_BYTES + crate::tos64_cmd::COMMAND_PAYLOAD_BYTES]
+        {
+            assert!(sent >= crate::gem::MINIMUM_FRAME_LEN, "no host frame is ever padded");
+            let on_the_wire = sent + FRAME_CHECK_SEQUENCE_BYTES;
+            let reported = on_the_wire - FRAME_CHECK_SEQUENCE_BYTES;
+            assert_eq!(reported, sent, "with DRFCS set the board reads what the host sent");
+        }
+        // And the command envelope's own halves still tile: what the classifier
+        // is handed is the payload, at its declared width, FCS excluded. This
+        // is the number that read 50 on 2026-08-08 and now reads 144.
+        let reported = HEADER_BYTES + crate::tos64_cmd::COMMAND_PAYLOAD_BYTES;
+        assert_eq!(reported - HEADER_BYTES, crate::tos64_cmd::COMMAND_PAYLOAD_BYTES);
     }
 
     #[test]

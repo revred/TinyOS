@@ -322,7 +322,7 @@ mod tests {
     #[test]
     fn sp5_a_batch_run_over_the_decorator_journals_exactly_the_counted_denials() {
         use crate::batch;
-        use crate::verbs::{Env, World};
+        use crate::verbs::{Env, Platform, World};
         use crate::volume::RamVolume;
 
         static BATCH_INNER: GrantSet = GrantSet {
@@ -334,6 +334,7 @@ mod tests {
         static POLICY: SpoorPolicy<'static, 8> = SpoorPolicy::new(&BATCH_INNER, &JOURNAL);
         let mut world = World {
             volume: RamVolume::new(Some("TINYOS"), (0x1234, 0xABCD)),
+            platform: Platform::TIER0_X86_64,
             env: Env::new(),
             cwd: 0,
             echo: true,

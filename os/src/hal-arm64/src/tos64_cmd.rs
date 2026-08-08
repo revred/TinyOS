@@ -20,12 +20,36 @@
 //!    The verb id chooses a row of [`VERB_TABLE`] through [`resolve`], which
 //!    walks the table's own length. Every one of the 65,536 possible ids is
 //!    exercised by a test; nothing indexes.
-//! 3. **The table denies by default and its rows own nothing.** Two rows,
-//!    both answer-only, both assembled from data the board already broadcasts.
-//!    The wire peer has no kernel-derived identity (`PD-02`), so a verb that
-//!    changed state or disclosed anything new would be authority granted to an
-//!    unauthenticated caller — a third row is a charter re-read, not an
-//!    addition.
+//! 3. **The table denies by default and its rows own nothing.** The wire peer
+//!    has no kernel-derived identity (`PD-02`), so a verb that changed state
+//!    or disclosed anything new would be authority granted to an
+//!    unauthenticated caller. `-17` satisfied that with two rows that execute
+//!    nothing at all, and recorded that a third row would be a charter re-read
+//!    rather than an addition.
+//!
+//!    **`STORY-P1-09-18` performed that re-read and added the third row —
+//!    `SHELL` — without weakening the sentence.** It is satisfied a second
+//!    way, by construction rather than by abstinence:
+//!
+//!    - *Execution changes nothing*, in the strongest sense available: the
+//!      runner builds its `World` fresh from a `const` seed for **every**
+//!      command and drops it when the answer is rendered. No cwd, no
+//!      environment, no file, no counter survives one wire command into the
+//!      next, so the board after any admitted sequence is bit-identical to
+//!      the board before it. Statelessness is a property of the shape, not a
+//!      discipline someone has to keep.
+//!    - *Discloses nothing new*: the grant set is the **read-only** subset of
+//!      `TINYCMD`'s verb core over a volume the board image itself seeded, so
+//!      the only bytes a peer can read back are bytes that shipped in a
+//!      published image. Every mutating verb is denied, and so is every verb
+//!      that reads live kernel state (`MEM`, `TASKMGR`, `SPOOR`) — those are a
+//!      separate decision and they wait on one.
+//!    - *Owns nothing*: this module still executes nothing. It classifies,
+//!      reports the line through [`CommandChannel::pending_line`], and renders
+//!      what the caller hands back. The runner behind the seam is `shell`,
+//!      which carries `#![forbid(unsafe_code)]` exactly as this module does,
+//!      so "a row cannot reach a register" is still enforced by the compiler
+//!      — now across two crates instead of one.
 //! 4. **Every refusal is spoken, by name, on the wire.** A refused command
 //!    that vanishes is indistinguishable from a dead board, which is the
 //!    diagnosis failure `LE-80`'s family keeps producing.
@@ -53,18 +77,57 @@ pub const COMMAND_MAGIC: &[u8; 4] = b"CMD1";
 
 /// Width of the fixed argument field, octets. Compared and echoed at fixed
 /// width; never dereferenced, never a length, never an offset.
-pub const ARGUMENT_BYTES: usize = 30;
-
-/// The command payload's exact length, octets.
 ///
-/// Chosen so that `14 + COMMAND_PAYLOAD_BYTES` is exactly
-/// [`crate::gem::MINIMUM_FRAME_LEN`]. That is not arithmetic tidiness: every
-/// Ethernet NIC pads a short frame to 60 octets below any software that could
-/// be told not to, so a shorter envelope would arrive carrying padding that no
-/// receiver can distinguish from a wrong-width field. Making the envelope the
-/// minimum frame is what lets "exactly this many octets" be a refusal rather
-/// than a hope.
-pub const COMMAND_PAYLOAD_BYTES: usize = 46;
+/// **128 since 2026-08-08, and the number is derived from the runner rather
+/// than from the wire.** `shell::capacities::MAX_LINE` is 128 and
+/// `shell::dos` refuses a command line longer than it, so 128 is the widest
+/// line the thing on the far side of this field can accept — a wider argument
+/// field could only carry lines the shell would reject, and a narrower one
+/// (this was 30) hands a 128-capable runner a keyhole. The composition root
+/// holds the two constants against each other at compile time, because
+/// `hal-arm64` cannot depend on `shell` without a cycle; see
+/// `pi5_image::wire_shell`.
+///
+/// 30 was never chosen for the argument. It was whatever remained of a
+/// 46-octet envelope after a 16-octet header, and the envelope's width was
+/// itself over-constrained — see [`COMMAND_PAYLOAD_BYTES`].
+pub const ARGUMENT_BYTES: usize = 128;
+
+/// The command payload's exact length, octets: the 16-octet header plus
+/// [`ARGUMENT_BYTES`].
+///
+/// # The padding argument, with the quantifier it always needed
+///
+/// Every Ethernet NIC pads a short frame **up to** 60 octets below any
+/// software that could be told not to, so an envelope whose whole frame is
+/// *under* the minimum arrives carrying padding no receiver can distinguish
+/// from a wrong-width field. That is what makes "exactly this many octets" a
+/// refusal rather than a hope, and it is unchanged.
+///
+/// What changed on 2026-08-08 is the quantifier. This constant was 46 —
+/// chosen so `14 + 46` is **exactly** [`crate::gem::MINIMUM_FRAME_LEN`] — but
+/// padding immunity requires the frame to be **at least** the minimum, never
+/// equal to it. A NIC pads up; it never pads a 158-octet frame. So every
+/// width from 46 upward carries the identical guarantee, and fixing the
+/// envelope at the floor bought nothing while costing the argument field 98
+/// octets. The board already transmits far wider frames on exactly this
+/// reasoning — [`crate::gem::text_frame`] pads *up to* the minimum and
+/// [`crate::gem::TEXT_FRAME_CAPACITY`] is `14 + 256`.
+///
+/// The refusal is untouched by the widening: [`classify`] still refuses any
+/// payload that is not this width, to the octet, and
+/// [`ADMITTED_CAPACITY`]'s headroom still makes
+/// [`CommandRefusal::Oversize`] reachable *and* able to name how far over.
+///
+/// `LE-122`'s row said the width "should not move to 50 **to paper over
+/// this**" — declining to disguise a defect. Moving it deliberately, for a
+/// reason stated where the old reason lived, is the opposite act.
+pub const COMMAND_PAYLOAD_BYTES: usize = HEADER_BYTES + ARGUMENT_BYTES;
+
+/// The fixed header ahead of the argument: prefix, magic, verb, sequence.
+/// Named so [`COMMAND_PAYLOAD_BYTES`] is arithmetic over the field layout
+/// rather than a literal that has to be re-derived when a field moves.
+pub const HEADER_BYTES: usize = 16;
 
 /// How many octets the board copies out of the receive region before handing
 /// the descriptor back — one more than the envelope, on purpose.
@@ -107,7 +170,7 @@ pub mod field {
 /// A data enum with no behaviour and no handler, deliberately. There is
 /// nowhere for a row to keep a capability, a register or a piece of state,
 /// because the answer for every row is rendered by [`render`] from the verb,
-/// the sequence heard, and a status text the *caller* supplies.
+/// the sequence heard, and the texts a *caller* supplies in [`AnswerText`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verb {
     /// The answer names the sequence heard. Discloses nothing the board did
@@ -116,6 +179,14 @@ pub enum Verb {
     /// The answer replays the transcript's own boot verdict line — already
     /// public on the wire every transcript cycle.
     Status,
+    /// `STORY-P1-09-18`: the argument field is handed to `TINYCMD`'s verb core
+    /// as one command line and the answer carries what it printed.
+    ///
+    /// This row is why `-17`'s absence argument expired. It is also the row
+    /// that reaches the least: the runner behind it is stateless, holds no
+    /// device, and is granted a read-only subset of the verb core over a
+    /// volume the board seeded — see the module header's clause 3.
+    Shell,
 }
 
 impl Verb {
@@ -125,6 +196,7 @@ impl Verb {
         match self {
             Verb::Ping => 1,
             Verb::Status => 2,
+            Verb::Shell => 3,
         }
     }
 
@@ -133,17 +205,39 @@ impl Verb {
         match self {
             Verb::Ping => "PING",
             Verb::Status => "STATUS",
+            Verb::Shell => "SHELL",
         }
+    }
+
+    /// Whether this row's answer needs the caller to run something first.
+    ///
+    /// Exactly one row does, and saying so as a property of the row rather
+    /// than as a `match` at the call site is what keeps the park loop from
+    /// growing a second place that knows which verbs mean what.
+    pub const fn needs_a_runner(self) -> bool {
+        matches!(self, Verb::Shell)
     }
 }
 
-/// The whole table. Two rows, both read-only, both answer-only.
+/// The whole table. Three rows: two answer-only, one that runs a stateless
+/// read-only shell over a board-seeded volume.
 ///
-/// `PD-02`: the peer on this cable has no kernel-derived identity, so the only
-/// verbs that may exist are ones whose answers disclose what the board already
-/// broadcasts and whose execution changes nothing. A third row waits on a
-/// session/authentication story, not on this table growing.
-pub const VERB_TABLE: [Verb; 2] = [Verb::Ping, Verb::Status];
+/// `PD-02`: the peer on this cable has no kernel-derived identity, so a row
+/// may exist only where its answer discloses what the board is willing to
+/// broadcast and its execution leaves the board unchanged. `-17` satisfied
+/// that by having its two rows execute nothing at all, and said a third row
+/// would be a charter re-read rather than an addition.
+///
+/// **`STORY-P1-09-18` is that re-read, and it did not weaken the sentence —
+/// it satisfied it a second way.** The `SHELL` row executes, but it executes
+/// against a `World` built fresh from a `const` seed for every single command
+/// and dropped when the answer is rendered. Nothing carries from one wire
+/// command to the next, so *"execution changes nothing"* is true in the
+/// strongest available sense: the board after any sequence of admitted
+/// commands is bit-identical to the board before it. The grant set is the
+/// read-only subset of the verb core, so the claim does not rest on the
+/// freshness alone.
+pub const VERB_TABLE: [Verb; 3] = [Verb::Ping, Verb::Status, Verb::Shell];
 
 /// Resolves a verb id through the table, deny-by-default.
 ///
@@ -194,13 +288,50 @@ impl CommandRefusal {
     }
 }
 
-/// A well-formed command: which row, and the sequence to name back.
+/// A well-formed command: which row, the sequence to name back, and the fixed
+/// argument field exactly as it arrived.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Command {
     /// The row the id resolved to.
     pub verb: Verb,
     /// The sequence the sender chose. Echoed; never interpreted.
     pub sequence: u32,
+    /// The argument field, copied at its fixed width.
+    ///
+    /// A **copy**, not a borrow, and a fixed-size array rather than a slice
+    /// and a length. The classifier reads exactly [`ARGUMENT_BYTES`] octets
+    /// from a fixed offset and there is nowhere for a length taken from the
+    /// frame to be stored, let alone believed.
+    pub argument: [u8; ARGUMENT_BYTES],
+}
+
+impl Command {
+    /// A command with an empty argument — the two rows that have no use for
+    /// one, and the shape most tests want.
+    pub const fn bare(verb: Verb, sequence: u32) -> Self {
+        Command { verb, sequence, argument: [0; ARGUMENT_BYTES] }
+    }
+
+    /// The command line this row hands its runner, or [`None`] for a row that
+    /// has no runner.
+    ///
+    /// The line is the fixed field with its padding trimmed. Both fillers a
+    /// sender can plausibly produce — spaces from a human-written console,
+    /// NULs from a zeroed buffer — are padding, because a classifier that told
+    /// them apart would make one command mean two things depending on who
+    /// sent it. Trailing only: an argument is left-justified in its field by
+    /// construction, and trimming from the front would let padding choose
+    /// where a line starts.
+    pub fn line(&self) -> Option<&[u8]> {
+        if !self.verb.needs_a_runner() {
+            return None;
+        }
+        let mut end = self.argument.len();
+        while end > 0 && matches!(self.argument[end - 1], 0 | b' ') {
+            end -= 1;
+        }
+        Some(&self.argument[..end])
+    }
 }
 
 /// Classifies one admitted payload — total, over fixed offsets, with no
@@ -229,19 +360,23 @@ pub fn classify(payload: &[u8]) -> Result<Command, CommandRefusal> {
         payload[field::SEQUENCE.start + 2],
         payload[field::SEQUENCE.start + 3],
     ]);
-    Ok(Command { verb, sequence })
+    let mut argument = [0u8; ARGUMENT_BYTES];
+    argument.copy_from_slice(&payload[field::ARGUMENT]);
+    Ok(Command { verb, sequence, argument })
 }
 
 /// One line the board owes the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Spoken {
     /// A row of the table answered.
-    Answer {
-        /// Which row.
-        verb: Verb,
-        /// The sequence heard.
-        sequence: u32,
-    },
+    ///
+    /// Carries the whole classified command rather than just the verb and the
+    /// sequence, because the `SHELL` row's answer needs its argument handed to
+    /// a runner before the line can be rendered. Keeping it in the one pending
+    /// value is what stops the channel growing a second field that has to be
+    /// held in step with this one — an invariant nobody re-reads is an
+    /// invariant that breaks.
+    Answer(Command),
     /// A refusal, named.
     Refused {
         /// Which refusal.
@@ -256,30 +391,100 @@ pub enum Spoken {
 }
 
 /// The longest answer line this module will build, octets.
-pub const ANSWER_CAPACITY: usize = 128;
-
-/// Renders one owed line. Pure: verb, sequence, and a status text the caller
-/// supplies. No device, no state, nothing this module owns.
 ///
-/// A `status` that will not fit is dropped **whole** and named `none`. A
-/// truncated replay of a verdict line is a fabrication with a plausible shape,
-/// which is worse than an absence because nothing marks it.
-pub fn render(spoken: Spoken, status: &[u8], out: &mut [u8]) -> usize {
+/// **Raised from 128 to 256 by `STORY-P1-09-18`**, which is the whole of the
+/// concession the `SHELL` row extracted from the wire format. It is bounded by
+/// the text channel that carries it — [`crate::gem::TEXT_FRAME_CAPACITY`] is
+/// `14 + 256`, so this is the largest line the existing frame builder can
+/// carry and the const assertion below it is now tight rather than slack.
+/// Nothing about the *rate* moved: the answer is still one line per park beat.
+pub const ANSWER_CAPACITY: usize = 256;
+
+/// The widest output this module will accept from a command runner, octets.
+///
+/// Deliberately **larger** than any single answer line can carry. The runner
+/// is a shell and a shell's output is not bounded by what a frame holds; a
+/// buffer sized to what fits would make the overflow invisible at the seam
+/// that is supposed to measure it, which is the `ADMITTED_CAPACITY` lesson
+/// (`LE-122`) one layer up. The excess is counted and named on the wire, never
+/// silently dropped and never continued into a second frame.
+pub const SHELL_OUTPUT_CAPACITY: usize = 256;
+
+/// Everything a row's answer may say that this module did not compute itself.
+///
+/// One struct rather than a growing parameter list, and it is the module's
+/// containment shape written as a type: **every byte an answer can disclose
+/// arrives through here, from a caller.** There is no device, no register and
+/// no state on this path, so a reviewer checking "what can a row leak?" reads
+/// two fields instead of auditing a call graph.
+#[derive(Debug, Clone, Copy)]
+pub struct AnswerText<'a> {
+    /// The boot verdict line the `STATUS` row replays — already public on the
+    /// wire every transcript cycle.
+    pub status: &'a [u8],
+    /// What the caller's command runner printed for the `SHELL` row. Bounded
+    /// by [`SHELL_OUTPUT_CAPACITY`] at the seam that produced it.
+    pub output: &'a [u8],
+}
+
+/// The widest ` more=N` field, octets: the tag plus every digit of a `u32`.
+///
+/// Reserved before the output is written rather than appended after it, so the
+/// field that reports what did not fit can never itself be the thing that does
+/// not fit. An accounting field that a long output can push off the end is an
+/// accounting field that is absent exactly when it matters.
+const MORE_FIELD_MAX: usize = b" more=".len() + 10;
+
+/// Renders one owed line. Pure: the verb, the sequence heard, and the texts the
+/// caller supplies. No device, no state, nothing this module owns.
+///
+/// The two texts are treated **differently on purpose**, and the difference is
+/// a decision rather than an inconsistency:
+///
+/// - A `status` that will not fit is dropped **whole** and named `none`. It is
+///   a replay of a verdict, and a truncated verdict is a fabrication with a
+///   plausible shape — worse than an absence, because nothing marks it.
+/// - A shell `output` that will not fit is carried as a **prefix** with the
+///   withheld octets counted in a ` more=` field. It is a stream, and a
+///   labelled prefix is a true statement about the beginning of one. The label
+///   is what separates the two cases: an unlabelled prefix would be the same
+///   forgery the `status` rule refuses.
+pub fn render(spoken: Spoken, text: AnswerText<'_>, out: &mut [u8]) -> usize {
     let mut writer = Writer::new(out);
     writer.put(b"TOS64-ANS/1 ");
     match spoken {
-        Spoken::Answer { verb, sequence } => {
+        Spoken::Answer(command) => {
             writer.put(b"verb=");
-            writer.put(verb.name().as_bytes());
+            writer.put(command.verb.name().as_bytes());
             writer.put(b" seq=");
-            writer.put_u32(sequence);
+            writer.put_u32(command.sequence);
             writer.put(b" ok=1");
-            if verb == Verb::Status {
-                writer.put(b" status=");
-                if status.is_empty() || writer.remaining() < status.len() + 1 {
-                    writer.put(b"none");
-                } else {
-                    writer.put(status);
+            match command.verb {
+                Verb::Ping => {}
+                Verb::Status => {
+                    writer.put(b" status=");
+                    if text.status.is_empty() || writer.remaining() < text.status.len() + 1 {
+                        writer.put(b"none");
+                    } else {
+                        writer.put(text.status);
+                    }
+                }
+                Verb::Shell => {
+                    writer.put(b" out=");
+                    // The `+ 1` is the line terminator, which is owed
+                    // unconditionally and is reserved with the same reasoning.
+                    let room = writer.remaining().saturating_sub(MORE_FIELD_MAX + 1);
+                    let carried = fitting_prefix(text.output, room);
+                    if carried == 0 {
+                        writer.put(b"none");
+                    } else {
+                        writer.put_escaped(&text.output[..carried]);
+                    }
+                    let withheld = text.output.len() - carried;
+                    if withheld > 0 {
+                        writer.put(b" more=");
+                        writer.put_u32(withheld as u32);
+                    }
                 }
             }
         }
@@ -297,6 +502,45 @@ pub fn render(spoken: Spoken, status: &[u8], out: &mut [u8]) -> usize {
     }
     writer.put(b"\n");
     writer.written()
+}
+
+/// The escaped width of one output octet on the wire.
+///
+/// Three classes and no others, so the function is total over `u8`:
+///
+/// - `\` and LF are **structure**, and are escaped reversibly — LF because the
+///   answer is one line and a raw LF would end it early, `\` because it is the
+///   escape character and an unescaped one would make the decoding ambiguous.
+/// - Everything else outside printable ASCII becomes `?`. Lossy, and
+///   deliberately so: this is the wire's own fence, standing behind the
+///   shell's `write_inert` rendering of attacker-influenced names
+///   (`EPIC-P2` §6.5 rule 3) rather than in place of it. The difference is
+///   that this one is total over every octet a runner can return, whatever
+///   produced it.
+const fn escaped_width(byte: u8) -> usize {
+    match byte {
+        b'\n' | b'\\' => 2,
+        _ => 1,
+    }
+}
+
+/// How many octets of `output` can be carried in `room` escaped octets.
+///
+/// Counted before anything is written rather than discovered by overrunning a
+/// buffer, because the answer must state how much it withheld and a writer
+/// that has already silently dropped bytes cannot say.
+fn fitting_prefix(output: &[u8], room: usize) -> usize {
+    let mut used = 0;
+    let mut carried = 0;
+    while carried < output.len() {
+        let width = escaped_width(output[carried]);
+        if used + width > room {
+            break;
+        }
+        used += width;
+        carried += 1;
+    }
+    carried
 }
 
 /// The bounded answer slot: one line per park beat, and a saturating count of
@@ -350,9 +594,27 @@ impl CommandChannel {
             return;
         }
         self.pending = Some(match classify(payload) {
-            Ok(Command { verb, sequence }) => Spoken::Answer { verb, sequence },
+            Ok(command) => Spoken::Answer(command),
             Err(refusal) => Spoken::Refused { refusal, sequence: sequence_of(payload), dropped: 0 },
         });
+    }
+
+    /// The command line the pending answer needs run, if any.
+    ///
+    /// The whole of the runner seam, and it is deliberately this small: the
+    /// channel **reports** and the caller **runs**. This module classifies and
+    /// renders and does neither, which is why it can still carry
+    /// `#![forbid(unsafe_code)]` and why no signature in it takes a device, an
+    /// `Mmio` or a `&mut` to anything the board owns — `-17`'s clause 2, held
+    /// unchanged across a row that executes.
+    ///
+    /// Returns [`None`] for a refusal (nothing reached a row), for the two
+    /// answer-only rows, and for an empty slot.
+    pub fn pending_line(&self) -> Option<&[u8]> {
+        match &self.pending {
+            Some(Spoken::Answer(command)) => command.line(),
+            _ => None,
+        }
     }
 
     /// The answer slot. Renders at most one line per call, or [`None`] when
@@ -361,16 +623,16 @@ impl CommandChannel {
     ///
     /// Counters move here and not in [`offer`](Self::offer), so the canvas row
     /// says what actually left the board.
-    pub fn take(&mut self, status: &[u8], out: &mut [u8]) -> Option<usize> {
+    pub fn take(&mut self, text: AnswerText<'_>, out: &mut [u8]) -> Option<usize> {
         if let Some(spoken) = self.pending.take() {
             match spoken {
-                Spoken::Answer { verb, .. } => {
+                Spoken::Answer(command) => {
                     self.answered = self.answered.saturating_add(1);
-                    self.last = Some(verb);
+                    self.last = Some(command.verb);
                 }
                 Spoken::Refused { .. } => self.refused = self.refused.saturating_add(1),
             }
-            return Some(render(spoken, status, out));
+            return Some(render(spoken, text, out));
         }
         if self.dropped > 0 {
             let dropped = self.dropped;
@@ -378,7 +640,7 @@ impl CommandChannel {
             self.refused = self.refused.saturating_add(1);
             return Some(render(
                 Spoken::Refused { refusal: CommandRefusal::OverRate, sequence: 0, dropped },
-                status,
+                text,
                 out,
             ));
         }
@@ -444,6 +706,22 @@ impl<'a> Writer<'a> {
         }
     }
 
+    /// Writes `bytes` through [`escaped_width`]'s three classes.
+    ///
+    /// Total over every octet: there is no arm that passes a byte through
+    /// unexamined, so no sequence a runner can produce reaches the wire able
+    /// to end the line early or move an operator's cursor.
+    fn put_escaped(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            match byte {
+                b'\n' => self.put(b"\\n"),
+                b'\\' => self.put(b"\\\\"),
+                0x20..=0x7E => self.put(&[byte]),
+                _ => self.put(b"?"),
+            }
+        }
+    }
+
     fn put_u32(&mut self, value: u32) {
         let mut digits = [0u8; 10];
         let mut count = 0;
@@ -482,20 +760,40 @@ mod tests {
     }
 
     fn rendered(spoken: Spoken, status: &[u8]) -> String {
+        rendered_with(spoken, AnswerText { status, output: b"" })
+    }
+
+    fn rendered_with(spoken: Spoken, text: AnswerText<'_>) -> String {
         let mut out = [0u8; ANSWER_CAPACITY];
-        let len = render(spoken, status, &mut out);
+        let len = render(spoken, text, &mut out);
         String::from_utf8(out[..len].to_vec()).expect("ASCII")
+    }
+
+    /// The answer for a row that needs no argument — most of this suite.
+    fn answer(verb: Verb, sequence: u32) -> Spoken {
+        Spoken::Answer(Command::bare(verb, sequence))
     }
 
     // --- clause 1: the classifier is total over fixed offsets ----------------
 
     #[test]
-    fn the_layout_is_fixed_and_exactly_one_ethernet_minimum_frame() {
-        // The command frame is deliberately the Ethernet minimum: 14 header
-        // octets plus this payload. A shorter payload would be padded by the
-        // sending NIC and the padding would be indistinguishable from an
-        // oversize field, which is how a fixed-width envelope stops being one.
-        assert_eq!(14 + COMMAND_PAYLOAD_BYTES, crate::gem::MINIMUM_FRAME_LEN);
+    fn the_layout_is_fixed_and_the_frame_can_never_be_padded() {
+        // The property is `>=`, not `==`, and the difference is the whole of
+        // 2026-08-08's widening. A NIC pads a short frame UP to 60 octets; it
+        // never pads a frame already at or above it. So any width from the
+        // minimum upward is equally immune, and pinning `==` fixed the
+        // argument field at 30 octets for a guarantee `>=` already gave.
+        assert!(
+            14 + COMMAND_PAYLOAD_BYTES >= crate::gem::MINIMUM_FRAME_LEN,
+            "a frame under the Ethernet minimum arrives padded, and padding is \
+             indistinguishable from a wrong-width field"
+        );
+        // Stated as its own assertion so the reason survives: the widening is
+        // legitimate precisely because this margin is non-negative, and a
+        // future narrowing that broke it would fail above rather than produce
+        // a subtly paddable envelope.
+        assert_eq!(COMMAND_PAYLOAD_BYTES, HEADER_BYTES + ARGUMENT_BYTES);
+        assert_eq!(HEADER_BYTES, 16);
         assert_eq!(field::PREFIX, 0..6);
         assert_eq!(field::MAGIC, 6..10);
         assert_eq!(field::VERB, 10..12);
@@ -518,13 +816,10 @@ mod tests {
 
     #[test]
     fn a_well_formed_ping_and_status_classify_to_their_verb_and_sequence() {
-        assert_eq!(
-            classify(&payload(Verb::Ping.id(), 7)),
-            Ok(Command { verb: Verb::Ping, sequence: 7 })
-        );
+        assert_eq!(classify(&payload(Verb::Ping.id(), 7)), Ok(Command::bare(Verb::Ping, 7)));
         assert_eq!(
             classify(&payload(Verb::Status.id(), 0xDEAD_BEEF)),
-            Ok(Command { verb: Verb::Status, sequence: 0xDEAD_BEEF })
+            Ok(Command::bare(Verb::Status, 0xDEAD_BEEF))
         );
     }
 
@@ -579,10 +874,7 @@ mod tests {
         for width in COMMAND_PAYLOAD_BYTES + 1..=ADMITTED_CAPACITY {
             assert_eq!(classify(&over[..width]), Err(CommandRefusal::Oversize), "at {width}");
         }
-        assert_eq!(
-            classify(&over[..COMMAND_PAYLOAD_BYTES]),
-            Ok(Command { verb: Verb::Ping, sequence: 1 })
-        );
+        assert_eq!(classify(&over[..COMMAND_PAYLOAD_BYTES]), Ok(Command::bare(Verb::Ping, 1)));
     }
 
     #[test]
@@ -612,20 +904,32 @@ mod tests {
     }
 
     #[test]
-    fn no_byte_of_the_argument_field_steers_anything() {
-        // The argument is carried at a fixed width and is never an offset, a
-        // length or an address. Filling it across its range may not move the
-        // verdict by one bit.
+    fn no_byte_of_the_argument_field_steers_the_classification_of_any_row() {
+        // `-17` asserted this as *"no byte of the argument field steers
+        // anything"*, comparing the whole classified command. `-18` gave one
+        // row an argument that means something, so the sentence had to become
+        // more precise rather than quietly weaker — the surviving claim is
+        // about the **classification**: which row answered, and with which
+        // sequence, is not a function of the argument for any row in the
+        // table, including the one that reads it.
+        //
+        // What the argument may now steer — a command line handed to a
+        // stateless runner that owns nothing — is asserted separately in
+        // `the_argument_steers_the_shell_row_and_still_steers_nothing_for_the_other_two`,
+        // which is where `-18`'s containment argument is pinned.
         for fill in [0x00u8, 0x01, 0x7F, 0x80, 0xFF] {
-            let mut frame = payload(Verb::Ping.id(), 5);
-            for byte in frame[field::ARGUMENT].iter_mut() {
-                *byte = fill;
+            for verb in VERB_TABLE {
+                let mut frame = payload(verb.id(), 5);
+                for byte in frame[field::ARGUMENT].iter_mut() {
+                    *byte = fill;
+                }
+                let command = classify(&frame).expect("well formed");
+                assert_eq!(
+                    (command.verb, command.sequence),
+                    (verb, 5),
+                    "argument fill {fill:#04x} moved {verb:?}'s classification"
+                );
             }
-            assert_eq!(
-                classify(&frame),
-                Ok(Command { verb: Verb::Ping, sequence: 5 }),
-                "argument fill {fill:#04x} changed the verdict"
-            );
         }
     }
 
@@ -647,38 +951,55 @@ mod tests {
 
     // --- clause 2: the table denies by default -------------------------------
 
+    /// The two original rows, unchanged by the widening.
+    ///
+    /// **This test used to assert `VERB_TABLE.len() == 2` with the reason
+    /// "`PD-02`: an unauthenticated peer earns two rows and no more".** That
+    /// clause was retired deliberately by `STORY-P1-09-18`, whose charter
+    /// re-read is quoted in the module header and in the Story's own text —
+    /// not weakened by a session that found it inconvenient. The count now
+    /// lives in [`the_table_holds_exactly_three_rows_and_the_third_is_the_shell`],
+    /// so it is still pinned; what this test keeps is the part `-18` did not
+    /// touch, which is everything about `PING` and `STATUS`.
     #[test]
-    fn the_table_holds_exactly_two_answer_only_rows() {
-        assert_eq!(
-            VERB_TABLE.len(),
-            2,
-            "PD-02: an unauthenticated peer earns two rows and no more"
-        );
-        assert_eq!(VERB_TABLE, [Verb::Ping, Verb::Status]);
+    fn the_two_original_rows_kept_their_ids_names_and_answer_only_shape() {
         assert_eq!(Verb::Ping.id(), 1);
         assert_eq!(Verb::Status.id(), 2);
         assert_eq!(Verb::Ping.name(), "PING");
         assert_eq!(Verb::Status.name(), "STATUS");
-        // Ids are distinct, and zero is not a verb — so an all-zero payload,
-        // the single most likely accident on a wire, is `UnknownVerb`.
-        assert_ne!(Verb::Ping.id(), Verb::Status.id());
-        for verb in VERB_TABLE {
+        assert!(!Verb::Ping.needs_a_runner(), "PING executes nothing");
+        assert!(!Verb::Status.needs_a_runner(), "STATUS executes nothing");
+        // Ids are distinct across the whole table, and zero is not a verb — so
+        // an all-zero payload, the single most likely accident on a wire, is
+        // `UnknownVerb`.
+        for (index, verb) in VERB_TABLE.iter().enumerate() {
             assert_ne!(verb.id(), 0);
-            assert_eq!(resolve(verb.id()), Some(verb));
+            assert_eq!(resolve(verb.id()), Some(*verb));
+            for later in &VERB_TABLE[index + 1..] {
+                assert_ne!(verb.id(), later.id(), "two rows share an id");
+                assert_ne!(verb.name(), later.name(), "two rows share a wire name");
+            }
         }
+        // Exactly one row in the whole table reaches a runner. Asserted over
+        // the table rather than over the one variant, so a fourth row that
+        // quietly wanted one fails here.
+        assert_eq!(VERB_TABLE.iter().filter(|verb| verb.needs_a_runner()).count(), 1);
     }
 
     #[test]
     fn every_row_answers_only_from_what_the_board_already_broadcasts() {
         // The rendering of every row is a pure function of (verb, sequence,
-        // caller-supplied status text). There is no device, no register and no
-        // state in any signature on this path — a row cannot reach authority it
-        // is never handed. The enumeration is over the table itself, so a third
+        // caller-supplied texts). There is no device, no register and no state
+        // in any signature on this path — a row cannot reach authority it is
+        // never handed. The enumeration is over the table itself, so a fourth
         // row added without an answer of the same shape fails here.
-        let status = b"TOS64-RESULT/1 fixture=none ok=true";
+        let text = AnswerText {
+            status: b"TOS64-RESULT/1 fixture=none ok=true",
+            output: b"A:\\>DIR\n 2 File(s)\n",
+        };
         for verb in VERB_TABLE {
-            let once = rendered(Spoken::Answer { verb, sequence: 11 }, status);
-            let twice = rendered(Spoken::Answer { verb, sequence: 11 }, status);
+            let once = rendered_with(answer(verb, 11), text);
+            let twice = rendered_with(answer(verb, 11), text);
             assert_eq!(once, twice, "an answer that is not a pure function of its inputs");
             assert!(once.starts_with("TOS64-ANS/1 "), "{once}");
             assert!(once.contains(verb.name()));
@@ -687,6 +1008,7 @@ mod tests {
                 Verb::Ping => {
                     assert_eq!(once, "TOS64-ANS/1 verb=PING seq=11 ok=1\n");
                     assert!(!once.contains("TOS64-RESULT"), "PING discloses nothing but the echo");
+                    assert!(!once.contains("DIR"), "PING discloses no runner output either");
                 }
                 // The transcript's own verdict line, already public on the wire
                 // every cycle — replayed, never composed.
@@ -694,6 +1016,20 @@ mod tests {
                     assert_eq!(
                         once,
                         "TOS64-ANS/1 verb=STATUS seq=11 ok=1 status=TOS64-RESULT/1 fixture=none ok=true\n"
+                    );
+                }
+                // The runner's output, escaped onto one line — and only the
+                // runner's output. `-18`'s row discloses what a read-only
+                // shell over a board-seeded volume printed, and nothing the
+                // module knows that the caller did not hand it.
+                Verb::Shell => {
+                    assert_eq!(
+                        once,
+                        "TOS64-ANS/1 verb=SHELL seq=11 ok=1 out=A:\\\\>DIR\\n 2 File(s)\\n\n"
+                    );
+                    assert!(
+                        !once.contains("TOS64-RESULT"),
+                        "the boot verdict belongs to STATUS and may not leak into SHELL"
                     );
                 }
             }
@@ -706,7 +1042,7 @@ mod tests {
         // fabrication, so a status text that will not fit is dropped whole and
         // the answer says so, rather than being cut mid-field.
         let long = [b'S'; ANSWER_CAPACITY];
-        let line = rendered(Spoken::Answer { verb: Verb::Status, sequence: 1 }, &long);
+        let line = rendered(answer(Verb::Status, 1), &long);
         assert_eq!(line, "TOS64-ANS/1 verb=STATUS seq=1 ok=1 status=none\n");
         assert!(line.len() <= ANSWER_CAPACITY);
     }
@@ -761,17 +1097,24 @@ mod tests {
         }
         // Exactly one answer leaves, and it is the first one heard — the
         // board answers what it heard first rather than what shouted last.
-        let len = channel.take(b"", &mut out).expect("one answer");
+        let len =
+            channel.take(AnswerText { status: b"", output: b"" }, &mut out).expect("one answer");
         assert_eq!(&out[..len], b"TOS64-ANS/1 verb=PING seq=1 ok=1\n");
         assert_eq!(channel.answered(), 1);
 
         // The next beat speaks the over-rate refusal, with its count.
-        let len = channel.take(b"", &mut out).expect("the over-rate refusal");
+        let len = channel
+            .take(AnswerText { status: b"", output: b"" }, &mut out)
+            .expect("the over-rate refusal");
         assert_eq!(&out[..len], b"TOS64-ANS/1 refused=over-rate dropped=4\n");
         assert_eq!(channel.refused(), 1);
 
         // And then silence: nothing is owed, so nothing is transmitted.
-        assert_eq!(channel.take(b"", &mut out), None, "an empty slot transmits nothing");
+        assert_eq!(
+            channel.take(AnswerText { status: b"", output: b"" }, &mut out),
+            None,
+            "an empty slot transmits nothing"
+        );
     }
 
     #[test]
@@ -788,7 +1131,7 @@ mod tests {
             channel.offer(&payload(Verb::Ping.id(), sequence));
             if sequence.is_multiple_of(3) {
                 beats += 1;
-                if channel.take(b"", &mut out).is_some() {
+                if channel.take(AnswerText { status: b"", output: b"" }, &mut out).is_some() {
                     lines += 1;
                 }
             }
@@ -810,9 +1153,11 @@ mod tests {
         let mut out = [0u8; ANSWER_CAPACITY];
         channel.offer(&payload(0, 3)); // unknown verb
         channel.offer(&payload(Verb::Ping.id(), 4)); // arrives with the slot full
-        let len = channel.take(b"", &mut out).expect("the refusal");
+        let len =
+            channel.take(AnswerText { status: b"", output: b"" }, &mut out).expect("the refusal");
         assert_eq!(&out[..len], b"TOS64-ANS/1 refused=unknown-verb seq=3\n");
-        let len = channel.take(b"", &mut out).expect("the over-rate");
+        let len =
+            channel.take(AnswerText { status: b"", output: b"" }, &mut out).expect("the over-rate");
         assert_eq!(&out[..len], b"TOS64-ANS/1 refused=over-rate dropped=1\n");
         assert_eq!(channel.answered(), 0, "nothing was answered");
         assert_eq!(channel.refused(), 2, "both refusals were spoken, neither vanished");
@@ -825,7 +1170,7 @@ mod tests {
         channel.offer(&payload(Verb::Status.id(), 2));
         assert_eq!(channel.answered(), 0, "decided is not sent");
         assert_eq!(channel.last(), None);
-        channel.take(b"verdict", &mut out).expect("the answer");
+        channel.take(AnswerText { status: b"verdict", output: b"" }, &mut out).expect("the answer");
         assert_eq!(channel.answered(), 1);
         assert_eq!(channel.last(), Some(Verb::Status), "the canvas names the verb that answered");
     }
@@ -838,27 +1183,332 @@ mod tests {
         // claim about code nobody re-reads.
         let mut channel = CommandChannel::new();
         let mut out = [0u8; ANSWER_CAPACITY];
-        assert_eq!(channel.take(b"", &mut out), None, "an untouched channel owes nothing");
+        assert_eq!(
+            channel.take(AnswerText { status: b"", output: b"" }, &mut out),
+            None,
+            "an untouched channel owes nothing"
+        );
         channel.offer(&payload(Verb::Ping.id(), 1));
-        assert!(channel.take(b"", &mut out).is_some());
-        assert_eq!(channel.take(b"", &mut out), None);
+        assert!(channel.take(AnswerText { status: b"", output: b"" }, &mut out).is_some());
+        assert_eq!(channel.take(AnswerText { status: b"", output: b"" }, &mut out), None);
     }
 
     #[test]
     fn the_answer_never_exceeds_the_line_the_text_channel_can_carry() {
         let mut out = [0u8; ANSWER_CAPACITY];
         for spoken in [
-            Spoken::Answer { verb: Verb::Ping, sequence: u32::MAX },
-            Spoken::Answer { verb: Verb::Status, sequence: u32::MAX },
+            Spoken::Answer(Command::bare(Verb::Ping, u32::MAX)),
+            Spoken::Answer(Command::bare(Verb::Status, u32::MAX)),
+            Spoken::Answer(Command::bare(Verb::Shell, u32::MAX)),
             Spoken::Refused {
                 refusal: CommandRefusal::OverRate,
                 sequence: u32::MAX,
                 dropped: u32::MAX,
             },
         ] {
-            let len = render(spoken, &[b'S'; 64], &mut out);
+            let len = render(
+                spoken,
+                AnswerText { status: &[b'S'; 64], output: &[b'O'; SHELL_OUTPUT_CAPACITY] },
+                &mut out,
+            );
             assert!(len <= ANSWER_CAPACITY, "{len} exceeds the answer capacity");
             const { assert!(ANSWER_CAPACITY + 14 <= crate::gem::TEXT_FRAME_CAPACITY) };
         }
+    }
+
+    // --- STORY-P1-09-18: the third row, and the argument that now means -------
+
+    /// The table grew, and it grew by exactly one row with exactly one id.
+    ///
+    /// `-17`'s own test asserted **two** rows and said a third was "a charter
+    /// re-read, not an addition". The re-read happened
+    /// ([`STORY-P1-09-18`](../../../goals/stories/STORY-P1-09-18.md)) and this
+    /// is what it licensed: one row, reaching a runner that owns nothing.
+    #[test]
+    fn the_table_holds_exactly_three_rows_and_the_third_is_the_shell() {
+        assert_eq!(VERB_TABLE.len(), 3);
+        assert_eq!(VERB_TABLE, [Verb::Ping, Verb::Status, Verb::Shell]);
+        assert_eq!(Verb::Shell.id(), 3);
+        assert_eq!(Verb::Shell.name(), "SHELL");
+        for verb in VERB_TABLE {
+            assert_ne!(verb.id(), 0, "zero is never a verb");
+            assert_eq!(resolve(verb.id()), Some(verb));
+        }
+        // Still exhaustive over the whole id space, and still exactly the
+        // table's rows — the widening did not widen the selection.
+        let mut known = 0;
+        for id in 0..=u16::MAX {
+            if resolve(id).is_some() {
+                known += 1;
+            }
+        }
+        assert_eq!(known, VERB_TABLE.len());
+    }
+
+    /// The containment sentence that changed, stated as two assertions.
+    ///
+    /// `-17` could say *no byte of the argument steers anything*. That is no
+    /// longer true and pretending otherwise would be the drift this project
+    /// keeps catching. What is true now, and is what `-18`'s argument rests
+    /// on: the argument steers **only** the `SHELL` row, it is carried at a
+    /// fixed width to a runner as **data**, and for the two original rows the
+    /// old sentence still holds unweakened.
+    #[test]
+    fn the_argument_steers_the_shell_row_and_still_steers_nothing_for_the_other_two() {
+        for fill in [0x00u8, 0x01, 0x7F, 0x80, 0xFF] {
+            for verb in [Verb::Ping, Verb::Status] {
+                let mut frame = payload(verb.id(), 5);
+                for byte in frame[field::ARGUMENT].iter_mut() {
+                    *byte = fill;
+                }
+                let command = classify(&frame).expect("well formed");
+                assert_eq!(command.verb, verb);
+                assert_eq!(command.sequence, 5);
+                // The classifier carries the argument for every row — it is
+                // one fixed-width copy, not a decision — but only the SHELL
+                // row has anywhere to take it.
+                assert_eq!(command.line(), None, "{verb:?} must not acquire a command line");
+            }
+        }
+        // And the SHELL row: the same bytes now mean a line, and the line is
+        // exactly the field, trimmed at a fixed width. No length inside the
+        // frame is believed, because there is no length inside the frame.
+        let mut frame = payload(Verb::Shell.id(), 6);
+        frame[field::ARGUMENT][..3].copy_from_slice(b"VER");
+        let command = classify(&frame).expect("well formed");
+        assert_eq!(command.line(), Some(&b"VER"[..]));
+    }
+
+    /// A command line is trimmed at a fixed width, and every filler the wire
+    /// might carry resolves to the same line.
+    ///
+    /// Space padding is what a human-written sender produces; NUL padding is
+    /// what a zeroed buffer produces. Both are padding, neither is content,
+    /// and a classifier that treated them differently would make the same
+    /// command mean two things depending on who sent it.
+    #[test]
+    fn the_command_line_is_the_fixed_field_trimmed_and_never_a_length_from_the_frame() {
+        for filler in [0x00u8, b' '] {
+            let mut frame = payload(Verb::Shell.id(), 1);
+            for byte in frame[field::ARGUMENT].iter_mut() {
+                *byte = filler;
+            }
+            frame[field::ARGUMENT][..9].copy_from_slice(b"DIR A:\\ ~");
+            frame[field::ARGUMENT][8] = filler; // the `~` was only a placeholder
+            let command = classify(&frame).expect("well formed");
+            assert_eq!(command.line(), Some(&b"DIR A:\\"[..]), "filler {filler:#04x}");
+        }
+        // A completely blank argument is an empty line, not a missing one:
+        // the row resolved, so the answer is owed. An empty line is what the
+        // shell itself refuses, and it refuses it as a shell rather than as a
+        // classifier.
+        let frame = payload(Verb::Shell.id(), 1);
+        assert_eq!(classify(&frame).expect("well formed").line(), Some(&b""[..]));
+        // The full field with no padding at all is still exactly the field —
+        // the one case where a trim could run off the end.
+        let mut full = payload(Verb::Shell.id(), 1);
+        for byte in full[field::ARGUMENT].iter_mut() {
+            *byte = b'X';
+        }
+        assert_eq!(
+            classify(&full).expect("well formed").line().map(<[u8]>::len),
+            Some(ARGUMENT_BYTES)
+        );
+    }
+
+    /// The channel tells its caller what to run, and only for the row that has
+    /// something to run.
+    ///
+    /// This is the whole of the seam: `offer` classifies, `pending_line`
+    /// reports, the **caller** runs, `take` renders what the caller produced.
+    /// The module still executes nothing, which is why it can still forbid
+    /// `unsafe` and still take no device in any signature.
+    #[test]
+    fn the_channel_reports_the_line_to_run_and_never_runs_it() {
+        let mut channel = CommandChannel::new();
+        assert_eq!(channel.pending_line(), None, "an untouched channel owes no run");
+
+        channel.offer(&payload(Verb::Ping.id(), 1));
+        assert_eq!(channel.pending_line(), None, "PING has nothing to run");
+
+        let mut channel = CommandChannel::new();
+        let mut frame = payload(Verb::Shell.id(), 2);
+        frame[field::ARGUMENT][..3].copy_from_slice(b"VOL");
+        channel.offer(&frame);
+        assert_eq!(channel.pending_line(), Some(&b"VOL"[..]));
+
+        // A refusal has no line either: an unknown verb never reached a row.
+        let mut channel = CommandChannel::new();
+        channel.offer(&payload(0, 3));
+        assert_eq!(channel.pending_line(), None);
+    }
+
+    /// The `SHELL` answer carries the caller's output and nothing the module
+    /// invented.
+    #[test]
+    fn a_shell_answer_carries_the_callers_output_escaped_onto_one_line() {
+        let line = rendered_with(
+            Spoken::Answer(Command::bare(Verb::Shell, 4)),
+            AnswerText { status: b"ignored", output: b"TinyOS 4.0\nA:\\>" },
+        );
+        assert_eq!(line, "TOS64-ANS/1 verb=SHELL seq=4 ok=1 out=TinyOS 4.0\\nA:\\\\>\n");
+        // The status text belongs to STATUS and may not leak into SHELL, and
+        // the shell output may not leak into STATUS. Two rows, two texts.
+        let status = rendered_with(
+            Spoken::Answer(Command::bare(Verb::Status, 4)),
+            AnswerText { status: b"TOS64-RESULT/1 ok=true", output: b"SHOULD NOT APPEAR" },
+        );
+        assert!(!status.contains("SHOULD NOT APPEAR"), "{status}");
+        assert!(status.contains("TOS64-RESULT/1 ok=true"), "{status}");
+    }
+
+    /// One frame in, one line out, whatever the shell produced.
+    ///
+    /// This is `SEC-20` restated for the widened row and it is the property a
+    /// verb core most plausibly breaks: a `DIR` of a full volume is many lines
+    /// of output, and many lines would be many frames, which is the
+    /// amplification an unauthenticated broadcast-capable peer must not get.
+    /// The answer is one line and the excess is **named**, never dropped
+    /// silently and never continued into a second frame.
+    #[test]
+    fn a_large_shell_output_still_leaves_as_exactly_one_named_bounded_line() {
+        let huge = [b'D'; SHELL_OUTPUT_CAPACITY];
+        let mut out = [0u8; ANSWER_CAPACITY];
+        let len = render(
+            Spoken::Answer(Command::bare(Verb::Shell, 7)),
+            AnswerText { status: b"", output: &huge },
+            &mut out,
+        );
+        let line = core::str::from_utf8(&out[..len]).expect("ASCII");
+        assert!(len <= ANSWER_CAPACITY, "{len}");
+        assert_eq!(line.matches('\n').count(), 1, "exactly one line: {line}");
+        assert!(line.ends_with('\n'));
+        assert!(line.contains(" more="), "the withheld octets must be named: {line}");
+        // And the count is the truth: prefix carried + withheld = produced.
+        let carried = line
+            .split("out=")
+            .nth(1)
+            .and_then(|rest| rest.split(" more=").next())
+            .expect("an out= field")
+            .len();
+        let withheld: usize = line
+            .rsplit(" more=")
+            .next()
+            .expect("a more= field")
+            .trim_end()
+            .parse()
+            .expect("a count");
+        assert_eq!(
+            carried + withheld,
+            SHELL_OUTPUT_CAPACITY,
+            "the answer must account for every octet the shell produced"
+        );
+    }
+
+    /// A labelled prefix is a measurement; an unlabelled one is a forgery.
+    ///
+    /// The deliberate divergence from `status`'s whole-drop rule, asserted so
+    /// the divergence is a decision rather than an accident: a `STATUS` reply
+    /// is a **replay of a verdict**, where a partial is a plausible lie with
+    /// no marker, so it is dropped whole and named `none`. Shell output is a
+    /// **stream**, where a prefix is a true statement about the beginning of
+    /// it provided the answer says how much it did not carry.
+    #[test]
+    fn output_that_fits_carries_no_more_field_and_output_that_does_not_always_carries_one() {
+        let fits = rendered_with(
+            Spoken::Answer(Command::bare(Verb::Shell, 1)),
+            AnswerText { status: b"", output: b"A:\\>" },
+        );
+        assert!(!fits.contains("more="), "nothing was withheld: {fits}");
+
+        for length in 1..=SHELL_OUTPUT_CAPACITY {
+            let output = vec![b'X'; length];
+            let line = rendered_with(
+                Spoken::Answer(Command::bare(Verb::Shell, 1)),
+                AnswerText { status: b"", output: &output },
+            );
+            assert!(line.len() <= ANSWER_CAPACITY, "at {length}: {line}");
+            assert_eq!(line.matches('\n').count(), 1, "at {length}");
+            let carried = line
+                .split("out=")
+                .nth(1)
+                .and_then(|rest| rest.split(" more=").next())
+                .expect("out=")
+                .trim_end()
+                .len();
+            let withheld: usize = match line.rsplit_once(" more=") {
+                Some((_, count)) => count.trim_end().parse().expect("a count"),
+                None => 0,
+            };
+            // Escaping only ever *grows* the carried text, so the carried
+            // count is compared as a floor over source octets rather than as
+            // an equality — what must hold exactly is the accounting.
+            assert!(carried >= length - withheld, "at {length}: {line}");
+            assert!(withheld <= length, "at {length}: withheld more than was produced");
+        }
+    }
+
+    /// Nothing the shell can emit can move the operator's cursor or break the
+    /// wire's own line framing.
+    ///
+    /// The shell already renders attacker-influenced names inert
+    /// (`EPIC-P2` §6.5 rule 3), so this is the second fence and not the first
+    /// — but it is a **total** function over bytes, which the first one is
+    /// not: it runs over every octet the runner returns regardless of which
+    /// side of the shell produced it.
+    #[test]
+    fn no_octet_of_shell_output_can_escape_the_one_line_it_is_carried_on() {
+        let mut output = [0u8; 64];
+        for (index, byte) in output.iter_mut().enumerate() {
+            *byte = index as u8;
+        }
+        let line = rendered_with(
+            Spoken::Answer(Command::bare(Verb::Shell, 1)),
+            AnswerText { status: b"", output: &output },
+        );
+        assert_eq!(line.matches('\n').count(), 1, "{line:?}");
+        for (index, byte) in line.bytes().enumerate() {
+            if index + 1 == line.len() {
+                assert_eq!(byte, b'\n', "the terminator");
+                continue;
+            }
+            assert!(
+                (0x20..0x7F).contains(&byte),
+                "octet {byte:#04x} at {index} reached the wire unrendered: {line:?}"
+            );
+        }
+        // Every one of the 256 octets, not just the first 64 — the escape is
+        // total or it is not a fence.
+        for byte in 0..=u8::MAX {
+            let line = rendered_with(
+                Spoken::Answer(Command::bare(Verb::Shell, 1)),
+                AnswerText { status: b"", output: &[byte, byte, byte] },
+            );
+            assert_eq!(line.matches('\n').count(), 1, "octet {byte:#04x}: {line:?}");
+        }
+    }
+
+    /// The rate bound is the same bound, with a row that does far more work
+    /// behind it.
+    #[test]
+    fn the_shell_row_owes_no_more_lines_per_beat_than_a_ping_does() {
+        let mut channel = CommandChannel::new();
+        let mut out = [0u8; ANSWER_CAPACITY];
+        let mut frame = payload(Verb::Shell.id(), 1);
+        frame[field::ARGUMENT][..3].copy_from_slice(b"DIR");
+        let mut beats = 0u32;
+        let mut lines = 0u32;
+        for sequence in 0..1_000u32 {
+            frame[field::SEQUENCE].copy_from_slice(&sequence.to_be_bytes());
+            channel.offer(&frame);
+            if sequence.is_multiple_of(3) {
+                beats += 1;
+                if channel.take(AnswerText { status: b"", output: b"x" }, &mut out).is_some() {
+                    lines += 1;
+                }
+            }
+        }
+        assert!(lines <= beats, "{lines} lines across {beats} beats");
+        assert!(channel.refused() > 0, "a flood that produced no over-rate refusal");
     }
 }

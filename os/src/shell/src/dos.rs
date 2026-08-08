@@ -326,7 +326,7 @@ mod tests {
     use super::*;
     use crate::labels::Labels;
     use crate::policy::GrantSet;
-    use crate::verbs::{Env, TaskInfo, VerbKind, World};
+    use crate::verbs::{Env, Platform, TaskInfo, VerbKind, World};
     use crate::volume::RamVolume;
 
     const ALL: &[VerbKind] = &[
@@ -359,6 +359,7 @@ mod tests {
     fn world() -> World<'static> {
         let mut w = World {
             volume: RamVolume::new(Some("TINYOS"), (0x1234, 0xABCD)),
+            platform: Platform::TIER0_X86_64,
             env: Env::new(),
             cwd: 0,
             echo: true,

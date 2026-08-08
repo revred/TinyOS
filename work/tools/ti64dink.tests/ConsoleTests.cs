@@ -52,11 +52,12 @@ public sealed class ConsoleTests
     // --- the frame builder, exact bytes -------------------------------------
 
     [Fact]
-    public void ACommandFrameIsExactlyTheEthernetMinimumAndCarriesTheFixedLayout()
+    public void ACommandFrameIsNeverPaddableAndCarriesTheFixedLayout()
     {
         var frame = Cmd.Frame(Cmd.IdFor("PING"), 7);
 
-        Assert.Equal(60, frame.Length);
+        Assert.Equal(158, frame.Length);
+        Assert.True(frame.Length >= 60, "at or above the Ethernet minimum, so no NIC pads it");
         Assert.Equal(14 + Cmd.PayloadBytes, frame.Length);
         Assert.Equal(Cmd.BoardMac, frame[0..6]);
         Assert.Equal(Cmd.SenderMac, frame[6..12]);
@@ -74,17 +75,47 @@ public sealed class ConsoleTests
     }
 
     [Fact]
-    public void TheWholeFrameIsTheEthernetMinimumSoNoNicPaddingCanEverReachTheBoard()
+    public void EveryFrameIsAtOrAboveTheEthernetMinimumSoNoNicPaddingCanEverReachTheBoard()
     {
-        // The reason the layout is 46 octets and not 32: a shorter frame is
-        // padded to 60 by the NIC, below any software here, and the padding
-        // would arrive at the board's fixed-width classifier indistinguishable
-        // from a wrong-width field. This assertion is that argument.
+        // A frame UNDER 60 octets is padded to 60 by the NIC, below any
+        // software here, and the padding would arrive at the board's
+        // fixed-width classifier indistinguishable from a wrong-width field.
+        // The property is therefore `>= 60`, not `== 60` — a NIC never pads a
+        // frame already at or above the minimum. Pinning `== 60` is what held
+        // the command line at 30 octets until 2026-08-08 for a guarantee that
+        // `>=` gives at any width.
+        const int EthernetMinimum = 60;
         foreach (var (_, id) in Cmd.Verbs)
         {
-            Assert.Equal(60, Cmd.Frame(id, uint.MaxValue).Length);
+            Assert.True(Cmd.Frame(id, uint.MaxValue).Length >= EthernetMinimum);
         }
-        Assert.Equal(60, Cmd.Frame(Cmd.UnknownVerbId, 0).Length);
+        Assert.True(Cmd.Frame(Cmd.UnknownVerbId, 0).Length >= EthernetMinimum);
+        // And every frame is the SAME width, which is what makes the board's
+        // classifier total: unpaddable is necessary, fixed-width is the point.
+        Assert.Equal(14 + Cmd.PayloadBytes, Cmd.Frame(Cmd.IdFor("SHELL"), 1).Length);
+        Assert.Equal(
+            14 + Cmd.PayloadBytes,
+            Cmd.Frame(Cmd.IdFor("SHELL"), 1, new string('A', Cmd.ArgumentBytes * 2)).Length);
+    }
+
+    [Fact]
+    public void TheArgumentFieldCarriesTheLineTheBoardsShellAccepts()
+    {
+        // shell::capacities::MAX_LINE, held equal to tos64_cmd::ARGUMENT_BYTES
+        // by a compile-time assertion in pi5-image. This end cannot see either
+        // crate, so it pins the number and names where the agreement lives.
+        Assert.Equal(128, Cmd.ArgumentBytes);
+
+        // The command the old 30-octet field could not carry.
+        const string line = "FIND /N \"Ethernet cable\" README.TXT";
+        Assert.True(line.Length > 30);
+        var frame = Cmd.Frame(Cmd.IdFor("SHELL"), 3, line);
+        Assert.Equal(
+            line,
+            Encoding.ASCII.GetString(frame, 14 + Cmd.ArgumentOffset, line.Length));
+        Assert.All(
+            frame[(14 + Cmd.ArgumentOffset + line.Length)..],
+            b => Assert.Equal(0, b));
     }
 
     [Fact]
@@ -248,5 +279,126 @@ public sealed class ConsoleTests
         // Blank lines are not commands: sequence 1 then 2, no gap.
         Assert.Equal(1, link.Sent[0][14 + Cmd.SequenceOffset + 3]);
         Assert.Equal(2, link.Sent[1][14 + Cmd.SequenceOffset + 3]);
+    }
+
+    // --- the SHELL row: a human typing at TinyOS (STORY-P1-09-18) -----------
+
+    [Fact]
+    public void AShellCommandCarriesItsLineInTheFixedArgumentFieldAndNowhereElse()
+    {
+        var frame = Cmd.Frame(Cmd.IdFor("SHELL"), 4, "DIR A:\\");
+
+        // Still exactly the Ethernet minimum. A command line does not grow the
+        // frame; that is the whole reason the field is fixed.
+        Assert.Equal(158, frame.Length);
+        Assert.True(frame.Length >= 60, "at or above the Ethernet minimum, so no NIC pads it");
+        Assert.Equal(new byte[] { 0x00, 0x03 }, frame[(14 + Cmd.VerbOffset)..(14 + Cmd.VerbOffset + 2)]);
+        var field = frame[(14 + Cmd.ArgumentOffset)..];
+        Assert.Equal(Cmd.ArgumentBytes, field.Length);
+        Assert.Equal("DIR A:\\", Encoding.ASCII.GetString(field, 0, 7));
+        // Everything past the line is zero — the padding the board trims.
+        Assert.All(field[7..], b => Assert.Equal(0, b));
+    }
+
+    [Fact]
+    public void ALineLongerThanTheFieldIsTruncatedAndTheOperatorIsToldByTheToolThatDidIt()
+    {
+        var link = new ScriptedLink().Answers("TOS64-ANS/1 verb=SHELL seq=1 ok=1 out=none");
+        var typed = "SHELL " + new string('X', Cmd.ArgumentBytes + 5);
+        var transcript = Session(typed + "\n", link, out _);
+
+        Assert.Contains($"the command line is {Cmd.ArgumentBytes + 5} octets", transcript);
+        Assert.Contains($"a frame carries {Cmd.ArgumentBytes}", transcript);
+        // And the frame really is the fixed width, carrying the prefix only.
+        Assert.Equal(14 + Cmd.PayloadBytes, link.Sent[0].Length);
+        Assert.Equal(
+            new string('X', Cmd.ArgumentBytes),
+            Encoding.ASCII.GetString(link.Sent[0], 14 + Cmd.ArgumentOffset, Cmd.ArgumentBytes));
+    }
+
+    [Fact]
+    public void TheBoardsShellOutputIsUnescapedBackIntoTheLinesTinycmdWrote()
+    {
+        var link = new ScriptedLink().Answers(
+            "TOS64-ANS/1 verb=SHELL seq=1 ok=1 out= Volume in drive A is TINYOS\\nREADME.TXT\\n");
+        var transcript = Session("SHELL DIR\n", link, out var unanswered);
+
+        Assert.Equal(0, unanswered);
+        Assert.Contains("verb=SHELL seq=1", transcript);
+        Assert.Contains("    |  Volume in drive A is TINYOS", transcript);
+        Assert.Contains("    | README.TXT", transcript);
+        // The escape is gone and no literal `\n` survived into the display.
+        Assert.DoesNotContain("\\n", transcript);
+    }
+
+    [Fact]
+    public void OutputThatDidNotFitTheFrameIsStatedRatherThanQuietlyAbsent()
+    {
+        var link = new ScriptedLink().Answers(
+            "TOS64-ANS/1 verb=SHELL seq=1 ok=1 out=README.TXT more=42");
+        var transcript = Session("SHELL DIR\n", link, out _);
+
+        Assert.Contains("    | README.TXT", transcript);
+        Assert.Contains("42 octet(s) did not fit", transcript);
+        // The count must not be mistaken for output.
+        Assert.DoesNotContain("| 42", transcript);
+    }
+
+    [Fact]
+    public void AnEscapedBackslashComesBackAsOneBackslashAndNotAsAnEscape()
+    {
+        // The path separator is the character most likely to appear in real
+        // output and is also the escape character, so the round trip through
+        // `A:\>` is the case worth pinning by name.
+        Assert.Equal("A:\\>", Cmd.Unescape("A:\\\\>"));
+        Assert.Equal("a\nb", Cmd.Unescape("a\\nb"));
+        Assert.Equal("a\\nb", Cmd.Unescape("a\\\\nb"));
+        // A `?` is what the board substituted for something unprintable. It is
+        // shown as a `?`: inventing the octet back would be this end
+        // fabricating board output.
+        Assert.Equal("EVIL?[2J", Cmd.Unescape("EVIL?[2J"));
+    }
+
+    [Fact]
+    public void AnEmptyOutputFieldIsAnAnswerAndNotASilence()
+    {
+        var link = new ScriptedLink().Answers("TOS64-ANS/1 verb=SHELL seq=1 ok=1 out=none");
+        var transcript = Session("SHELL\n", link, out var unanswered);
+
+        Assert.Equal(0, unanswered);
+        Assert.Contains("verb=SHELL", transcript);
+        Assert.DoesNotContain("TIMEOUT", transcript);
+    }
+
+    [Fact]
+    public void AnUnknownWordIsStillSentWholeSoTheBoardIsTheOneThatDeniesIt()
+    {
+        // Rule 3, re-asserted now that a row exists which could have swallowed
+        // it. A console that quietly routed `WOBBLE` to the shell would hide
+        // the deny-by-default table an operator is meant to be watching.
+        var link = new ScriptedLink().Answers("TOS64-ANS/1 refused=unknown-verb seq=1");
+        var transcript = Session("WOBBLE\n", link, out _);
+
+        Assert.Equal(Cmd.UnknownVerbId, (ushort)link.Sent[0][14 + Cmd.VerbOffset + 1]);
+        Assert.Contains("REFUSED: unknown-verb", transcript);
+    }
+
+    [Fact]
+    public void ASharedStatusAndOutputLineKeepsTheTwoFieldsApart()
+    {
+        // `status=` and `out=` both run to the end of a line, so a parser that
+        // handled them in the wrong order would fold one into the other. The
+        // board never emits both, and this end is asserted not to confuse them
+        // if a capture ever shows one.
+        var answer = Cmd.Parse("TOS64-ANS/1 verb=STATUS seq=3 ok=1 status=TOS64-RESULT/1 ok=true");
+        Assert.NotNull(answer);
+        Assert.Equal("TOS64-RESULT/1 ok=true", answer!.Status);
+        Assert.Null(answer.Output);
+
+        var shell = Cmd.Parse("TOS64-ANS/1 verb=SHELL seq=3 ok=1 out=A:\\\\> more=7");
+        Assert.NotNull(shell);
+        Assert.Equal("A:\\>", shell!.Output);
+        Assert.Equal(7u, shell.Withheld);
+        Assert.Null(shell.Status);
     }
 }
