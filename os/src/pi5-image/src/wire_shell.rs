@@ -400,8 +400,13 @@ mod tests {
     /// reader who does not spot the `const` assertion still sees the number.
     #[test]
     fn the_session_fits_the_stack_budget_it_declares() {
-        assert!(core::mem::size_of::<World<'static>>() <= STACK_BUDGET);
-        assert!(STACK_BUDGET * 4 <= 64 * 1024, "the budget is a quarter of the board stack");
+        // Both are constant, so both are checked when this crate COMPILES
+        // rather than when the test runs — which is what a bound on a board
+        // stack should be. `clippy::assertions_on_constants` asks for exactly
+        // this form, and it is right to: a runtime assertion over two
+        // constants can only ever fail on a machine that already built.
+        const { assert!(core::mem::size_of::<World<'static>>() <= STACK_BUDGET) };
+        const { assert!(STACK_BUDGET * 4 <= 64 * 1024, "the budget is a quarter of the board stack") };
     }
 
     /// `GrantSet::allows` reaches through the trait; naming it once keeps the

@@ -783,11 +783,17 @@ mod tests {
         // never pads a frame already at or above it. So any width from the
         // minimum upward is equally immune, and pinning `==` fixed the
         // argument field at 30 octets for a guarantee `>=` already gave.
-        assert!(
-            14 + COMMAND_PAYLOAD_BYTES >= crate::gem::MINIMUM_FRAME_LEN,
-            "a frame under the Ethernet minimum arrives padded, and padding is \
-             indistinguishable from a wrong-width field"
-        );
+        // A `const` block, so the property is checked when this crate COMPILES:
+        // a width that could be padded must not produce a buildable image, let
+        // alone a failing test. `clippy::assertions_on_constants` asks for this
+        // form and is right to.
+        const {
+            assert!(
+                14 + COMMAND_PAYLOAD_BYTES >= crate::gem::MINIMUM_FRAME_LEN,
+                "a frame under the Ethernet minimum arrives padded, and padding is \
+                 indistinguishable from a wrong-width field"
+            )
+        };
         // Stated as its own assertion so the reason survives: the widening is
         // legitimate precisely because this margin is non-negative, and a
         // future narrowing that broke it would fail above rather than produce
