@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TinyOS Handovers — 8 August 2026</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #5a5a5a;
+    --border: #d8d8d8;
+    --code-bg: #f2f2f2;
+    --accent: #0b5fff;
+    --tag-bg: #eef2ff;
+    --card-bg: #fafafa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --fg: #e8e8e8;
+      --muted: #a0a0a0;
+      --border: #333740;
+      --code-bg: #1e2126;
+      --accent: #6fa8ff;
+      --tag-bg: #1c2333;
+      --card-bg: #191c21;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.6;
+  }
+  h1 { font-size: 1.7rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.25rem; margin-top: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+  .status {
+    display: inline-block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--tag-bg);
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    margin-bottom: 1.5rem;
+  }
+  code {
+    background: var(--code-bg);
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  a { color: var(--accent); }
+  .muted { color: var(--muted); }
+  .entries { list-style: none; padding-left: 0; }
+  .entry {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 0.9rem;
+  }
+  .entry .num {
+    display: inline-block;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin-right: 0.4rem;
+  }
+  .entry a { font-weight: 600; font-size: 1.02rem; text-decoration: none; }
+  .entry a:hover { text-decoration: underline; }
+  .entry p { margin: 0.4rem 0 0; color: var(--muted); font-size: 0.92rem; }
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+
+<h1>TinyOS &mdash; Handovers for 8 August 2026</h1>
+<p class="muted">This page indexes every handover produced on this date, in order. Per the <a href="../README.md">session naming convention</a>, all handovers from a single calendar date live in this one folder. Previous date: <a href="../hand-2026-08-07/index.html">7 August 2026</a>.</p>
+<span class="status">The ear woke up, and TinyOS answered a human for the first time</span>
+
+<h2>Handovers</h2>
+<ol class="entries">
+  <li class="entry">
+    <span class="num">19A</span><a href="19A-the-ear-is-deaf-on-arrival.md">The ear was deaf on arrival, the fix works, and the board answered</a>
+    <p><strong>TinyOS answered a human.</strong> Three commands typed at <code>ti64dink --console</code>, three distinct sequence-matched refusals spoken back over the cable, nothing unanswered &mdash; <code>M1</code>'s round trip proven on silicon, and <code>STORY-P1-09-17</code> criterion 4's refusal arms closed. Getting there took three findings. <strong><code>LE-119</code> closed in code and on silicon</strong>, putting the RX and CMD rows on the wire as rotation slots (cadence unmoved) &mdash; and its very first capture carried <code>LE-118</code>'s deciding evidence: a freshly netbooted board <code>stopped reason=nobuffer accepted=0 refused=0</code> with nothing sent to it, unmoved by three pings. <strong>The ear was deaf before our traffic, not because of it.</strong> The owner ruled <em>BNA becomes a counted drop, OVR stays terminal</em> &mdash; two different failures wearing one word, since <code>BNA</code> is backpressure about a frame that never entered the ring &mdash; and the next boot read <code>state=listening accepted=5 refused=19 dropped=19</code>: alive, classifying, with the contention finally a number. <strong><code>LE-122</code> is the last gap and it is measured, not guessed</strong>: every command refused <code>oversize</code>, so the board was made to state its own width; the first reading (47) was the copy-out cap saturating, so the buffer was widened and the board answered <strong><code>lastlen=50</code> against 46 sent &mdash; exactly the four octets of the FCS</strong>. Also: <code>LE-120</code>'s general half (the transport refuses and speaks <code>TOS64-TRUNC/1</code>; capacity derived from the transcript, after the test found seven-digit latency tails would overflow the old bound), and <code>main</code>'s inherited red cleared &mdash; a test literal pinning <code>qualified_count()==0</code> had been calling the project's first qualified platform a violation.</p>
+  </li></ol>
+
+<footer>
+Written 2026-08-07. Previous date: <a href="../hand-2026-08-07/index.html">7 August 2026</a>. The deep operational context (SSH runbook, card roles, capture procedure) lives in <a href="../hand-2026-08-03/09A-window-poisoned-inbound-path-indicted.md">hand-2026-08-03/09A</a>.
+</footer>
+
+</body>
+</html>
+
+
