@@ -85,7 +85,36 @@ pub mod ncfgr_receive {
     /// set today, because the drop count now measures the contention rather
     /// than leaving it to be guessed at.
     pub const NO_BROADCAST: u32 = 1 << 5;
+    /// `DRFCS` — remove the frame check sequence. Transcribed from `macb.h`:
+    /// `#define MACB_DRFCS_OFFSET 17 /* FCS remove */`.
+    ///
+    /// **Set, and that is `LE-122`'s fix.** The descriptor's frame length
+    /// counts every octet the MAC wrote into the buffer, and with this bit
+    /// clear that includes the four-octet FCS — so a host frame of `14 + 46`
+    /// octets, built at exactly the Ethernet minimum so no sending NIC's
+    /// padding can exist, arrived reporting 64 and offered a 50-octet payload
+    /// to a fixed-width classifier that wants 46. Measured on silicon
+    /// 2026-08-08 (`19A`), not inferred: the board's own `lastlen=50`.
+    ///
+    /// It is fixed **here rather than by subtracting four in the glue**,
+    /// because this is where every other bound on this path lives: the MAC
+    /// enforces and software does not compensate (`STORY-P1-09-16`). A
+    /// software subtraction would encode a hardware behaviour as arithmetic,
+    /// and on the day the bit *is* set by anything else the frame would read
+    /// four octets **short** and every command would refuse as `Undersize`
+    /// instead — the same defect wearing the opposite name.
+    pub const DISCARD_RX_FCS: u32 = 1 << 17;
 }
+
+/// The four octets of frame check sequence the wire carries and
+/// [`ncfgr_receive::DISCARD_RX_FCS`] keeps out of the reported length.
+///
+/// Named rather than written as a literal `4` so that the one number
+/// `LE-122` measured has somewhere to be stated, and so a reader who finds a
+/// four-octet disagreement anywhere on this path has a name to search for.
+/// **Nothing subtracts it**: it exists to make the MAC's job legible, not to
+/// do that job in software.
+pub const FRAME_CHECK_SEQUENCE_BYTES: usize = 4;
 
 /// Receive-relevant fields inside `DMACFG`.
 pub mod dmacfg_receive {
@@ -281,11 +310,14 @@ pub fn enable_receive<M: Mmio>(
     // The bound the MAC enforces, and 64-bit addressing: system RAM is above
     // any 32-bit address on RP1's bus. Promiscuous is cleared explicitly
     // rather than assumed clear — the filter above is only containment if
-    // this bit is down.
+    // this bit is down. The FCS strip is set for the same reason the bound is
+    // programmed here: the MAC enforces the widths this path believes, and
+    // software does not compensate for it afterwards (`LE-122`).
     let ncfgr = device.read_u32(crate::gem::register::NCFGR);
     device.write_u32(
         crate::gem::register::NCFGR,
-        ncfgr & !ncfgr_receive::COPY_ALL_FRAMES & !ncfgr_receive::NO_BROADCAST,
+        (ncfgr & !ncfgr_receive::COPY_ALL_FRAMES & !ncfgr_receive::NO_BROADCAST)
+            | ncfgr_receive::DISCARD_RX_FCS,
     );
     let dmacfg = device.read_u32(crate::gem::register::DMACFG);
     device.write_u32(crate::gem::register::DMACFG, dmacfg_for_receive(dmacfg, code));
@@ -1327,6 +1359,51 @@ mod tests {
         assert_eq!(next, BeatPlan::Quiet);
     }
 
+    // LE-122: the length the descriptor reports must be the length the host
+    // sent, and the MAC is what makes that true.
+
+    #[test]
+    fn the_frame_check_sequence_is_stripped_by_the_mac_and_never_reaches_a_length() {
+        // A device whose NCFGR reads back with the strip bit clear — which is
+        // how this bench's silicon was found on 2026-08-08 — must be written
+        // with it set.
+        let device = ScriptedRx::new().steady(gem::register::NCFGR, 0x0008_0000);
+        let _ = enable_receive(
+            &device,
+            gem::BEACON_SOURCE_MAC,
+            0x0000_0010_0008_3000,
+            RECEIVE_BUFFER_BYTES,
+        );
+        let ncfgr = device.written_to(gem::register::NCFGR);
+        assert_eq!(ncfgr.len(), 1, "still one configuration write, read-modify-write");
+        assert_eq!(
+            ncfgr[0] & ncfgr_receive::DISCARD_RX_FCS,
+            ncfgr_receive::DISCARD_RX_FCS,
+            "LE-122: with DRFCS clear the descriptor's length includes the four-octet FCS, \
+             so a 60-octet host frame offers a 50-octet payload to a classifier that wants 46 \
+             and every command refuses as oversize before the verb table is consulted"
+        );
+        assert_eq!(ncfgr[0] & ncfgr_receive::COPY_ALL_FRAMES, 0, "and the filter still stands");
+        assert_eq!(ncfgr[0] & 0x0008_0000, 0x0008_0000, "unrelated bits still survive");
+    }
+
+    #[test]
+    fn a_minimum_ethernet_frame_offers_exactly_the_command_envelope_after_the_strip() {
+        // The arithmetic LE-122 turned from a mystery into a number, stated
+        // where a later reader can see both halves at once. The host builds
+        // 14 + 46 = 60 octets; the wire adds a four-octet FCS; the MAC strips
+        // it, so the descriptor reports 60 and the payload is 46 — not 50.
+        let on_the_wire = crate::gem::MINIMUM_FRAME_LEN + FRAME_CHECK_SEQUENCE_BYTES;
+        assert_eq!(on_the_wire, 64);
+        let reported = on_the_wire - FRAME_CHECK_SEQUENCE_BYTES;
+        assert_eq!(reported, crate::gem::MINIMUM_FRAME_LEN);
+        assert_eq!(
+            reported - HEADER_BYTES,
+            crate::tos64_cmd::COMMAND_PAYLOAD_BYTES,
+            "the fixed-width envelope is measured against a length that excludes the FCS"
+        );
+    }
+
     #[test]
     fn the_register_offsets_are_the_macb_transcriptions() {
         assert_eq!(register::RBQP, 0x0018);
@@ -1334,6 +1411,28 @@ mod tests {
         assert_eq!(register::SA1B, 0x0088);
         assert_eq!(register::SA1T, 0x008C);
         assert_eq!(register::RBQPH, 0x04D4);
+        // NCFGR bit positions, transcribed rather than recalled: macb.h gives
+        // MACB_CAF_OFFSET 4, MACB_NBC_OFFSET 5, MACB_DRFCS_OFFSET 17.
+        assert_eq!(ncfgr_receive::COPY_ALL_FRAMES, 1 << 4);
+        assert_eq!(ncfgr_receive::NO_BROADCAST, 1 << 5);
+        assert_eq!(ncfgr_receive::DISCARD_RX_FCS, 1 << 17);
+        // Between RLCE (16) and the GEM MDC divisor field (18..21), and clear
+        // of every bit this path or the transmit path writes.
+        assert_eq!(
+            ncfgr_receive::DISCARD_RX_FCS & crate::gem::ncfgr::MDC_DIVISOR_MASK,
+            0,
+            "the strip bit must not land in the MDC divisor field"
+        );
+        for other in [
+            crate::gem::ncfgr::SPEED_100,
+            crate::gem::ncfgr::FULL_DUPLEX,
+            crate::gem::ncfgr::GIGABIT,
+            ncfgr_receive::COPY_ALL_FRAMES,
+            ncfgr_receive::NO_BROADCAST,
+        ] {
+            assert_eq!(ncfgr_receive::DISCARD_RX_FCS & other, 0);
+        }
+        assert_eq!(FRAME_CHECK_SEQUENCE_BYTES, 4);
         for offset in
             [register::RBQP, register::RSR, register::SA1B, register::SA1T, register::RBQPH]
         {

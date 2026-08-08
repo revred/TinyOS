@@ -42,6 +42,16 @@ it prevents:
    `086b83e3332dfc8927c56762771d082f3077a1ae` (2026-05-26). **A mismatch is
    not a failure; it is the record's void clause firing** — stop, and the
    response is a new qualification Report, never a quiet re-pin.
+
+   **Read on 2026-08-08 and the pin held**, byte-identical
+   (`goals/reports/eeprom-tripwire-2026-08-08.txt`). The same reading found
+   `rpi-eeprom-update` **enabled with nothing held**, so the row's trigger is
+   live on this bench and `LE-117` half (2) — the recorded decision about
+   whether this card may auto-update the EEPROM — is open and the owner's.
+
+   **Getting back out is §6b**, and it is not optional: this step boots the Pi
+   OS role, the plug must not be cut underneath it, and without §6b's one
+   sudoers line the session cannot shut it down. Do §6b *before* you need it.
 3. **If the canvas matters this sitting:** power the board while the monitor
    is *actively displaying a live source*, not merely awake — firmware scanout
    bring-up at power-on is nondeterministic (`hand-2026-08-07/07F` §7b holds
@@ -366,3 +376,50 @@ Rules, so this stays an instrument and never becomes a hole:
 4. This card is the **ground-truth instrument** (`tos64-cardswap pios`), reachable
    only over the direct cable's link-local address; it holds nothing but a stock
    Pi OS and the probes. The TOS64 card is untouched by any of this.
+
+## 6b. The second one-time line: a shutdown the session can reach (2026-08-08, `LE-117`)
+
+§6 made the *reading* unattended and left the *exit* attended, and on 2026-08-08
+that cost the owner a hand on the bench (`hand-2026-08-08/20A` §5). Reading
+`LE-117`'s tripwire means booting the card's Pi OS role, and §0b item 2 requires
+that reading before wire evidence is filed — but the session that boots it then
+cannot put it back:
+
+- `sudo shutdown -h now` and `sudo poweroff` gate on the password §6 exists to avoid;
+- `systemctl poweroff` over ssh is refused by **polkit** — `Call to PowerOff failed:
+  Interactive authentication required` — because an ssh session is not a local seat,
+  and no amount of group membership changes that;
+- and the plug **must not** be cut underneath a booted Pi OS role (§0c's last
+  paragraph): a write in flight is a corrupt card, and this bench owns one Pi.
+
+So the tripwire is an unattended reading that ends in an attended shutdown, which
+makes the whole procedure attended. One line fixes it, in exactly §6's shape:
+
+```
+# on the Pi, over ssh, once — the same session as §6 if it has not been done yet:
+echo 'revanur ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff' | \
+  sudo tee /etc/sudoers.d/011-tos64-poweroff
+sudo visudo -c    # refuse to leave the session until this prints "parsed OK"
+```
+
+Then the exit is `ssh … 'sync; sudo systemctl poweroff'`, wait for the link to
+drop, and only then may the plug be cut or the board netbooted back into TOS64.
+
+§6's four rules apply unchanged. Two more belong to this line specifically — one
+addition, one honest limit:
+
+1. **The argument is part of the rule.** `NOPASSWD: /usr/bin/systemctl` with no
+   argument would grant *every* unit operation — `systemctl start`, and with it
+   anything the card can be made to run as root. `poweroff` is written into the
+   rule so the grant is one verb. For the same reason prefer this over
+   `/sbin/poweroff`, which is a symlink to `systemctl` and dispatches on `argv[0]`:
+   pinning the real binary and its verb is a rule a reader can check.
+2. **What this actually grants is a denial of service**, and that is the whole of
+   it: anyone who already holds the ssh key can now switch the ground-truth card
+   off without a password. They could already read every register the probe
+   exposes. On a bench card behind a direct cable that trade is worth making; on
+   anything reachable from a network it would not be.
+
+**Until this line exists, `LE-117`'s tripwire costs an owner's hand every time it
+is read** — which in practice means it will be skipped, which is exactly the
+failure mode the row was raised about.

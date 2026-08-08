@@ -1,0 +1,16 @@
+=== LE-117 tripwire, read from the SD card's Pi OS role, 2026-08-08 ===
+--- vcgencmd bootloader_version ---
+2026/05/26 16:01:25
+version 086b83e3332dfc8927c56762771d082f3077a1ae (release)
+timestamp 1779807685
+update-time 1781784436
+capabilities 0x0000007f
+
+--- rpi-eeprom-update -m / config ---
+FIRMWARE_RELEASE_STATUS="default"
+[systemctl is-enabled rpi-eeprom-update]
+enabled
+[apt-mark showhold]
+[dpkg -l rpi-eeprom]
++++-==============-============-============-====================================
+ii  rpi-eeprom     28.27-1      all          Raspberry Pi 4/5 boot EEPROM updater

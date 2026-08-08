@@ -75,6 +75,27 @@ pub enum QualRefusal {
     PmuDead,
     /// The caller's scratch buffer is smaller than the sample set.
     ScratchTooSmall,
+    /// **The core clock moved during the campaign** (`LE-121`). A second,
+    /// tightly-grouped mode in the campaign's own per-window rate samples —
+    /// which is what CPU frequency scaling looks like from inside this
+    /// arithmetic, and which is arithmetically indistinguishable from secure
+    /// world residency *within any one window*.
+    ///
+    /// Carries what it refused on, because a refusal that names no number
+    /// throws away the observation: a reader must be able to see the two
+    /// modes without re-running anything.
+    ClockUnstable {
+        /// The self-calibrated median rate — the mode the campaign would have
+        /// measured everything else against.
+        rate_p50: u64,
+        /// The lowest per-window rate observed: the second mode.
+        rate_min: u64,
+        /// How many windows sat below the median beyond the arithmetic's own
+        /// quantisation.
+        deviating_windows: u32,
+        /// Out of how many.
+        windows: u32,
+    },
 }
 
 impl QualRefusal {
@@ -86,8 +107,31 @@ impl QualRefusal {
             QualRefusal::WindowNeverClosed => "window_never_closed",
             QualRefusal::PmuDead => "pmu_dead",
             QualRefusal::ScratchTooSmall => "scratch_too_small",
+            QualRefusal::ClockUnstable { .. } => "clock_unstable",
         }
     }
+}
+
+/// The largest rate disagreement the instrument's **own arithmetic** can
+/// produce without the clock having moved, in the same units as
+/// [`CampaignSummary::pmu_per_1000_ticks`].
+///
+/// Derived, never chosen — the no-bench-tuned-constants rule applies here more
+/// than anywhere, because this number decides what a qualification record may
+/// say. Three flooring divisions can each cost the ratio a little:
+/// the ratio's own `pmccntr × 1000 / cntpct` floor costs up to one unit; one
+/// cycle of uncertainty in the PMU delta costs `1000 / cntpct` units; one tick
+/// of uncertainty in the window's width costs `rate / cntpct` units. At the
+/// campaign's real parameters (540,000-tick windows, ~44,444 cycles per 1000
+/// ticks) that totals **two units in 44,444** — five parts per million, against
+/// the 37.5% a 1500/2400 MHz clock change produces. The two are not close, and
+/// that gap is why a derived bound is enough.
+#[must_use]
+pub const fn rate_quantisation(rate: u64, narrowest_window_ticks: u64) -> u64 {
+    if narrowest_window_ticks == 0 {
+        return u64::MAX;
+    }
+    1 + (1000 + rate).div_ceil(narrowest_window_ticks)
 }
 
 /// What one campaign (or one control arm's idle set) measured.
@@ -153,16 +197,56 @@ pub fn summarize(
     let scratch = &mut scratch[..samples.len()];
 
     // Pass one: the self-calibrated rate, as the median per-window ratio.
+    let mut narrowest = u64::MAX;
     for (slot, sample) in scratch.iter_mut().zip(samples) {
         if sample.cntpct_ticks == 0 {
             return Err(QualRefusal::WindowNeverClosed);
         }
+        narrowest = if sample.cntpct_ticks < narrowest { sample.cntpct_ticks } else { narrowest };
         *slot = sample.pmccntr_delta.saturating_mul(1000) / sample.cntpct_ticks;
     }
     scratch.sort_unstable();
     let ratio = percentile(scratch, 1, 2).unwrap_or(0);
     if ratio == 0 {
         return Err(QualRefusal::PmuDead);
+    }
+
+    // Pass one and a half: was there ONE clock? (`LE-121`)
+    //
+    // Everything below assumes a single rate — `unaccounted` is physical ticks
+    // minus what the PMU accounts for AT THAT RATE — so a campaign whose
+    // windows disagree about the rate produces a distribution of plausible
+    // non-zeros that is about the clock and not about the secure world. On
+    // 2026-08-07 that distribution was `max=202500` against a 540,000-tick
+    // window: exactly 0.375, which is exactly `1 - 1500/2400`.
+    //
+    // The test is for a **second mode**, not for spread, and the distinction
+    // is the whole design. Residency is what this instrument exists to report
+    // and it arrives as an outlier tail — a few windows, of varying depth.
+    // Frequency scaling arrives as a *population*: many windows, tightly
+    // grouped at one other rate. So the refusal fires on how MANY windows sit
+    // below the calibrated rate, never on how far the worst one did.
+    //
+    // Two conditions, and neither is a bench-tuned number:
+    //
+    //   1. More than 1% of windows deviate. Tied to what this instrument
+    //      REPORTS — `unaccounted_p99` — because past 1% the quoted p99 has
+    //      stopped describing a tail and started describing the other clock.
+    //   2. At least two windows deviate. One window is not a mode, however
+    //      deep, and without this floor a single genuine excursion in a short
+    //      campaign would be refused as a clock move — the instrument
+    //      declining to report the one thing it is for.
+    //
+    // `scratch` is sorted ascending, so the deviating windows are its prefix.
+    let floor = ratio.saturating_sub(rate_quantisation(ratio, narrowest));
+    let deviating = scratch.iter().take_while(|rate| **rate < floor).count();
+    if deviating >= 2 && deviating.saturating_mul(100) > samples.len() {
+        return Err(QualRefusal::ClockUnstable {
+            rate_p50: ratio,
+            rate_min: scratch[0],
+            deviating_windows: deviating as u32,
+            windows: samples.len() as u32,
+        });
     }
 
     // Pass two: per-window unaccounted physical ticks against that rate,
@@ -284,6 +368,18 @@ pub fn write_refusal_line<W: fmt::Write>(
     arm: &str,
     refusal: QualRefusal,
 ) -> fmt::Result {
+    // The clock refusal carries its two modes onto the wire. A refusal that
+    // said only `reason=clock_unstable` would throw away the observation that
+    // justified it, and a reader would have to re-run a campaign to learn what
+    // this one already knew (`LE-115`'s lesson, in the refusal direction).
+    if let QualRefusal::ClockUnstable { rate_p50, rate_min, deviating_windows, windows } = refusal {
+        return writeln!(
+            sink,
+            "TOS64-QUAL/1 {arm} REFUSED reason={} rate_p50={rate_p50} rate_min={rate_min} \
+             deviating_windows={deviating_windows} windows={windows}",
+            refusal.as_str()
+        );
+    }
     writeln!(sink, "TOS64-QUAL/1 {arm} REFUSED reason={}", refusal.as_str())
 }
 
@@ -369,6 +465,122 @@ mod tests {
         let summary = summarize(&samples, &mut scratch, 540_000).expect("summarizes");
         assert_eq!(summary.offset_disagreement_max, 40);
         assert_eq!(summary.unaccounted_max, 0, "the PMU channel stays clean");
+    }
+
+    // LE-121's remaining half: an unpinned clock is a named refusal, not a
+    // distribution of plausible non-zeros.
+
+    /// The 2026-08-07 campaign's own shape, reconstructed: most windows at the
+    /// 2400 MHz boost rate, a minority at the 1500 MHz idle rate — 62.5% of
+    /// it, which is where `202500/540000 = 0.375` came from.
+    fn dvfs_campaign() -> [WindowSample; 200] {
+        let mut samples = [idle(540_000, 44_444); 200];
+        for slot in samples.iter_mut().take(40) {
+            *slot = idle(540_000, 44_444 * 1500 / 2400);
+        }
+        samples
+    }
+
+    #[test]
+    fn a_clock_that_moved_mid_campaign_is_a_named_refusal_and_not_a_distribution() {
+        let samples = dvfs_campaign();
+        let mut scratch = [0u64; 200];
+        let refusal = summarize(&samples, &mut scratch, 540_000).expect_err("must refuse");
+        let QualRefusal::ClockUnstable { rate_p50, rate_min, deviating_windows, windows } = refusal
+        else {
+            panic!("wrong refusal: {refusal:?}");
+        };
+        assert_eq!(rate_p50, 44_444);
+        assert_eq!(rate_min, 27_777, "the idle-clock mode, 62.5% of the boost rate");
+        assert_eq!(deviating_windows, 40);
+        assert_eq!(windows, 200);
+        assert_eq!(refusal.as_str(), "clock_unstable");
+    }
+
+    #[test]
+    fn the_refusal_fires_before_any_distribution_is_built() {
+        // The point of the row: a session that had quoted `max=202500` as a
+        // residency bound would have put a confident, precise, wrong number
+        // into the one document the release ladder is quoted from. There must
+        // be no CampaignSummary to quote at all.
+        let samples = dvfs_campaign();
+        let mut scratch = [0u64; 200];
+        assert!(
+            summarize(&samples, &mut scratch, 540_000).is_err(),
+            "an unpinned campaign must yield no summary, not a summary a reader must know to \
+             distrust"
+        );
+    }
+
+    #[test]
+    fn a_genuine_excursion_tail_still_summarizes_and_is_still_reported() {
+        // The property that must survive the new refusal, and the reason it is
+        // a mode test rather than a spread test: residency is what this
+        // instrument EXISTS to report. Five stolen windows in 6000 is 0.08% —
+        // an outlier tail, not a second clock.
+        let mut samples = [idle(540_000, 44_444); 6000];
+        for index in [11usize, 500, 1234, 4000, 5999] {
+            samples[index] = excursion(540_000, 44_444, 300);
+        }
+        let mut scratch = [0u64; 6000];
+        let summary = summarize(&samples, &mut scratch, 540_000)
+            .expect("an excursion tail is the measurement, not a refusal");
+        assert_eq!(summary.unaccounted_p50, 0);
+        assert!(
+            (299..=302).contains(&summary.unaccounted_max),
+            "the stolen ticks still surface: {}",
+            summary.unaccounted_max
+        );
+    }
+
+    #[test]
+    fn one_deviating_window_is_never_a_second_clock_mode() {
+        // A single window is not a mode, however far it deviates. Without this
+        // floor the refusal would swallow the single-excursion case that
+        // `the_rate_is_the_median_so_excursions_do_not_recalibrate_the_ruler`
+        // pins — i.e. it would refuse to report the one thing Q3 is for.
+        let mut samples = [idle(1_000_000, 50_000); 11];
+        samples[5] = excursion(1_000_000, 50_000, 400_000);
+        let mut scratch = [0u64; 11];
+        assert!(summarize(&samples, &mut scratch, 1_000_000).is_ok());
+    }
+
+    #[test]
+    fn quantisation_alone_never_trips_the_clock_refusal() {
+        // Every window one unit apart in either direction: the floor division
+        // in the ratio itself, not a moving clock. A refusal that fired here
+        // would make every campaign unreportable.
+        let mut samples = [idle(540_000, 44_444); 300];
+        for (index, slot) in samples.iter_mut().enumerate() {
+            let wobble = (index % 3) as u64; // 44_443 | 44_444 | 44_445
+            *slot = idle(540_000, 44_443 + wobble);
+        }
+        let mut scratch = [0u64; 300];
+        assert!(
+            summarize(&samples, &mut scratch, 540_000).is_ok(),
+            "one unit of ratio quantisation is arithmetic, not DVFS"
+        );
+    }
+
+    #[test]
+    fn the_clock_refusal_line_carries_the_rates_it_refused_on() {
+        let mut sink = String::new();
+        write_refusal_line(
+            &mut sink,
+            "campaign",
+            QualRefusal::ClockUnstable {
+                rate_p50: 44_444,
+                rate_min: 27_777,
+                deviating_windows: 40,
+                windows: 200,
+            },
+        )
+        .expect("writes");
+        assert_eq!(
+            sink,
+            "TOS64-QUAL/1 campaign REFUSED reason=clock_unstable rate_p50=44444 rate_min=27777 \
+             deviating_windows=40 windows=200\n"
+        );
     }
 
     #[test]

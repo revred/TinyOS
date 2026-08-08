@@ -1,0 +1,8 @@
+=== STORY-P1-09-16 criterion 4, all five arms, 2026-08-08 ===
+each arm: ti64dink --send <arm> --count 10, then the board's own TOS64-RX/1 row
+settle :   +9.983s  TOS64-RX/1 state=listening accepted=26 refused=67 dropped=93
+ping x10 :   +28.852s  TOS64-RX/1 state=listening accepted=36 refused=67 dropped=103
+unicast x10 :   +22.539s  TOS64-RX/1 state=listening accepted=46 refused=67 dropped=113
+ethertype x10 :   +16.304s  TOS64-RX/1 state=listening accepted=46 refused=77 dropped=123
+prefix x10 :   +10.078s  TOS64-RX/1 state=listening accepted=46 refused=87 dropped=133
+notforus x10 :   +29.114s  TOS64-RX/1 state=listening accepted=46 refused=87 dropped=133

@@ -1,0 +1,20 @@
+=== ti64dink --console, board netbooted at commit with LE-122's DRFCS fix, 2026-08-08 ===
+ti64dink: console on \Device\NPF_{CF32D858-FAD0-49C8-A581-0F6BE4E9765D}
+Ti64Dink console — TOS64-CMD/1 (STORY-P1-09-17)
+  verbs: PING | STATUS   (anything else is SENT, so the board's refusal is the one you see)
+  quit  : `quit`, `exit`, or end of input
+
+tos64>     sent   : verb=PING id=1 seq=1
+    ANSWER : verb=PING seq=1
+tos64>     sent   : verb=STATUS id=2 seq=2
+    ANSWER : verb=STATUS seq=2 status=TOS64-RESULT/1 fixture=measure ok=true
+tos64>     sent   : verb=WOBBLE id=0 seq=3
+    REFUSED: unknown-verb seq=3
+tos64> 
+console: 0 exchange(s) went unanswered
+
+=== the board's own rows, one rotation later ===
+  +6.382s  TOS64-RESULT/1 fixture=measure ok=true
+  +7.438s  TOS64-DISPLAY/1 native=1920x1080 fb=refused fb_addr=0x000000003f80
+  +8.372s  TOS64-RX/1 state=listening accepted=26 refused=63 dropped=89
+  +9.428s  TOS64-CMD/1 last=STATUS answered=4 refused=22 lastlen=46
